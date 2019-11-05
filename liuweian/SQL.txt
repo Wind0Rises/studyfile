@@ -1,0 +1,13 @@
+1、索引。
+	创建索引？
+		create index index_name on table table_name(column_name);
+		
+	为什么索引可以提高查询速度？
+		和索引的数据结构有关系
+		
+	哪些情况下可以使索引失效？
+		使用or、like（并且是%开头，如果不是，索引是可以使用的）、is null、not in等。
+		数据类型出现隐式转化。如varchar不加单引号的话可能会自动转换为int型，使索引无效，产生全表扫描。
+		
+	行列转换？
+	
