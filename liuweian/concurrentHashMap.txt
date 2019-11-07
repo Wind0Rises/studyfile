@@ -2,6 +2,20 @@
 好处在于并发的粒度更细，影响更小，从而并发效率更好，但不足之处在于并发扩容的时候，由于操作的table都是同一个，不像JDK7中分段控制，所以这里需
 要等扩容完之后，所有的读写操作才能进行。
 
+
+1、ConcurrentHashMap是如何保证线程安全的？分别说一下JDK7和JDK8。
+	JDK8：
+		put操作：获取头节点操作：使用getObjectVolatile方法，支持Volatile内存语义。
+			1、如果头节点为空，直接通过compareAndSwapObject进行添加【如果成功直接返回，不成功一直尝试】。
+			2、如果头节点不为空，给头节点上锁。这个时候put操作就是串行执行了。进入锁以后，还是要判断头节点，如果头节点没有变化才进行操作（双重加锁）。
+			3、是否需要从链表到红黑树。在需要转换的时候也是会上锁的。转换之后通过cas更换头节点。
+			###注意步骤2和步骤3锁的是同一个对象，所以在同一时刻2、3只有一个能执行。【分析场景：联系put两个，第一个先执行else;第二个先执行完第三步。这个时候第一步要怎么执行】###
+			
+			
+			
+			
+			
+
 ##########   初始化  ########
 public ConcurrentHashMap(int initialCapacity) {
 	if (initialCapacity < 0) {
@@ -37,7 +51,7 @@ final V putVal(K key, V value, boolean onlyIfAbsent) {
 		// 头结点。
 		Node<K,V> f; 
 		
-		// n：table数组的长度。 i:数据在数字上的位置。
+		// n：table数组的长度。 i:数据在数组上的位置。
 		int n, i, fh;
 		
 		// 第一次put元素时，初始化tabel。
@@ -110,7 +124,7 @@ final V putVal(K key, V value, boolean onlyIfAbsent) {
 			// 从链表到树。
 			if (binCount != 0) {
 				if (binCount >= TREEIFY_THRESHOLD) {
-					// 把链表转转成树的过程，这里面有一个加锁过程。
+					// 把链表转转成树的过程，这里面有一个加锁过程。同通过cas更换头节点。
 					treeifyBin(tab, i);
 				}
 				
@@ -127,6 +141,10 @@ final V putVal(K key, V value, boolean onlyIfAbsent) {
 	return null;
 }
 
+sizeCtl：初始化之前为0；
+sizeCtl：初始化的时候设置为-1；
+sizeCtl：当在resize的时候，值是1(1 + 正在执行resize操作的线程数量）。
+sizeCtl：初始化之后的其他时间它是下一次table要变成的大小。
 
 // 初始化table
 private final Node<K,V>[] initTable() {
@@ -155,6 +173,7 @@ private final Node<K,V>[] initTable() {
 	}
 	return tab;
 }
+
 
 static final <K,V> Node<K,V> tabAt(Node<K,V>[] tab, int i) {
 	// 获取obj对象中offset偏移地址对应的object型field的值,支持volatile load语义。
@@ -197,6 +216,7 @@ static final int resizeStamp(int n) {
 
 // 从链表到树。table为node数组，index为数组中的位置。
 private final void treeifyBin(Node<K,V>[] tab, int index) {
+
 	Node<K,V> b; 
 	int n, sc;
 	
@@ -233,7 +253,10 @@ private final void treeifyBin(Node<K,V>[] tab, int index) {
 	}
 }
 
+// 扩大两倍的table长度。
 private final void tryPresize(int size) {
+	// >>>无符号；>>有符号。//如果大小为MAXIMUM_CAPACITY最大总量的一半，那么直接扩容为MAXIMUM_CAPACITY，否则计算最小幂次方
+	// 如果size：16；16 + 8 + 1 = 25 == 32
 	int c = (size >= (MAXIMUM_CAPACITY >>> 1)) ? MAXIMUM_CAPACITY : tableSizeFor(size + (size >>> 1) + 1);
 	int sc;
 	
@@ -272,17 +295,22 @@ private final void tryPresize(int size) {
 	}
 }
 
+
 // 检查是否需要扩容，或者是否正在扩容。如果需要扩容，就调用扩容方法，如果正在扩容，就帮助其扩容。
 private final void addCount(long x, int check) {
 	CounterCell[] as; 
 	long b, s;
 	
+	// 
 	if ((as = counterCells) != null || !U.compareAndSwapLong(this, BASECOUNT, b = baseCount, s = b + x)) {
 		CounterCell a; 
 		long v; 
 		int m;
+		
+		// uncontended：无竞争。
 		boolean uncontended = true;
 		
+		// 如果计数盒子是空（尚未出现并发） 如果随机取余一个数组位置为空或者修改这个槽位的变量失败（出现并发了）
 		if (as == null || (m = as.length - 1) < 0 || (a = as[ThreadLocalRandom.getProbe() & m]) == null || !(uncontended = U.compareAndSwapLong(a, CELLVALUE, v = a.value, v + x))) {
 			fullAddCount(x, uncontended);
 			return;
@@ -293,7 +321,7 @@ private final void addCount(long x, int check) {
 		s = sumCount();
 	}
 	
-	//  check >= 0 即为可能出现扩容的情况，例如 putVal方法中的调用
+	//  check >= 0 即为可能出现扩容的情况，例如putVal方法中的调用
 	if (check >= 0) {
 		Node<K,V>[] tab, nt; 
 		int n, sc;
@@ -326,6 +354,93 @@ private final void addCount(long x, int check) {
 	}
 }
 
+
+private final void fullAddCount(long x, boolean wasUncontended) {
+	int h;
+	if ((h = ThreadLocalRandom.getProbe()) == 0) {
+		// 强制初始化
+		ThreadLocalRandom.localInit(); 
+		h = ThreadLocalRandom.getProbe();
+		wasUncontended = true;
+	}
+	
+	// 如果最后一个插槽非空则为真
+	boolean collide = false;
+	for (;;) {
+		CounterCell[] as; 
+		CounterCell a; 
+		int n; 
+		long v;
+		
+		if ((as = counterCells) != null && (n = as.length) > 0) {
+			if ((a = as[(n - 1) & h]) == null) {
+				if (cellsBusy == 0) {            // Try to attach new Cell
+					CounterCell r = new CounterCell(x); // Optimistic create
+					if (cellsBusy == 0 &&
+						U.compareAndSwapInt(this, CELLSBUSY, 0, 1)) {
+						boolean created = false;
+						try {               // Recheck under lock
+							CounterCell[] rs; int m, j;
+							if ((rs = counterCells) != null &&
+								(m = rs.length) > 0 &&
+								rs[j = (m - 1) & h] == null) {
+								rs[j] = r;
+								created = true;
+							}
+						} finally {
+							cellsBusy = 0;
+						}
+						if (created)
+							break;
+						continue;           		// Slot is now non-empty
+					}
+				}
+				collide = false;
+			} else if (!wasUncontended) {       	// CAS already known to fail
+				wasUncontended = true;      		// Continue after rehash
+			} else if (U.compareAndSwapLong(a, CELLVALUE, v = a.value, v + x)) {
+				break;
+			} else if (counterCells != as || n >= NCPU) {
+				collide = false;            		// At max size or stale
+			} else if (!collide) {
+				collide = true;
+			} else if (cellsBusy == 0 &&  U.compareAndSwapInt(this, CELLSBUSY, 0, 1)) {
+				try {
+					if (counterCells == as) {		// Expand table unless stale
+						CounterCell[] rs = new CounterCell[n << 1];
+						for (int i = 0; i < n; ++i) {
+							rs[i] = as[i];
+						}
+						counterCells = rs;
+					}
+				} finally {
+					cellsBusy = 0;
+				}
+				collide = false;
+				continue;                   		// Retry with expanded table
+			}
+			h = ThreadLocalRandom.advanceProbe(h);
+		}
+		else if (cellsBusy == 0 && counterCells == as && U.compareAndSwapInt(this, CELLSBUSY, 0, 1)) {
+			boolean init = false;
+			try {                          			// Initialize table
+				if (counterCells == as) {
+					CounterCell[] rs = new CounterCell[2];
+					rs[h & 1] = new CounterCell(x);
+					counterCells = rs;
+					init = true;
+				}
+			} finally {
+				cellsBusy = 0;
+			}
+			if (init) {
+				break;
+			}
+		} else if (U.compareAndSwapLong(this, BASECOUNT, v = baseCount, v + x)) {
+			break;                          // Fall back on using base
+		}
+	}
+}
 
 // 
 private final void transfer(Node<K,V>[] tab, Node<K,V>[] nextTab) {

@@ -2,4 +2,5 @@ idea：
 	Ctrl + Alt + 向左：Back
 	Ctrl + Alt + 向右：Froward
 	
-	
+https://github.com/Wind0Rises/studyfile.git
+Wind0Rises

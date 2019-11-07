@@ -1,3 +1,4 @@
 concurrentHashMap:
 	https://www.cnblogs.com/zerotomax/p/8687425.html
 	https://blog.csdn.net/ZOKEKAI/article/details/90051567
+	https://www.jianshu.com/p/fc72281e529f
