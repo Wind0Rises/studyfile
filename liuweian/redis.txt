@@ -1,3 +1,255 @@
+hash表：类似java里的map
+	
+	命令：
+		hset key filed value
+			向key哈希表中插入一个字段为filed值为vaule的数据。如果key哈希表不存在，则创建key哈希表。
+			如果域已经存在，则更新域对应的值，并返回0。
+			返回：成功返回1；失败或者已经存在返回0。
+			
+		hsetnx key filed value
+			向key哈希表中插入一个字段为filed值为vaule的数据，当且仅当filed不存在时，进行插入操作。
+			返回设置成功时返回1， 在给定域已经存在而放弃执行设置操作时返回0。
+			
+		hget key filed
+			返回给定的哈希表中的filed对应的值，如果field不存在或者是key不存在，返回nil。
+			
+		hexists kye field 
+			返回给定哈希表下的是否存在给定field。
+			返回：如果存在返回1，不存在返回0；
+			
+		hdel key filed1 [field2 ..]
+			删除给定哈希表下一个或者多个域，如果域不存在则忽略
+			返回：被成功移除的域的数量，不包括被忽略的域。
+			
+		hlen key
+			返回哈希表中的序列的数列。
+			
+		hstrlen key field
+			返回给定哈希表中对应的域的值得字符长度。如果key不存在，那么返回0。
+		
+		hincrby key field increment
+			将给定哈希表的给定域的值加上increment。如果filed对应的值不是64位有符号的数字内，都会报错。
+			如果field不存在，先新建一个filed并把值设置为0，然后再操作。
+			返回操作过后的value值。
+			
+		hincrbyfload key field increment 
+			将给定哈希表的给定域的值加上increment。
+			如果field不存在，先新建一个filed并把值设置为0，然后再操作。
+			返回操作过后的value值。
+			
+		hmset key filed1 value1 [field2 value2 ...]
+			一次插入多个值，如果成功返回ok。当key不是哈希表(hash)类型时，返回一个错误
+			
+		hmget key filed1 [field2 ...]
+			一次获取入多个值，如果filed不存在返回nil。
+			
+		hkeys key【key是具体的值，不能使用正则表达式】
+			返回哈希表key中的所有【域】。
+			
+		hvals key 
+			返回哈希表key中所有【域的值】。
+			
+		hgetall key
+			返回哈希表key中，所有的域和值。
+			
+		hscan key cursor [match pattern] [count count]
+				
+		
+
+
+Set集合()
+	集合是通过哈希表实现的，所以添加，删除，查找的复杂度都是 O(1)。
+	
+	命令：
+		sadd：sadd key member1 [member2 ...]
+			将一个或者多个member加入到集合key中，如果member已经存在于集合中，则直接忽略。当key不是集合类型报错。
+			
+		sismember  key  member
+			判断member是否存在集合key中，如果存在返回1，如果不存在返回0；
+			
+		smembers key
+			返回key集合中所有成员。
+			
+		spop key
+			移除并返回集合key中随机一个成员。返回被移除的随机元素。 当key不存在或key是空集时，返回 nil。
+		
+		srandmember key [count]
+			随机返回key集合中的元素，并不会把元素删除。如果count是小于集合总数并且大于0，会随机返回count个元素；如果count为负数，或者大于集合元素，则返回全部元素。
+		
+		srem key member1 [member2 ...]
+			移除一个或者多个元素，并返回移除的个数。不存在的member元素会被忽略，这时返回的值是不包含被忽略的元素的。
+			
+		smove source destination member
+			把member从source集合移动到destination集合中，如果source集合不存在或者source集合中没有member元素，smove不进行任何操作，返回0；
+			否则，member元素从source集合中被移除，并添加到destination集合中去。如果destination集合中已经存在member元素，只会把source集合中的member元素删除。
+			
+		scard key
+			查询key集合中元素的个数。
+			
+		sinter key1 [key2 ..]
+			返回给定集合的交集。如果只有一个集合，返回结合的全部元素；如果有多个结合。
+			
+		sinterstore destination key1 [key2 ..]
+			把给定集合的交集保存到destination集合中。如果destination集合已经存在，将其覆盖。
+			
+		sunion key1 [key2 ...]
+			返回给定集合的并集。
+			
+		sunionstore destination key1 [key2 ...]
+			把给定集合的并集存放在destination结合中。
+			
+		sdiff key1 [key2 ...]
+			返回key1集合中没有在后面集合中出现过的元素。
+			
+		sdiffstore destination key1 [key2 ...]
+			把key1集合中没有在后面集合中出现过的元素保存到destination集合中。
+		
+
+	zset集合()
+		zadd key score member1 [score member2 ...]
+		例： zadd ordered 1 value1  4 value2
+			返回插入的集合的个数。如果插入的元素已经存在，不计入统计，这个时候回更新对应的值。position值可以是整数值或双精度浮点数。
+		
+		
+		zscore key member
+			返回给定集合中给定元素的score的值。
+			如果key集合不存在或者是member元素不存在，返回nil
+			
+		zincrby key increment member
+			为有序集合key的member元素的score值增加increment。可以通过一个负数减去一个值。
+			当key不存在，或member不是key的成员时，ZINCRBY key increment member 等同于 ZADD key increment member。
+			返回更新后的score的值。
+			
+		zcard key
+			返回集合key中元素的个数。
+			返回满足条件的数据个数
+			
+		zcount key min max
+			返回集合key中score在max和min之间的元素个数，包含min和max
+			
+		zrange key start end [withscores]    【key start相当于是数组下标】
+			返回有序集key中，指定区间内的成员。其中成员的位置按score值递增(从小到大)来排序
+			如果想要score也返回可以在最后加上withscores。start和end相当于数组的下标，从0开始，start和end都是闭区间。
+			
+		zrevrange key start end [withscores]  【key start相当于是数组下标】
+			返回有序集key中，指定区间内的成员。其中成员的位置按score值递减(从大到小)来排序
+			如果想要score也返回可以在最后加上withscores。start和end相当于数组的下标，从0开始，start和end都是闭区间。
+			
+		zrangebyscore key min max [WITHSCORES] [LIMIT offset count]
+			返回有序集合score值在min于max之间的值。序集成员按score值递增(从小到大)次序排列。可以使用limit进行类似分页操作。
+			min最小值可以使用-inf来表示；max最大值可以使用+inf表示。
+			
+		zrevrangebyscore key min max [WITHSCORES] [LIMIT offset count] 
+			返回有序集合score值在min于max之间的值。序集成员按score值递减(从大到小)次序排列。可以使用limit进行类似分页操作。
+			min最小值可以使用-inf来表示；max最大值可以使用+inf表示。
+			
+		zrank key member
+			返回member元素在key集合中的排名，按照score递增排序，需要从0开始。
+			如果member不是有序集key的成员，返回nil。
+			
+		zrevrank key member
+			返回member元素在key集合中的排名，按照score递减排序，需要从0开始。
+			如果member不是有序集key的成员，返回nil。
+			
+		zrem key1 member1 [member2 ..]
+			移除一个或者多个元素，如果元素不存在，忽略。返回被成功移除的成员的数量，不包括被忽略的成员。
+			
+		zremrangebyrank key start end
+			移除有序集合中，下标区间start和end之间【包括start和end】元素。用0表示第一个元素。
+			返回移除的元素个数。
+		
+		zremrangebyscore key start end
+			移除有序集合中，score区间在start和end之间【包括start和end】元素
+			返回被移除成员的数量。
+			
+		zrangebylex key min max [limit offset count]
+			
+		
+
+事务：
+	multi
+		标记一个事务的开始。事务块内的多条命令会按照先后顺序被放进一个队列当中，最后由EXEC命令原子性(atomic)地执行。
+		
+	exec
+		执行事务块内的所有命令。
+		假如某个(或某些) key正处watch命令的监视之下，且事务块中有和这个(或这些)key相关的命令，
+		那么exec命令只在这个(或这些)key没有被其他命令所改动的情况下执行并生效，否则该事务被打断(abort)。
+		
+	discard
+		取消事务，放弃执行事务块内的所有命令。
+		如果正在使用watch命令监视某个(或某些) key，那么取消所有监视，等同于执行命令unwatch。
+
+	watch key1 [key2 ..]
+		监视一个(或多个) key ，如果在事务执行之前这个(或这些) key 被其他命令所改动，那么事务将被打断。
+		线程一： 	match test   			  线程二：	match test
+					multi								multi
+					incr incr							incr incr
+														exec  【执行成功】
+					exec 【执行失败】
+		
+	unwatch
+		取消watch命令对所有 key 的监视。
+		如果在执行watch命令之后，exec命令或discard命令先被执行了的话，那么就不需要再执行unwatch了。
+		因为exec命令会执行事务，因此watch命令的效果已经产生了；而discarg命令在取消事务的同时也会取消所有对key的监视，
+		因此这两个命令执行之后，就没有必要执行unwatch了。
+
+set与list的区别：
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+redis事务原理：
+	当一条线程去执行某些业务逻辑，但是这些业务逻辑操作的数据可能被其他线程共享了，这样会引发多线程中数据不一致的情况。
+	为了克服这个问题，首先，在线程开始时读取这些多线程共享的数据，并将其保存到当前进程的副本中，我们称为旧值（old value），watch 命令就是这样的一个功能。
+	然后，开启线程业务逻辑，由 multi 命令提供这一功能。在执行更新前，比较当前线程副本保存的旧值和当前线程共享的值是否一致，
+	如果不一致，那么该数据已经被其他线程操作过，此次更新失败。
+	
+	为了保持一致，线程就不去更新任何值，而将事务回滚；
+	否则就认为它没有被其他线程操作过，执行对应的业务逻辑，exec 命令就是执行“类似”这样的一个功能。
+	
+	
+如果命令出错事务还会执行吗？
+	如果是命令已经入队，但是最后exec执行以后，发现操作命令需要的对象与实际传入的对象不符合，这个时候报错，是不会影响事务的执行的，事务依旧会进行操作。
+	如果是命令本身就有问题，导致命令行无法入队，这个时候回导致事务自动退出，并回滚事务，操作不会影响实际的值。
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
 	1、什么是缓存穿透问题？如何处理缓存穿透问题？
 		用户在访问应用时，会把不常改变并且使用频繁的数据缓存起来，如果用户再次访问这些数据，就会直接访问缓存中的数据，并不会直接去数据库查询，只有数据改变或者没有缓存的数据才会去
 		数据库查询。可以看出缓存就是访问数据库的防火墙，从而减轻数据库的访问压力。
@@ -5,3 +257,8 @@
 			1、恶意攻击，猜测你的key命名方式，然后估计使用一个你缓存中不会有的key进行访问。
 			2、第一次数据访问，这时缓存中还没有数据，则并发场景下，所有的请求都会压到数据库。
 			3、数据库的数据也是空，这样即使访问了数据库，也是获取不到数据，那么缓存中肯定也没有对应的数据。这样也会导致穿透。
+			
+	2、redis的事务
+	
+	
+	3、

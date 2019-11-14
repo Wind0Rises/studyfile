@@ -5,3 +5,10 @@ concurrentHashMap:
 	
 Synchronized:
 	https://blog.csdn.net/zhaocuit/article/details/100208879
+	
+	
+redis：
+	http://c.biancheng.net/view/4544.html
+	
+博主：
+	https://www.cnblogs.com/xiaoxi/
