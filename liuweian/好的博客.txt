@@ -10,5 +10,12 @@ Synchronized:
 redis：
 	http://c.biancheng.net/view/4544.html
 	
+zookeeper:
+	https://blog.csdn.net/elkholer/article/details/88808687
+	
 博主：
 	https://www.cnblogs.com/xiaoxi/
+	
+数据库：
+	https://blog.csdn.net/mzglzzc/article/details/46300127
+	https://blog.csdn.net/bluishglc

@@ -1,0 +1,14 @@
+1、配置：my-default.ini
+2、安装到bin目录执行 mysqld install
+3、启动mysql服务：net start mysql
+
+修改密码：
+	1、在my-default.ini文件尾部添加：skip-grant-tables
+	2、关闭mysql服务，net stop mysql  在开启服务：net  start  mysql
+	3、登录mysql -u root -p     --->   不要输入密码，直接回车。
+	4、执行以下语句：
+		use mysql;
+		update user set password=password('123456') where user='root';
+		flush privileges;
+		
+	5、关闭mysql服务，net stop mysql 删除my-default.ini文件尾部添加：skip-grant-tables  在开启服务：net  start  mysql

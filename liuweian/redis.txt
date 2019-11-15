@@ -193,6 +193,76 @@ Set集合()
 		因为exec命令会执行事务，因此watch命令的效果已经产生了；而discarg命令在取消事务的同时也会取消所有对key的监视，
 		因此这两个命令执行之后，就没有必要执行unwatch了。
 
+发布订阅：
+	publish channel message
+		将消息message发布到频道channel。
+		返回：接收到消息的订阅者的数量。
+	
+	subscribe channel1 [channel2 ..]
+		订阅一个或者多个频道channel。
+		
+	psubscribe pattern1 [pattern2 ..]
+		定于一个或者多个符合正则表达式的频道。
+		
+	unsubscribe channel1 [channel2 ..]
+		客户端退订一个或者多个频道
+		
+	punsubscribe pattern1 [pattern2 ..]
+		客户端退订一个或者多个满足正则表达式的频道。
+		
+	pubsub subcommand [argument [argument]]
+		pubsub channels [pattern]
+			列出当前的活跃的频道。活跃频道指的是那些至少有一个订阅者的频道， 订阅模式的客户端不计算在内。
+		
+		pubsub numsub channel1 [channel2 ..]
+			查询频道的订阅者的数量。
+			
+		pubsub numpat
+		
+		
+		
+过期操作。
+	expire key seconds
+		为给定key设置生存时间，当key过期时(生存时间为0)，它会被自动删除。【seconds不能是浮点型数字。】
+		生存时间可以通过使用DEL命令来删除整个key来移除，或者被SET和GETSET命令覆写(overwrite)，
+		这意味着，如果一个命令只是修改(alter)一个带生存时间的key的值而不是用一个新的key值来代替(replace)它的话，那么生存时间不会被改变。
+		如果通过rename改变了key的名称，则新的key的过期时间也是与原有key的偶去时间是一样的。
+		
+	expireat key timestamp
+		给key设置过去时间，这个过期时间是一个时间戳，到达这个时间点就过期。
+		设置成功返回1，失败返回0。
+		
+	ttl key
+		查询key的过期时间，如果key不存在返回-2，当key没有设置过去时间返回-1，否则以秒为单位返回key的剩余生存时间。
+		
+	persist key
+		移除key的生存时间。表示key永不过期。
+		
+	pexpire key milliseconds
+		以毫米为单位设置过期时间。【milliseconds不能是浮点型数字。】
+	
+	pexpireat key timestamp	
+		以毫秒为单位
+	
+	pttl
+		以秒为单位。
+		
+	
+持久化
+	save
+		save命令执行一个同步保存操作，将当前redis实例的所有数据快照(snapshot)以RDB文件的形式保存到硬盘。
+		一般来说，在生产环境很少执行save操作，因为它会阻塞所有客户端，保存数据库的任务通常由bgsave命令异步地执行。然而，如果负责保存数据的后台子进程不幸出现问题时，save可以作为保存数据的最后手段来使用。
+		
+	bgsave
+		在后台异步(Asynchronously)保存当前数据库的数据到磁盘。
+		bgsave命令执行之后立即返回OK，然后 Redis fork出一个新子进程，原来的redis进程(父进程)继续处理客户端请求，而子进程则负责将数据保存到磁盘，然后退出。
+		
+	bgrewriteaof
+		
+		
+	lastsave
+		返回最近一次redis成功将数据保存到磁盘上的时间，以UNIX时间戳格式表示。
+		
 set与list的区别：
 	
 	
@@ -261,4 +331,11 @@ redis事务原理：
 	2、redis的事务
 	
 	
-	3、
+	3、redis集群策略
+		* 主从模式：redis的主从模式，使用异步复制，slave节点异步从master节点复制数据，master节点提供读写服务，slave节点只提供读服务
+					（这个是默认配置，可以通过修改配置文件slave-read-only控制）。master节点可以有多个从节点。配置一个slave节点只需要
+					 在redis.conf文件中指定 slaveof master-ip master-port即可。
+					 优点：由于主从模式，slave节点不会进行选举操作，
+					 
+		* 哨兵模式：
+		* 集群模式

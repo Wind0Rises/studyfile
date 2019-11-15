@@ -1,0 +1,4 @@
+cache-ref、 cache
+
+
+select ---->  fetchSize、timeout、resultSetType、flushCache、useCache、resultOrdered、resultSets、keyProperty、keyColumn

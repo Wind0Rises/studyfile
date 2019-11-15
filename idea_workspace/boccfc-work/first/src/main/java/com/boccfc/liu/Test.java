@@ -10,7 +10,15 @@ public class Test {
 
     public static void main(String[] args) {
         Test test = new Test();
-        test.firstMethod();
+        Class[] classe = Test.Liu.class.getDeclaredClasses();
+        for (Class item : classe) {
+            System.out.println(item.getName());
+        }
+        //test.firstMethod();
+    }
+
+    class Liu {
+
     }
 
     public int firstMethod() {

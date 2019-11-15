@@ -1,0 +1,93 @@
+通过SqlSessionFactory创建一个SqlSession。SqlSession中主要包含Configuration、Executor、是否自动提交。
+
+TransactionFactory  -->  ManagedTransaction
+Executor  -->  DefaultSqlSession
+
+ExecutorType：
+	SIMPLE：该模式下它为每个语句的执行创建一个新的预处理语句，单条提交sql；默认模式。
+	REUSE：REUSE是可重用执行器，重用对象是Statement（即该执行器会缓存同一个sql的Statement，省去Statement的重新创建，优化性能）（即会重用预处理语句）。
+	BATCH：BATCH执行器会重用预处理语句，并执行批量更新。
+
+ManagedTransaction：内部维持着一个DataSource、TransactionIsolationLevel【这个事务等级和数据库的事务等级是一样的。】、Connection、boolean closeConnection这个四个参数
+					重要的方法都是和事务相关的：getConnection();commit();rollback();close();
+
+// 打开SqlSession。
+location：DefaultSqlSessionFactory。
+public SqlSession openSession() {
+	return openSessionFromDataSource(configuration.getDefaultExecutorType(), null, false);
+}
+
+location：DefaultSqlSessionFactory。
+private SqlSession openSessionFromDataSource(ExecutorType execType, TransactionIsolationLevel level, boolean autoCommit) {
+	Transaction tx = null;
+	try {
+		// 获取Configuration的环境。
+		final Environment environment = configuration.getEnvironment();
+		
+		//
+		final TransactionFactory transactionFactory = getTransactionFactoryFromEnvironment(environment);
+		
+		// 新建一个Transaction。
+		tx = transactionFactory.newTransaction(environment.getDataSource(), level, autoCommit);
+		
+		// 获取一个执行器。每次打开session时，都会创建一个新的executor
+		// 其是根据ExecutorType类型来创建的，【【但是如果开启了二级缓存，Executor统一用CachingExecutor】】
+		final Executor executor = configuration.newExecutor(tx, execType);
+		
+		// 新建一个DefaultSqlSession
+		return new DefaultSqlSession(configuration, executor, autoCommit);
+	} catch (Exception e) {
+		closeTransaction(tx);
+		throw ExceptionFactory.wrapException("Error opening session.  Cause: " + e, e);
+	} finally {
+		ErrorContext.instance().reset();
+	}
+}
+
+/**
+ * 获取TransactionFactory。
+ * TransactionFactory：TransactionFactory接口的实现类，主要newTransaction()方法，用于提供Transaction实例对象的，Transaction对象使于
+ * 处理事务的对象，包括事务的提交、回滚、关闭等等。
+ */
+location：DefaultSqlSessionFactory
+private TransactionFactory getTransactionFactoryFromEnvironment(Environment environment) {
+	if (environment == null || environment.getTransactionFactory() == null) {
+		return new ManagedTransactionFactory();
+	}
+	return environment.getTransactionFactory();
+}
+
+location：ManagedTransactionFactory
+public Transaction newTransaction(DataSource ds, TransactionIsolationLevel level, boolean autoCommit) {
+    return new ManagedTransaction(ds, level, closeConnection);
+}
+
+
+/**
+ * 创建一个执行器。
+ * 	一个执行器包含的操作：更新，查询，刷新Statement，提价事务，回滚事务，创建缓存，清理缓存，获取事务，关闭，
+ */
+public Executor newExecutor(Transaction transaction, ExecutorType executorType) {
+	executorType = executorType == null ? defaultExecutorType : executorType;
+	executorType = executorType == null ? ExecutorType.SIMPLE : executorType;
+	
+	// 根据不同的ExecutorType创建对应的Executor实例。
+	Executor executor;
+	if (ExecutorType.BATCH == executorType) {
+		executor = new BatchExecutor(this, transaction);
+	} else if (ExecutorType.REUSE == executorType) {
+		executor = new ReuseExecutor(this, transaction);
+	} else {
+		executor = new SimpleExecutor(this, transaction);
+	}
+	
+	// 判断二级缓存是否开启。
+	if (cacheEnabled) {
+		executor = new CachingExecutor(executor);
+	}
+	
+	// 【【向插件中注入执行器】】
+	executor = (Executor) interceptorChain.pluginAll(executor);
+	
+	return executor;
+}

@@ -1,0 +1,27 @@
+1、mybatis缓存策略。
+	<cache eviction="LRU" flushInterval="30000" readOnly="true" size="1024" />
+	
+	eviction：缓存淘汰策略
+		* LRU：最近最少使用，移除最长时间不被使用的对象，默认策略
+		* FIFO：先进先出，按对象进入缓存的顺序来移除
+		* SOFT：软引用，移除基于垃圾回收器状态和软引用规则的对象
+		* WEAK：弱引用，更积极地移除基于垃圾收集器状态和弱引用规则的对象
+	
+	flashInterval：设置缓存过期的时间。
+	
+	readOnly：是否只读，如果为true，则所有相同的sql语句返回的是同一个对象（有助于提高性能，但并发操作同一条数据时，可能不安全），
+	          如果设置为false，则相同的sql，后面访问的是cache的clone副本。
+	
+	size：缓存对象的个数，默认为1024。
+	
+	type：指定自定义缓存的全类名(实现Cache接口即可) 
+
+2、如何自定义缓存策略。
+
+3、说一下Mybatis的缓存。
+	mybatis有一级缓存和二级缓存，
+		一级缓存默认是开启的，一级缓存的作用域是一个Session，不同的SqlSession是互补影响的。useCache=true不影响一级缓存。
+		二级缓存默认是不开启的，如果需要开启，需要把Mybaits.xml文件的settings属性下添加cacheEnable=true，二级缓存是基于namespace。二级缓存的可以设置具体某一个语句是否使用useCache。
+		
+4、Mybatis分页插件。
+		
