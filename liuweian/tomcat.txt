@@ -1,0 +1,18 @@
+https://www.cnblogs.com/dadonggg/p/8668386.html
+
+1、tomcat优化：
+	1、内存优化：
+		设置合适的初始化内存和最大内存，
+		
+	2、并发优化
+		配置server.xml中的Connector标签。
+			maxThreads 客户请求最大线程数 
+		　　minSpareThreads Tomcat初始化时创建的socket线程数 
+		　　maxSpareThreads Tomcat连接器的最大空闲socket线程数 
+		　　enableLookups 若设为true, 则支持域名解析，可把ip地址解析为主机名 
+		　　redirectPort 在需要基于安全通道的场合，把客户请求转发到基于SSL 的 redirectPort 端口 
+		　　acceptAccount 监听端口队列最大数，满了之后客户请求会被拒绝（不能小于maxSpareThreads ） 
+		　　connectionTimeout 连接超时 
+		　　minProcessors 服务器创建时的最小处理线程数 
+		　　maxProcessors 服务器同时最大处理线程数 
+		　　URIEncoding URL统一编码

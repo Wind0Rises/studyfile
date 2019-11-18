@@ -1,0 +1,9 @@
+1、spring boot是什么。
+
+2、为什么要使用spring boot。
+	内嵌servlet容器，可以打包成可执行jar包，而不需要tomcat、jetty等容器。
+	更好的管理jar的依赖，解决了jar版本冲突问题
+	简化配置，
+	新增健康监测工具。
+	
+3、

@@ -1,0 +1,12 @@
+1、常用的线程池。
+	当个线程的线程池。
+	固定线程的线程池，核心线程数等于最大线程数量。
+	ForkJoinPool：
+	
+2、fork/join框架。
+
+
+3、高并发常用类：
+	CountDownLatch：
+	CyclicBarrier：
+	Semaphore：

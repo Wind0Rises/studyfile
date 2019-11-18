@@ -12,6 +12,10 @@ redis：
 	
 zookeeper:
 	https://blog.csdn.net/elkholer/article/details/88808687
+	https://blog.csdn.net/crazymakercircle/article/details/85956246
+	
+锁：
+	https://www.cnblogs.com/takumicx/p/9338983.html#reentrantlock%E7%AE%80%E4%BB%8B
 	
 博主：
 	https://www.cnblogs.com/xiaoxi/
@@ -19,3 +23,6 @@ zookeeper:
 数据库：
 	https://blog.csdn.net/mzglzzc/article/details/46300127
 	https://blog.csdn.net/bluishglc
+	
+spring boot:
+	https://www.cnblogs.com/daiwei1981/p/10260458.html
