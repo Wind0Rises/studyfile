@@ -1,0 +1,418 @@
+// 解析mapper
+this.mapperElement(root.evalNode("mappers"));
+
+private void mapperElement(XNode parent) throws Exception {
+	if (parent != null) {
+		Iterator i$ = parent.getChildren().iterator();
+
+		while(true) {
+			while(i$.hasNext()) {
+				XNode child = (XNode)i$.next();
+				String resource;
+				if ("package".equals(child.getName())) {
+					resource = child.getStringAttribute("name");
+					this.configuration.addMappers(resource);
+				} else {
+					resource = child.getStringAttribute("resource");
+					String url = child.getStringAttribute("url");
+					String mapperClass = child.getStringAttribute("class");
+					XMLMapperBuilder mapperParser;
+					InputStream inputStream;
+					if (resource != null && url == null && mapperClass == null) {
+						ErrorContext.instance().resource(resource);
+						inputStream = Resources.getResourceAsStream(resource);
+						mapperParser = new XMLMapperBuilder(inputStream, this.configuration, resource, this.configuration.getSqlFragments());
+						mapperParser.parse();
+					} else if (resource == null && url != null && mapperClass == null) {
+						ErrorContext.instance().resource(url);
+						inputStream = Resources.getUrlAsStream(url);
+						mapperParser = new XMLMapperBuilder(inputStream, this.configuration, url, this.configuration.getSqlFragments());
+						mapperParser.parse();
+					} else {
+						if (resource != null || url != null || mapperClass == null) {
+							throw new BuilderException("A mapper element may only specify a url, resource or class, but not more than one.");
+						}
+
+						Class<?> mapperInterface = Resources.classForName(mapperClass);
+						this.configuration.addMapper(mapperInterface);
+					}
+				}
+			}
+
+			return;
+		}
+	}
+}
+
+localtion：MapperRegistry
+public void addMappers(String packageName, Class<?> superType) {
+	// ResolverUtil：内部属性Set<Class<? extends T>> matches = new HashSet();和ClassLoader
+	ResolverUtil<Class<?>> resolverUtil = new ResolverUtil();
+	
+	// 把包下的类（Class对象）都保存在MapperRegistry对象名为matches的set集合中。
+	resolverUtil.find(new IsA(superType), packageName);
+	
+	// 获取上一步结果。
+	Set<Class<? extends Class<?>>> mapperSet = resolverUtil.getClasses();
+	
+	// 遍历。
+	Iterator i$ = mapperSet.iterator();
+	while(i$.hasNext()) {
+		Class<?> mapperClass = (Class)i$.next();
+		// 添加mapper操作。
+		this.addMapper(mapperClass);
+	}
+
+}
+
+public ResolverUtil<T> find(ResolverUtil.Test test, String packageName) {
+	// 获取路径。
+	String path = this.getPackagePath(packageName);
+
+	try {
+		List<String> children = VFS.getInstance().list(path);
+		
+		// 遍历list
+		Iterator i$ = children.iterator();
+
+		while(i$.hasNext()) {
+			// 获取元素。
+			String child = (String)i$.next();
+			
+			// 判断是否已.class结尾。
+			if (child.endsWith(".class")) {
+				this.addIfMatching(test, child);
+			}
+		}
+	} catch (IOException var7) {
+		log.error("Could not read package: " + packageName, var7);
+	}
+
+	return this;
+}
+
+localtion：ResolverUtil
+protected void addIfMatching(Test test, String fqn) {
+	try {
+		String externalName = fqn.substring(0, fqn.indexOf('.')).replace('/', '.');
+		ClassLoader loader = getClassLoader();
+		
+		log.debug("Checking to see if class " + externalName + " matches criteria [" + test + "]");
+
+		Class<?> type = loader.loadClass(externalName);
+		
+		if (test.matches(type)) {
+			// private Set<Class<? extends T>> matches = new HashSet<Class<? extends T>>();
+			matches.add((Class<T>) type);
+		}
+	} catch (Throwable t) {
+		log.warn("Could not examine class '" + fqn + "'" + " due to a " + t.getClass().getName() + " with message: " + t.getMessage());
+	}
+}
+
+
+localtion：ResolverUtil.IsA
+public boolean matches(Class<?> type) {
+	// parent是对应的Class。
+	return type != null && parent.isAssignableFrom(type);
+}
+
+
+##################################################################
+###############   最终都是通过class添加Mapper   ##################
+##################################################################
+public <T> void addMapper(Class<T> type) {
+	// 判断class是否是接口。
+	if (type.isInterface()) {
+		
+		// 判断mapper是否已经存在，禁止重复解析。
+		if (this.hasMapper(type)) {
+			throw new BindingException("Type " + type + " is already known to the MapperRegistry.");
+		}
+
+		boolean loadCompleted = false;
+
+		try {
+			// new一个MapperProxyFactory。MapperProxyFactory是mapper的代理工厂。
+			// private final Map<Class<?>, MapperProxyFactory<?>> knownMappers = new HashMap<Class<?>, MapperProxyFactory<?>>();
+			this.knownMappers.put(type, new MapperProxyFactory(type));
+			MapperAnnotationBuilder parser = new MapperAnnotationBuilder(this.config, type);
+			parser.parse();
+			loadCompleted = true;
+		} finally {
+			if (!loadCompleted) {
+				this.knownMappers.remove(type);
+			}
+
+		}
+	}
+}
+
+public void parse() {
+    String resource = type.toString();
+	
+	// 判断资源是否已经加载过了。
+    if (!configuration.isResourceLoaded(resource)) {
+		loadXmlResource();
+		configuration.addLoadedResource(resource);
+		assistant.setCurrentNamespace(type.getName());
+		parseCache();
+		parseCacheRef();
+		Method[] methods = type.getMethods();
+		for (Method method : methods) {
+			try {
+				if (!method.isBridge()) { // issue #237
+					parseStatement(method);
+				}
+			} catch (IncompleteElementException e) {
+				configuration.addIncompleteMethod(new MethodResolver(this, method));
+			}
+		}
+    }
+    parsePendingMethods();
+}
+
+
+location：Configuration
+public boolean isResourceLoaded(String resource) {
+    return loadedResources.contains(resource);
+}
+
+private void loadXmlResource() {
+    // 判断资源是否被加载过了。
+	if (!configuration.isResourceLoaded("namespace:" + type.getName())) {
+	
+		// 找到对应mapper.xml文件。
+		String xmlResource = type.getName().replace('.', '/') + ".xml";
+		
+		// 获取资源。
+		InputStream inputStream = null;
+		try {
+			inputStream = Resources.getResourceAsStream(type.getClassLoader(), xmlResource);
+		} catch (IOException e) {
+			// ignore, resource is not required
+		}
+		if (inputStream != null) {
+			XMLMapperBuilder xmlParser = new XMLMapperBuilder(inputStream, assistant.getConfiguration(), xmlResource, configuration.getSqlFragments(), type.getName());
+			xmlParser.parse();
+		}
+	}
+}
+
+location：XMLMapperBuilder
+// 解析mapper.xml
+public void parse() {
+	// 判断资源是否被加载过了。
+    if (!configuration.isResourceLoaded(resource)) {
+      configurationElement(parser.evalNode("/mapper"));
+      configuration.addLoadedResource(resource);
+      bindMapperForNamespace();
+    }
+
+    parsePendingResultMaps();
+    parsePendingChacheRefs();
+    parsePendingStatements();
+}
+
+location：XMLMapperBuilder
+// 具体的解析mapper.xml操作。
+private void configurationElement(XNode context) {
+    try {
+		// 获取命名空间。并且命名空间不能为空。
+		String namespace = context.getStringAttribute("namespace");
+		if (namespace.equals("")) {
+			throw new BuilderException("Mapper's namespace cannot be empty");
+		}
+		
+		// MapperBuilderAssistant builderAssistant：构建Mapper的辅助类。
+		builderAssistant.setCurrentNamespace(namespace);
+		
+		// 解析cache-ref标签。
+		cacheRefElement(context.evalNode("cache-ref"));
+		
+		// 解析cache标签
+		cacheElement(context.evalNode("cache"));
+		
+		// 解析parameterMap标签。
+		parameterMapElement(context.evalNodes("/mapper/parameterMap"));
+		
+		// 解析resultMap标签。
+		resultMapElements(context.evalNodes("/mapper/resultMap"));
+		
+		// 解析sql标签
+		sqlElement(context.evalNodes("/mapper/sql"));
+		
+		// 解析select|insert|update|delete标签。
+		buildStatementFromContext(context.evalNodes("select|insert|update|delete"));
+    } catch (Exception e) {
+      throw new BuilderException("Error parsing Mapper XML. Cause: " + e, e);
+    }
+}
+
+###################################    cache-ref   ##################################################################
+location：XMLMapperBuilder
+private void cacheRefElement(XNode context) {
+	if (context != null) {
+		// 向configuration中添加cacheRef
+		configuration.addCacheRef(builderAssistant.getCurrentNamespace(), context.getStringAttribute("namespace"));
+		
+		// 构建CacheRefResolver实例	
+		CacheRefResolver cacheRefResolver = new CacheRefResolver(builderAssistant, context.getStringAttribute("namespace"));
+		try {
+			cacheRefResolver.resolveCacheRef();
+		} catch (IncompleteElementException e) {
+			configuration.addIncompleteCacheRef(cacheRefResolver);
+		}
+	}
+}
+
+location：CacheRefResolver
+public Cache resolveCacheRef() {
+	return assistant.useCacheRef(cacheRefNamespace);
+}
+
+location：MapperBuilderAssistant
+public Cache useCacheRef(String namespace) {
+	if (namespace == null) {
+		throw new BuilderException("cache-ref element requires a namespace attribute.");
+	}
+	try {
+		unresolvedCacheRef = true;
+		Cache cache = configuration.getCache(namespace);
+		if (cache == null) {
+			throw new IncompleteElementException("No cache for namespace '" + namespace + "' could be found.");
+		}
+		currentCache = cache;
+		unresolvedCacheRef = false;
+		return cache;
+	} catch (IllegalArgumentException e) {
+		throw new IncompleteElementException("No cache for namespace '" + namespace + "' could be found.", e);
+	}
+}
+
+###################################    cache   ##################################################################
+
+###################################    parameterMap   ##################################################################
+
+###################################    resultMap   ##################################################################
+
+###################################    sql   ##################################################################
+
+
+###################################    select|insert|update|delete   ##################################################################
+location：XMLMapperBuilder
+private void buildStatementFromContext(List<XNode> list) {
+    if (configuration.getDatabaseId() != null) {
+		buildStatementFromContext(list, configuration.getDatabaseId());
+    }
+    buildStatementFromContext(list, null);
+}
+
+location：XMLMapperBuilder
+private void buildStatementFromContext(List<XNode> list, String requiredDatabaseId) {
+	// 一个节点要循环一次
+	for (XNode context : list) {
+		final XMLStatementBuilder statementParser = new XMLStatementBuilder(configuration, builderAssistant, context, requiredDatabaseId);
+		
+		try {
+			statementParser.parseStatementNode();
+		} catch (IncompleteElementException e) {
+			configuration.addIncompleteStatement(statementParser);
+		}
+	}
+}
+
+location：XMLStatementBuilder
+public void parseStatementNode() {
+	String id = context.getStringAttribute("id");
+	String databaseId = context.getStringAttribute("databaseId");
+
+	if (!databaseIdMatchesCurrent(id, databaseId, this.requiredDatabaseId)) {
+		return;
+	}
+
+	Integer fetchSize = context.getIntAttribute("fetchSize");
+	Integer timeout = context.getIntAttribute("timeout");
+	String parameterMap = context.getStringAttribute("parameterMap");
+	
+	String parameterType = context.getStringAttribute("parameterType");
+	Class<?> parameterTypeClass = resolveClass(parameterType);
+	
+	String resultMap = context.getStringAttribute("resultMap");
+	String resultType = context.getStringAttribute("resultType");
+	String lang = context.getStringAttribute("lang");
+	
+	LanguageDriver langDriver = getLanguageDriver(lang);
+
+	Class<?> resultTypeClass = resolveClass(resultType);
+	
+	
+	String resultSetType = context.getStringAttribute("resultSetType");
+	StatementType statementType = StatementType.valueOf(context.getStringAttribute("statementType", StatementType.PREPARED.toString()));
+	ResultSetType resultSetTypeEnum = resolveResultSetType(resultSetType);
+
+	String nodeName = context.getNode().getNodeName();
+	SqlCommandType sqlCommandType = SqlCommandType.valueOf(nodeName.toUpperCase(Locale.ENGLISH));
+	boolean isSelect = sqlCommandType == SqlCommandType.SELECT;
+	boolean flushCache = context.getBooleanAttribute("flushCache", !isSelect);
+	boolean useCache = context.getBooleanAttribute("useCache", isSelect);
+	boolean resultOrdered = context.getBooleanAttribute("resultOrdered", false);
+
+	XMLIncludeTransformer includeParser = new XMLIncludeTransformer(configuration, builderAssistant);
+	includeParser.applyIncludes(context.getNode());
+
+	processSelectKeyNodes(id, parameterTypeClass, langDriver);
+
+	SqlSource sqlSource = langDriver.createSqlSource(configuration, context, parameterTypeClass);
+	String resultSets = context.getStringAttribute("resultSets");
+	String keyProperty = context.getStringAttribute("keyProperty");
+	String keyColumn = context.getStringAttribute("keyColumn");
+	KeyGenerator keyGenerator;
+	String keyStatementId = id + SelectKeyGenerator.SELECT_KEY_SUFFIX;
+	keyStatementId = builderAssistant.applyCurrentNamespace(keyStatementId, true);
+	
+	if (configuration.hasKeyGenerator(keyStatementId)) {
+		keyGenerator = configuration.getKeyGenerator(keyStatementId);
+	} else {
+		keyGenerator = context.getBooleanAttribute("useGeneratedKeys", configuration.isUseGeneratedKeys() && SqlCommandType.INSERT.equals(sqlCommandType))
+		  ? new Jdbc3KeyGenerator() : new NoKeyGenerator();
+	}
+
+	builderAssistant.addMappedStatement(id, sqlSource, statementType, sqlCommandType, fetchSize, timeout, parameterMap, parameterTypeClass, resultMap, resultTypeClass,
+		resultSetTypeEnum, flushCache, useCache, resultOrdered,  keyGenerator, keyProperty, keyColumn, databaseId, langDriver, resultSets);
+}
+
+
+// 构建一个MappedStatement，并保存到Configuration实例对象中。
+location：MapperBuilderAssistant
+public MappedStatement addMappedStatement(String id, SqlSource sqlSource, StatementType statementType,
+      SqlCommandType sqlCommandType, Integer fetchSize, Integer timeout, String parameterMap, Class<?> parameterType, String resultMap,
+      Class<?> resultType, ResultSetType resultSetType, boolean flushCache, boolean useCache, boolean resultOrdered, KeyGenerator keyGenerator,
+      String keyProperty, String keyColumn, String databaseId, LanguageDriver lang, String resultSets) {
+    
+	if (unresolvedCacheRef) throw new IncompleteElementException("Cache-ref not yet resolved");
+
+	id = applyCurrentNamespace(id, false);
+	boolean isSelect = sqlCommandType == SqlCommandType.SELECT;
+
+	MappedStatement.Builder statementBuilder = new MappedStatement.Builder(configuration, id, sqlSource, sqlCommandType);
+	statementBuilder.resource(resource);
+	statementBuilder.fetchSize(fetchSize);
+	statementBuilder.statementType(statementType);
+	statementBuilder.keyGenerator(keyGenerator);
+	statementBuilder.keyProperty(keyProperty);
+	statementBuilder.keyColumn(keyColumn);
+	statementBuilder.databaseId(databaseId);
+	statementBuilder.lang(lang);
+	statementBuilder.resultOrdered(resultOrdered);
+	statementBuilder.resulSets(resultSets);
+	setStatementTimeout(timeout, statementBuilder);
+
+	setStatementParameterMap(parameterMap, parameterType, statementBuilder);
+	setStatementResultMap(resultMap, resultType, resultSetType, statementBuilder);
+	setStatementCache(isSelect, flushCache, useCache, currentCache, statementBuilder);
+
+	MappedStatement statement = statementBuilder.build();
+	configuration.addMappedStatement(statement);
+	return statement;
+}

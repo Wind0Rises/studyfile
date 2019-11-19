@@ -1,6 +1,125 @@
 	
 	ZooKeeper是一个分布式的，开放源码的分布式应用程序协调服务
 		配置管理、命名服务、分布式锁、集群管理。
+
+zookeeper命令：
+	connect host:port
+
+	ls path [watch]
+		查看path路径下的内容。如果需要监听节点和子节点的变化，可以使用watch命令。
+		
+	ls2 path [watch]
+		ls2相当于ls + get命令，
+	
+	create [-s] [-e] path data acl
+		create创建一个节点。默认创建持久化节点。
+			-s：表示顺序节点
+			-e：表示临时节点，在客户端退出以后会自定删除。	
+		acl：用于设置权限的。
+	
+	
+	delete path [version]
+		删除路径和节点。如果这个节点有子节点，是无法删除的。
+		
+	rmr path
+		删除路径。如果有子节点，会递归删除所有节点。
+		
+	
+	get path [watch]
+		获取节点的相关信息。
+			cZxid = 0x8                                     是节点的创建时间所对应的Zxid格式时间戳
+			ctime = Tue Nov 19 10:42:07 CST 2019            是节点的创建时间
+			mZxid = 0x8                                     是节点的修改时间所对应的Zxid格式时间戳。
+			mtime = Tue Nov 19 10:42:07 CST 2019            是节点的修改时间
+			pZxid = 0x8                                     是与该节点的子节点（或该节点）的最近一次创建/删除的时间戳对应。
+			cversion = 0                                    子版本号
+			dataVersion = 0                                 数据版本号
+			aclVersion = 0                                  权限版本号
+			ephemeralOwner = 0x0                            如果该节点为ephemeral节点, ephemeralOwner值表示与该节点绑定的session_id. 如果该节点不是ephemeral节点, ephemeralOwner值为0. 
+			dataLength = 11                                 数据长度
+			numChildren = 0                                 子节点的个数。
+		
+	stat path [watch]
+		和get命令大体相同。
+	
+	set path data [version]
+		设置指定的znode节点的信息。
+		这个version是dataVersion的版本，如果指定的版本和znode的现在的版本不一致，是无法修改数据的。
+		
+	
+	setquota -n|-b val path
+		设置配额，配额分为两种，一种是对子节点数量的限制，称之为count限制，一种是对节点能够存放的数据大小的限制，称之为byte限制。
+			-n 限制此节点最大可拥有多少个子节点。这个只算孩子节点，孙子及其以后的节点不统计。
+			-b 限制此节点能够存储的数据最大是多少个字节
+	
+	listquota path
+		查看配置。
+	
+	delquota [-n|-b] path
+		产出配额。
+		
+	
+	setAcl命令
+		设置节点Acl。acl由大部分组成：1为scheme，2为user，3为permission，一般情况下表示为scheme:id:permissions。其中scheme和id是相关的，下面将scheme和id一起说明。
+		scheme和id
+			world: 它下面只有一个id, 叫anyone, world:anyone代表任何人，zookeeper中对所有人有权限的结点就是属于world:anyone的
+			auth: 它不需要id, 只要是通过authentication的user都有权限（zookeeper支持通过kerberos来进行authencation, 也支持username/password形式的authentication)
+			digest: 它对应的id为username:BASE64(SHA1(password))，它需要先通过username:password形式的authentication
+			ip: 它对应的id为客户机的IP地址，设置的时候可以设置一个ip段，比如ip:192.168.1.0/16, 表示匹配前16个bit的IP段
+			super: 在这种scheme情况下，对应的id拥有超级权限，可以做任何事情(cdrwa)
+
+			permissions
+				CREATE(c): 创建权限，可以在在当前node下创建child node
+				DELETE(d): 删除权限，可以删除当前的node
+				READ(r): 读权限，可以获取当前node的数据，可以list当前node所有的child nodes
+				WRITE(w): 写权限，可以向当前node写数据
+				ADMIN(a): 管理权限，可以设置当前node的permission
+
+		综上，一个简单使用setAcl命令，则可以为：
+			setAcl /zookeeper/node1 world:anyone:cdrw
+
+	addauth scheme auth
+	
+	setAcl path acl
+	
+	getAcl path
+		
+	
+	quit
+		退出客户端。
+		
+	history
+		查看最近的操作命令。
+	
+	close
+		关闭本次连接，但是不退出客户端。还可以使用connect命令连接服务端。
+	
+	printwatches on|off
+
+
+
+权限：http://www.manongjc.com/article/88875.html
+
+	查看zookeeper的状态
+		sh /bin/zkServer.sh status
+	
+	配置zookeeper的环境
+		vi /bin/zkEvn.sh 
+
+
+
+
+
+1、介绍一下zookeeper。
+	它是一个分布式服务框架，是Apache Hadoop的一个子项目，它主要是用来解决分布式应用中经常遇到的一些数据管理问题，如：统一命名服务、状态同步服务、
+	集群管理、分布式应用配置项的管理等。
+	
+
+
+
+
+
+
 		
 1、首先要搞懂分布式系统会存在哪些问题？
 

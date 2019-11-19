@@ -13,6 +13,7 @@ redis：
 zookeeper:
 	https://blog.csdn.net/elkholer/article/details/88808687
 	https://blog.csdn.net/crazymakercircle/article/details/85956246
+	https://www.cnblogs.com/raphael5200/p/5285583.html
 	
 锁：
 	https://www.cnblogs.com/takumicx/p/9338983.html#reentrantlock%E7%AE%80%E4%BB%8B
@@ -26,3 +27,7 @@ zookeeper:
 	
 spring boot:
 	https://www.cnblogs.com/daiwei1981/p/10260458.html
+	
+spring boot：
+	刷新配置文件：https://blog.csdn.net/liuyueyi25/article/details/83244208
+	RefreshScope
