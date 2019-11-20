@@ -28,6 +28,10 @@ zookeeper:
 spring boot:
 	https://www.cnblogs.com/daiwei1981/p/10260458.html
 	
+	
+分布式：
+	https://coolshell.cn/articles/10910.html
+	
 spring boot：
 	刷新配置文件：https://blog.csdn.net/liuyueyi25/article/details/83244208
 	RefreshScope

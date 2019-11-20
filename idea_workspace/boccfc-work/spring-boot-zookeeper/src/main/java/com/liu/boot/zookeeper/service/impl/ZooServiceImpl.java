@@ -1,6 +1,9 @@
 package com.liu.boot.zookeeper.service.impl;
 
 import com.liu.boot.zookeeper.service.ZooService;
+import org.I0Itec.zkclient.ZkClient;
+import org.apache.curator.framework.CuratorFramework;
+import org.apache.zookeeper.CreateMode;
 import org.apache.zookeeper.KeeperException;
 import org.apache.zookeeper.ZooKeeper;
 import org.apache.zookeeper.data.Stat;
@@ -18,15 +21,32 @@ public class ZooServiceImpl implements ZooService {
     private static final Logger LOG = LoggerFactory.getLogger(ZooServiceImpl.class);
 
     @Autowired
-    private ZooKeeper zkClient;
+    private ZooKeeper zookeeper;
+
+    @Autowired
+    private ZkClient zkClient;
+
+    @Autowired
+    private CuratorFramework curatorFramework;
 
     @Override
     public Stat exists(String path, boolean needWatch) {
         try {
-            return zkClient.exists(path, needWatch);
+            return zookeeper.exists(path, needWatch);
         } catch (Exception e) {
             LOG.info("{}节点exist查询异常，异常信息为：{}", path, e);
         }
         return null;
+    }
+
+    /**
+     * 创建临时顺序节点。
+     */
+    public void createTempSortNode(String path, byte[] bytes) {
+        try {
+            curatorFramework.create().withMode(CreateMode.EPHEMERAL_SEQUENTIAL).forPath(path, bytes);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
     }
 }

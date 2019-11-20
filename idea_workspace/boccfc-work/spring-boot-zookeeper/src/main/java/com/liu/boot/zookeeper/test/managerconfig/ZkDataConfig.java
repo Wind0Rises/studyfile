@@ -14,7 +14,6 @@ import org.springframework.beans.factory.annotation.Autowired;
  * 当配置信息注册到zookeeper上时，需要这些的配置的应用服务需要需要监听这些节点，
  * 当节点发生改变时，监听这些节点的应用服务期会做出对应的反应，
  */
-@RefreshScope
 public class ZkDataConfig {
 
     private static final Logger LOG = LoggerFactory.getLogger(ZkDataConfig.class);

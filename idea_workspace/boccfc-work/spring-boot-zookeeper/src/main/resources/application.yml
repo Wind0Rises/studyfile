@@ -7,4 +7,4 @@ server:
 zookeeper:
     address: 22.144.101.47:2181,22.144.101.47:2182,22.144.101.47:2183
     sessionTimeout: 50000
-    connectionTimeout: 4000
+    connectionTimeout: 40000
