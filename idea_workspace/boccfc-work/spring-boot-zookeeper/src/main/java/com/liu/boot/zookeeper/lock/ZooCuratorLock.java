@@ -43,7 +43,7 @@ public class ZooCuratorLock {
         try {
             if(interProcessMutex != null && interProcessMutex.isAcquiredInThisProcess()){
                 interProcessMutex.release();
-                curatorFramework.delete().inBackground().forPath(root+lockName);
+                curatorFramework.delete().inBackground().forPath(LOCK_ROOT + lockName);
                 LOG.info("Thread:"+Thread.currentThread().getId()+" release distributed lock  success");
             }
         }catch (Exception e){
