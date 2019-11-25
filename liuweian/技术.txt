@@ -1,0 +1,2 @@
+actuator：监控
+spring boot admin

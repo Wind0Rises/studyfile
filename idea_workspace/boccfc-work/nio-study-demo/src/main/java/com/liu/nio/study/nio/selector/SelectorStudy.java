@@ -65,4 +65,12 @@ public class SelectorStudy {
         socketChannel.register(selector, socketChannel.validOps());
         System.out.println(socketChannel.isRegistered());
     }
+
+    class Server implements Runnable{
+
+        @Override
+        public void run() {
+
+        }
+    }
 }

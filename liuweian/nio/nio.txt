@@ -1,0 +1,47 @@
+传统IO：同步堵塞IO。
+Nio：同步非堵塞IO。
+
+
+reactor：reactor模式是一种时间驱动处理模式。可以处理一个或多个输入源。通过Service Handler同步的将输入事件（Event）采用多路复用分发给相应的Request Handler（多个）处理。
+
+为什么要使用reactor：
+	常见的网络服务中，如果每一个客户端都维持一个与服务器的连接。服务器也将维护多个和客户端的连接，已操作与客户端的contnect、read、write。
+	对于长链接的服务，有多少个Clinet端，就需要在Sever端维护同等的IO连接。这对服务器来说是一个很大的开销。
+
+
+
+Socket：
+	InetAddress：代表一个Internet Protocol (IP)地址.
+
+channel:
+	Socket通道有可以直接创建新socket通道的工厂方法。但是一个FileChannel对象却只能通过在一个打开的RandomAccessFile、FileInputStream或FileOutputStream对象上调用getChannel()方法来获取。
+	不能直接创建一个FileChannel对象。
+	
+	通道可以是单向（unidirectional）或者双向的（bidirectional）。一个channel类可能实现定义read()方法的ReadableByteChannel接口，
+	而另一个channel类也许实现WritableByteChannel接口以提供 write()方法。实现这两种接口其中之一的类都是单向的，只能在一个方向上传输数据。
+	如果一个类同时实现这两个接口，那么它是双向的，可以双向传输数据。
+	
+	从FileInputStream对象的getChannel()方法获取的FileChannel对象是只读的，不过从接口声明的角度来看却是双向的，因为FileChannel实现ByteChannel接口。
+	在这样一个通道上调用write()方法将抛出未经检查的NonWritableChannelException异常，因为FileInputStream对象总是以read-only的权限打开文件。
+	
+	通道会连接一个特定I/O服务且通道实例（channel instance）的性能受它所连接的I/O服务的特征限制.
+	
+	通道可以以阻塞（blocking）或非阻塞（nonblocking）模式运行。
+	
+	socket通道类从SelectableChannel引申而来。从SelectableChannel引申而来的类可以和支持有条件的选择（readiness selectio）的选择器（Selectors）一起使用。=
+	将非阻塞I/O和选择器组合起来可以使您的程序利用多路复用I/O（multiplexed I/O）。
+	
+	通道提供了一种被称为 Scatter/Gather的重要新功能（有时也被称为矢量 I/O）。
+	
+	文件通道总是阻塞式的，因此不能被置于非阻塞模式。FileChannel对象是线程安全（thread-safe）的。新的 socket 通道类可以运行非阻塞模式并且是可选择的。
+	
+	DatagramChannel和SocketChannel 实现定义读和写功能的接口而 ServerSocketChannel不实现。ServerSocketChannel 负责监听传入的连接和创建新的SocketChannel对象，
+	它本身从不传输数据。
+	
+	
+Selectors:
+	试图注册一个处于阻塞状态的通道，register()将抛出未检查的 IllegalBlockingModeException 异常。此外，通道一旦被注册，就不能回到阻塞状态。
+	
+	选择器才是提供管理功能的对象，而不是【可选择通道对象】。SocketChannel不支持accept。  
+	
+	选择器对象是线程安全的，但它们包含的键集合不是。

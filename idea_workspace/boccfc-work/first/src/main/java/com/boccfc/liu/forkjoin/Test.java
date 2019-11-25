@@ -9,7 +9,7 @@ import java.util.concurrent.RecursiveTask;
 public class Test {
 
     public static void main(String[] args) {
-        ForkJoinPool forkJoinPool = new ForkJoinPool()
+        ForkJoinPool forkJoinPool = new ForkJoinPool();
     }
 
     class AddNumber extends RecursiveTask<Integer> {

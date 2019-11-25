@@ -9,6 +9,7 @@ Synchronized:
 	
 redis：
 	http://c.biancheng.net/view/4544.html
+	https://blog.csdn.net/Aquester/article/details/83419512
 	
 zookeeper:
 	https://blog.csdn.net/elkholer/article/details/88808687
@@ -20,6 +21,8 @@ zookeeper:
 	
 博主：
 	https://www.cnblogs.com/xiaoxi/
+	https://crossoverjie.top
+	https://www.cnblogs.com/crazymakercircle/p/9904544.html
 	
 数据库：
 	https://blog.csdn.net/mzglzzc/article/details/46300127

@@ -28,6 +28,8 @@ public class BufferStudy {
      * position：表示这一个时刻，第多少个位置已经被占用了。
      * limit：限制只能放多少个元素。比如周杰伦过来演出，来观看的人肯定很多，为了安全，限制只有80%座位的人数过来观看。
      * capacity >= position >= limit
+     *
+     * flip()：复位操作，把position置位0，
      */
     public static void bufferParamTest() throws Exception {
         ByteBuffer byteBuffer = ByteBuffer.allocate(10);
