@@ -23,6 +23,7 @@ zookeeper:
 	https://www.cnblogs.com/xiaoxi/
 	https://crossoverjie.top
 	https://www.cnblogs.com/crazymakercircle/p/9904544.html
+	https://tech.meituan.com/   ----->  美团技术
 	
 数据库：
 	https://blog.csdn.net/mzglzzc/article/details/46300127
@@ -34,7 +35,16 @@ spring boot:
 	
 分布式：
 	https://coolshell.cn/articles/10910.html
+
+	
+nio：
+	https://www.iteye.com/blog/bijian1013-2277792
+
 	
 spring boot：
 	刷新配置文件：https://blog.csdn.net/liuyueyi25/article/details/83244208
 	RefreshScope
+	
+	
+others:
+	unsafe解析：https://tech.meituan.com/2019/02/14/talk-about-java-magic-class-unsafe.html

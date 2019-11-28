@@ -1,0 +1,18 @@
+1、ThreadLocal：线程的本地变量，线程私有的。其内部使用ThreadLocalMap保存线程的本地变量，每一个ThreadLocal实例内部都有一个ThreadLocalMap对象，【一个ThreadLocal内部
+				的ThreadLocalMap只保存一个数据，这是为什么？】
+
+
+2、ThreadLocalMap：内部有一个Entry内部类，该内部类继承WeakReference，说明Entry是一个弱引用对象。ThreadLocalMap底层是使用数组进行保存的，不是想HashMap使用
+				   数组和链表数据结构。
+	
+	ThreadLocalMap是如何解决Hash冲突的？
+		使用开放地址法，和HashMap的连地址法不同。
+		
+	开发地址法和链地址法的各有优缺点？
+		
+		
+	ThreadLocalMap为什么要使用开发地址法？
+		
+3、ThreadLocal使用场景：
+	Spring事务管理器就是使用ThreadLocal。
+	https://www.cnblogs.com/fishisnow/p/6396989.html
