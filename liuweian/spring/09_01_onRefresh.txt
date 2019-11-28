@@ -1,0 +1,46 @@
+refresh()
+	onRefresh():
+
+protected void onRefresh() {
+	this.themeSource = UiApplicationContextUtils.initThemeSource(this);
+}
+
+
+public static ThemeSource initThemeSource(ApplicationContext context) {
+	
+	// 判断ApplicationContext中是否有：themeSource对应的Bean
+	if (context.containsLocalBean(THEME_SOURCE_BEAN_NAME)) {
+	
+		// 获取ThemeSource对应的Bean
+		ThemeSource themeSource = context.getBean(THEME_SOURCE_BEAN_NAME, ThemeSource.class);
+		
+		
+		if (context.getParent() instanceof ThemeSource && themeSource instanceof HierarchicalThemeSource) {
+			HierarchicalThemeSource hts = (HierarchicalThemeSource) themeSource;
+			if (hts.getParentThemeSource() == null) {
+				hts.setParentThemeSource((ThemeSource) context.getParent());
+			}
+		}
+		
+		if (logger.isDebugEnabled()) {
+			logger.debug("Using ThemeSource [" + themeSource + "]");
+		}
+		return themeSource;
+		
+	// 如果ApplicationContext中没有ThemeSource对应Bean。
+	} else {
+	
+		HierarchicalThemeSource themeSource = null;
+		
+		if (context.getParent() instanceof ThemeSource) {
+			themeSource = new DelegatingThemeSource();
+			themeSource.setParentThemeSource((ThemeSource) context.getParent());
+		} else {
+			themeSource = new ResourceBundleThemeSource();
+		}
+		if (logger.isDebugEnabled()) {
+			logger.debug("Unable to locate ThemeSource with name '" + THEME_SOURCE_BEAN_NAME + "': using default [" + themeSource + "]");
+		}
+		return themeSource;
+	}
+}

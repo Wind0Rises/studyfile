@@ -1,0 +1,226 @@
+refresh()	
+	registerBeanPostProcessors  注册【【BeanPostProcessor】】接口。
+
+// 实例化并调用所有已注册的[BeanPostProcessor]bean，如果给定，则遵守显式顺序。
+location：AbstractApplicationBean
+protected void registerBeanPostProcessors(ConfigurableListableBeanFactory beanFactory) {
+	PostProcessorRegistrationDelegate.registerBeanPostProcessors(beanFactory, this);	// this = XmlWebApplicationContext
+}
+
+
+// BeanPostProcesser：允许自定修改bean instance。
+// ApplicationContext能够自动检测出Bean Definitions中的BeanPostProcessor的beans，并将他们应用于随后的任何Bean
+location：PostProcessorRegistrationDelegate
+public static void registerBeanPostProcessors(ConfigurableListableBeanFactory beanFactory, AbstractApplicationContext applicationContext) {
+
+	// 获取BeanFactory中的BeanPostProcesser。
+	String[] postProcessorNames = beanFactory.getBeanNamesForType(BeanPostProcessor.class, true, false);
+
+	// 注册BeanPostProcessorChecker，在BeanPostProcessor实例化期间创建bean时记录信息消息，即当bean不符合由所有BeanPostProcessors处理的资格时。
+	// beanFactory.getBeanPostProcessorCount()是获取beanPostProcessors结合的大小。beanPostProcessors存放着refresh()第三第四步骤中addBeanPostProcessor(..)添加的对象。
+	int beanProcessorTargetCount = beanFactory.getBeanPostProcessorCount() + 1 + postProcessorNames.length;
+
+	// 在添加一个BeanPostProcessor。
+	beanFactory.addBeanPostProcessor(new BeanPostProcessorChecker(beanFactory, beanProcessorTargetCount));
+
+	// Separate between BeanPostProcessors that implement PriorityOrdered,
+	// Ordered, and the rest.
+
+	// 对BeanPostProcessors进行分类。分为PriorityOrdered、Ordered、和其他这三类
+	List<BeanPostProcessor> priorityOrderedPostProcessors = new ArrayList<BeanPostProcessor>();
+	List<BeanPostProcessor> internalPostProcessors = new ArrayList<BeanPostProcessor>();
+	List<String> orderedPostProcessorNames = new ArrayList<String>();
+	List<String> nonOrderedPostProcessorNames = new ArrayList<String>();
+	for (String ppName : postProcessorNames) {
+		if (beanFactory.isTypeMatch(ppName, PriorityOrdered.class)) {
+			BeanPostProcessor pp = beanFactory.getBean(ppName, BeanPostProcessor.class);
+			priorityOrderedPostProcessors.add(pp);
+			if (pp instanceof MergedBeanDefinitionPostProcessor) {
+				internalPostProcessors.add(pp);
+			}
+		}
+		else if (beanFactory.isTypeMatch(ppName, Ordered.class)) {
+			orderedPostProcessorNames.add(ppName);
+		}
+		else {
+			nonOrderedPostProcessorNames.add(ppName);
+		}
+	}
+
+	// 【01】PriorityOrdered先处理。
+	sortPostProcessors(priorityOrderedPostProcessors, beanFactory);
+	registerBeanPostProcessors(beanFactory, priorityOrderedPostProcessors);
+
+	// 【02】注册BeanPostProcessor实现Ordered的类
+	List<BeanPostProcessor> orderedPostProcessors = new ArrayList<BeanPostProcessor>();
+	for (String ppName : orderedPostProcessorNames) {
+		BeanPostProcessor pp = beanFactory.getBean(ppName, BeanPostProcessor.class);
+		orderedPostProcessors.add(pp);
+		if (pp instanceof MergedBeanDefinitionPostProcessor) {
+			internalPostProcessors.add(pp);
+		}
+	}
+	sortPostProcessors(orderedPostProcessors, beanFactory);
+	registerBeanPostProcessors(beanFactory, orderedPostProcessors);
+
+	// 【03】 其他没有规则的BeanPostProcessor。
+	List<BeanPostProcessor> nonOrderedPostProcessors = new ArrayList<BeanPostProcessor>();
+	for (String ppName : nonOrderedPostProcessorNames) {
+		BeanPostProcessor pp = beanFactory.getBean(ppName, BeanPostProcessor.class);
+		nonOrderedPostProcessors.add(pp);
+		if (pp instanceof MergedBeanDefinitionPostProcessor) {
+			internalPostProcessors.add(pp);
+		}
+	}
+	registerBeanPostProcessors(beanFactory, nonOrderedPostProcessors);
+
+	// 【04】 最后，重新注册所有内部BeanPostProcessors
+	sortPostProcessors(internalPostProcessors, beanFactory);
+	registerBeanPostProcessors(beanFactory, internalPostProcessors);
+
+	// 重新注册BeanPostProcessor以检测内部bean作为ApplicationListeners，将其移动到处理器链的末尾（用于拾取代理等）。
+	beanFactory.addBeanPostProcessor(new ApplicationListenerDetector(applicationContext));
+}
+
+
+// 通过类型获取Bean的名称。
+location：DefaultListableBeanFactory
+public String[] getBeanNamesForType(Class<?> type, boolean includeNonSingletons, boolean allowEagerInit) {
+	// includeNonSingletons = ture; allowEagerInit = false。
+
+	// isConfigurationFrozen()默认返回false
+	if (!isConfigurationFrozen() || type == null || !allowEagerInit) {
+		return doGetBeanNamesForType(ResolvableType.forRawClass(type), includeNonSingletons, allowEagerInit);
+	}
+
+	// ?????  什么时候可以进入下面 ###############
+	Map<Class<?>, String[]> cache = (includeNonSingletons ? this.allBeanNamesByType : this.singletonBeanNamesByType);
+	String[] resolvedBeanNames = cache.get(type);
+	if (resolvedBeanNames != null) {
+		return resolvedBeanNames;
+	}
+	resolvedBeanNames = doGetBeanNamesForType(ResolvableType.forRawClass(type), includeNonSingletons, true);
+	if (ClassUtils.isCacheSafe(type, getBeanClassLoader())) {
+		cache.put(type, resolvedBeanNames);
+	}
+	return resolvedBeanNames;
+}
+
+// 通过类型获取Bean的名称。
+private String[] doGetBeanNamesForType(ResolvableType type, boolean includeNonSingletons, boolean allowEagerInit) {
+	// includeNonSingletons=ture;   allowEagerInit=false。
+	
+	List<String> result = new ArrayList<String>();
+
+	// 遍历所有的BeanDefinition。
+	for (String beanName : this.beanDefinitionNames) {
+	
+		// 如果bean名称未定义为某些其他bean的别名，则仅将bean视为合格。
+		if (!isAlias(beanName)) {
+			try {
+				RootBeanDefinition mbd = getMergedLocalBeanDefinition(beanName);
+
+				// 仅仅检查bean Definition是否完成，
+				if (!mbd.isAbstract() && (allowEagerInit || ((mbd.hasBeanClass() || !mbd.isLazyInit() || 
+								isAllowEagerClassLoading())) && !requiresEagerInitForType(mbd.getFactoryBeanName()))) {
+					// In case of FactoryBean, match object created by FactoryBean.
+					
+					// 判断是否是FactoryBean
+					boolean isFactoryBean = isFactoryBean(beanName, mbd);
+					
+					// 获取RootBeanDefinition的BeanDefinitionHolder
+					BeanDefinitionHolder dbd = mbd.getDecoratedDefinition();
+					
+					// 匹配发现
+					boolean matchFound = (allowEagerInit || !isFactoryBean || (dbd != null && !mbd.isLazyInit()) || containsSingleton(beanName)) &&
+							(includeNonSingletons || (dbd != null ? mbd.isSingleton() : isSingleton(beanName))) && isTypeMatch(beanName, type);
+							
+					// 如果是FactoryBean，请尝试下一步匹配FactoryBean实例。
+					if (!matchFound && isFactoryBean) {
+						beanName = FACTORY_BEAN_PREFIX + beanName;
+						matchFound = (includeNonSingletons || mbd.isSingleton()) && isTypeMatch(beanName, type);
+					}
+					
+					if (matchFound) {
+						result.add(beanName);
+					}
+				}
+			} catch (CannotLoadBeanClassException ex) {
+				if (allowEagerInit) {
+					throw ex;
+				}
+				
+				if (this.logger.isDebugEnabled()) {
+					this.logger.debug("Ignoring bean class loading failure for bean '" + beanName + "'", ex);
+				}
+				onSuppressedException(ex);
+			} catch (BeanDefinitionStoreException ex) {
+				if (allowEagerInit) {
+					throw ex;
+				}
+				
+				if (this.logger.isDebugEnabled()) {
+					this.logger.debug("Ignoring unresolvable metadata in bean definition '" + beanName + "'", ex);
+				}
+				onSuppressedException(ex);
+			}
+		}
+	}
+	// 【【result：BeanDefinitionRegistryPostProcessor接口的实现类。】】
+
+	// 也可以手动注册单例。this.manualSingletonNames是refresh()方法第三步注册的。
+	for (String beanName : this.manualSingletonNames) {
+		try {
+			// In case of FactoryBean, match object created by FactoryBean.
+			if (isFactoryBean(beanName)) {
+				if ((includeNonSingletons || isSingleton(beanName)) && isTypeMatch(beanName, type)) {
+					result.add(beanName);
+					// Match found for this bean: do not match FactoryBean itself anymore.
+					continue;
+				}
+				// In case of FactoryBean, try to match FactoryBean itself next.
+				beanName = FACTORY_BEAN_PREFIX + beanName;
+			}
+			// Match raw bean instance (might be raw FactoryBean).
+			if (isTypeMatch(beanName, type)) {
+				result.add(beanName);
+			}
+		}
+		catch (NoSuchBeanDefinitionException ex) {
+			// Shouldn't happen - probably a result of circular reference resolution...
+			if (logger.isDebugEnabled()) {
+				logger.debug("Failed to check manually registered singleton with name '" + beanName + "'", ex);
+			}
+		}
+	}
+
+	return StringUtils.toStringArray(result);
+}
+
+
+################  处理过程  ##################
+location：PostProcessorRegistrationDelegate
+private static void registerBeanPostProcessors(ConfigurableListableBeanFactory beanFactory, List<BeanPostProcessor> postProcessors) {
+	for (BeanPostProcessor postProcessor : postProcessors) {
+		beanFactory.addBeanPostProcessor(postProcessor);
+	}
+}
+
+
+// 添加BeanPostProcessor
+location：AbstractBeanFactory
+public void addBeanPostProcessor(BeanPostProcessor beanPostProcessor) {
+	Assert.notNull(beanPostProcessor, "BeanPostProcessor must not be null");
+	
+	// 移除原有的
+	this.beanPostProcessors.remove(beanPostProcessor);
+	
+	// 重新添加
+	this.beanPostProcessors.add(beanPostProcessor);
+	if (beanPostProcessor instanceof InstantiationAwareBeanPostProcessor) {
+		this.hasInstantiationAwareBeanPostProcessors = true;
+	}
+	if (beanPostProcessor instanceof DestructionAwareBeanPostProcessor) {
+		this.hasDestructionAwareBeanPostProcessors = true;
+	}
+}

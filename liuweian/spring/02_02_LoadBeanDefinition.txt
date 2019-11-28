@@ -1,0 +1,2248 @@
+###########################   加载BeanDefinition过程  ############################################
+
+
+
+判断这个ApplicationContext的实例是否有BeanFactory，如果有则销毁BeanFactory中的Bean和缓存。【具体清理哪些对象？】把ApplicationContext中的BeanFactory设置为null。然后创建一个新的DefaultListableBeanFactory。然后加载BeanDefinition。
+
+	加载BeanDefinition过程：
+		。创建对应的BeanDefinitionReader【XmlBeanDefinitionReader、PropertiesBeanDefinitionReader、GroovyBeanDefinitionReader】，接着设置Reader的属性，然后初始化Reader【空的方法，可以扩展】，最后加载。首先获取需要加载的配置文件，获取文件的Resources；遍历加载对应的Resources。转换为EncodedResource。获取对应xml文件的Document对象。
+		。注册过程：解析xml，
+		
+
+		
+		1、获取xml文件对应的输入流，并解析对应的Document的对象。
+					【衍生问题？1：xml是如何解析的?】
+					
+					
+		2、注册过程。解析过程发生在DefaultBeanDefinitionDocumentReader类中，
+				判断对应的Element是否是默认的命名空间。------ 如果是默认的     ---》  三种【import、alias、bean】三种element处理过程，【beans】进行递归。 
+												       ------ 如果不是默认的   ---》  获取响应的element所对应的命名空间，并创建NamespaceHandler，然后进行解析。
+													   
+		3、<bean>的解析过程?
+			首先根据className、parent、classLoader创建对应BeanDefinition，并设置attribute、metaElement、propriety等等。
+			接着生成BeanName并构建BeanDefinitionHolder对象，如果需要装饰AbstractBeanDefinition进行装饰操作。
+			然后把BeanDefinition注册到BeanDefinitionRegistry（DefaultListableBeanFactory)中。
+			
+		
+// 获取刷新的BeanFactory
+location：AbstractApplicationContext
+protected ConfigurableListableBeanFactory obtainFreshBeanFactory() {
+	refreshBeanFactory();
+	
+	// 获取上一步初始化过的BeanFactory。
+	ConfigurableListableBeanFactory beanFactory = getBeanFactory();
+	if (logger.isDebugEnabled()) {
+		logger.debug("Bean factory for " + getDisplayName() + ": " + beanFactory);
+	}
+	return beanFactory;
+}
+
+// 刷新BeanFactory。??什么情况下回去找GenericApplicationContext??
+location：AbstractRefreshableApplicationContext
+protected final void refreshBeanFactory() throws BeansException {
+	// 判断是否已经存在BeanFactory
+	if (hasBeanFactory()) {
+		// 如果已经存在BeanFactory销毁Bean并关闭BeanFactory。
+		destroyBeans();
+		closeBeanFactory();
+	}
+	
+	try {
+		// 创建【DefaultListableBeanFactory】实例。
+		DefaultListableBeanFactory beanFactory = createBeanFactory();
+		// 设置BeanFactory的ID
+		beanFactory.setSerializationId(getId());
+		
+		// 设置allowBeanDefinitionOverriding（是否允许覆盖注册）和allowCircularReferences（是否允许循环引用）
+		customizeBeanFactory(beanFactory);
+		
+		// 加载BeanDefinition【这是一个很重要的过程】
+		loadBeanDefinitions(beanFactory);
+		
+		// 把初始化成功的BeanFactory复制给AbstractApplicationContext中变量BeanFactory。
+		synchronized (this.beanFactoryMonitor) {
+			this.beanFactory = beanFactory;
+		}
+	} catch (IOException ex) {
+		throw new ApplicationContextException("I/O error parsing bean definition source for " + getDisplayName(), ex);
+	}
+}
+
+// 初始化时：DefaultListableBeanFactory的实例，
+location：DefaultListableBeanFactory
+protected DefaultListableBeanFactory createBeanFactory() {
+	// 注意DefaultListableBeanFactory对象的初始化过程。初始化getInternalParentBeanFactory()为null
+	// DefaultListableBeanFactory的初始化过程是什么样的。
+	return new DefaultListableBeanFactory(getInternalParentBeanFactory());
+}
+
+// 
+protected void customizeBeanFactory(DefaultListableBeanFactory beanFactory) {
+	// allowBeanDefinitionOverriding：是否ryunxu允许覆盖注册。
+	if (this.allowBeanDefinitionOverriding != null) {
+		beanFactory.setAllowBeanDefinitionOverriding(this.allowBeanDefinitionOverriding);
+	}
+	// allowCircularReferences是否循环应用。
+	if (this.allowCircularReferences != null) {
+		beanFactory.setAllowCircularReferences(this.allowCircularReferences);
+	}
+}
+
+
+############################### 加载过程开始   ########################################
+############################### 加载过程开始   ########################################
+
+// 不同的ApplicationContext有不同的处理方式。其他几种方式：AnnotationConfigWebApplication、GroovyWebApplicationContext、AbstractXmlApplicationContext
+location：XmlWebApplicationContext
+protected void loadBeanDefinitions(DefaultListableBeanFactory beanFactory) throws BeansException, IOException {
+	// 为BeanFactory创建一个新的XmlBeanDefinitionReader实例  ==========    XmlBeanDefinitionReader中包含DefaultListableBeanFactory
+	XmlBeanDefinitionReader beanDefinitionReader = new XmlBeanDefinitionReader(beanFactory);
+
+	// 用这个Context资源加载环境配置beanDefinitionReader。getEnvironment是获取XmlWebApplicationContext的环境。
+	beanDefinitionReader.setEnvironment(getEnvironment());
+	beanDefinitionReader.setResourceLoader(this);
+	beanDefinitionReader.setEntityResolver(new ResourceEntityResolver(this));
+
+	// 初始化beanDefinitionReader，允许子类提供自定义初始化的reader然后继续加载实际的beanDefinition ￥可进行拓展￥
+	initBeanDefinitionReader(beanDefinitionReader);
+	
+	// 加载过程BeanDefinition
+	loadBeanDefinitions(beanDefinitionReader);
+}
+
+// 加载BeanDefinition
+location：XmlWebApplicationContext。
+protected void loadBeanDefinitions(XmlBeanDefinitionReader reader) throws IOException {
+	String[] configLocations = getConfigLocations();
+	if (configLocations != null) {
+		for (String configLocation : configLocations) {
+			reader.loadBeanDefinitions(configLocation);
+		}
+	}
+}	
+
+// 获取加载资源的路径。
+location：AbstractRefreshWebApplicationContext
+public String[] getConfigLocations() {
+	return super.getConfigLocations();
+}
+		    ||
+			\/
+
+// configLocations就是web.xml配置的contextConfigLocation参数
+location：AbstractRefreshableConfigApplicationContext			
+protected String[] getConfigLocations() {
+	return (this.configLocations != null ? this.configLocations : getDefaultConfigLocations());
+}	
+
+
+// 加载过程BeanDefinition
+location：AbstractBeanDefinitionReader
+public int loadBeanDefinitions(String location) throws BeanDefinitionStoreException {
+	return loadBeanDefinitions(location, null);
+}	
+
+// 初始化BeanDefinitionReader把XmlWebApplicationContext赋值给resourceLoader
+location：AbstractBeanDefinitionReader
+public int loadBeanDefinitions(String location, Set<Resource> actualResources) throws BeanDefinitionStoreException {
+
+	// 获取初始化BeanDefinitionReader的resourceLoader。这里为XmlWebApplicationContext实例。
+	ResourceLoader resourceLoader = getResourceLoader();
+
+	if (resourceLoader == null) {
+		throw new BeanDefinitionStoreException("Cannot import bean definitions from location [" + location + "]: no ResourceLoader available");
+	}
+
+	// 判断是否是ResourcePatternResolver子类，XmlWebApplicationContext是其子类
+	if (resourceLoader instanceof ResourcePatternResolver) {
+		// Resource pattern matching available.
+		try {
+			// 获取所有需要加载资源的所有资源路径
+			Resource[] resources = ((ResourcePatternResolver) resourceLoader).getResources(location);
+			
+			// 【重点】loadCount初始化总数。
+			int loadCount = loadBeanDefinitions(resources);
+
+			// actualResources是否为null。判断是否处理完成。
+			if (actualResources != null) {
+				for (Resource resource : resources) {
+					actualResources.add(resource);
+				}
+			}
+
+			if (logger.isDebugEnabled()) {
+				logger.debug("Loaded " + loadCount + " bean definitions from location pattern [" + location + "]");
+			}
+			
+			// 返回加载的加载的BeanDefinition的个数。
+			return loadCount;
+		} catch (IOException ex) {
+			throw new BeanDefinitionStoreException(
+					"Could not resolve bean definition resource pattern [" + location + "]", ex);
+		}
+	} else {
+		// 只能通过绝对URL加载单个资源。
+		Resource resource = resourceLoader.getResource(location);
+		int loadCount = loadBeanDefinitions(resource);
+		if (actualResources != null) {
+			actualResources.add(resource);
+		}
+		if (logger.isDebugEnabled()) {
+			logger.debug("Loaded " + loadCount + " bean definitions from location [" + location + "]");
+		}
+		return loadCount;
+	}
+}
+
+
+location：AbstractApplicationContext
+public Resource[] getResources(String locationPattern) throws IOException {
+	return this.resourcePatternResolver.getResources(locationPattern);
+}
+			||
+			\/
+
+// 通过路径，加载资源的过程。
+location：PathMathingResourcePatternResolver
+public Resource[] getResources(String locationPattern) throws IOException {
+	Assert.notNull(locationPattern, "Location pattern must not be null");
+	// 判断是否是“classpath*：”开头
+	if (locationPattern.startsWith(CLASSPATH_ALL_URL_PREFIX)) {
+		// 判断是否使用通配符了
+		if (getPathMatcher().isPattern(locationPattern.substring(CLASSPATH_ALL_URL_PREFIX.length()))) {
+			// 处理
+			return findPathMatchingResources(locationPattern);
+		} else {
+			// all class path resources with the given name
+			return findAllClassPathResources(locationPattern.substring(CLASSPATH_ALL_URL_PREFIX.length()));
+		}
+	} else {
+		// Generally only look for a pattern after a prefix here,
+		// and on Tomcat only after the "*/" separator for its "war:" protocol.
+		int prefixEnd = (locationPattern.startsWith("war:") ? locationPattern.indexOf("*/") + 1 : locationPattern.indexOf(":") + 1);
+		if (getPathMatcher().isPattern(locationPattern.substring(prefixEnd))) {
+			// a file pattern
+			return findPathMatchingResources(locationPattern);
+		}
+		else {
+			// a single resource with the given name
+			return new Resource[] {getResourceLoader().getResource(locationPattern)};
+		}
+	}
+}
+
+// 把所有可以匹配的Resource找出来
+location：PathMathingResourcePatternResolver
+protected Resource[] findPathMatchingResources(String locationPattern) throws IOException {
+	// 获取配置文件路径
+	String rootDirPath = determineRootDir(locationPattern);
+	// 通配符的文件名
+	String subPattern = locationPattern.substring(rootDirPath.length());
+	// 加载所有资源路径
+	Resource[] rootDirResources = getResources(rootDirPath);
+	Set<Resource> result = new LinkedHashSet<Resource>(16);
+	for (Resource rootDirResource : rootDirResources) {
+		// 参数是什么返回什么
+		rootDirResource = resolveRootDirResource(rootDirResource);
+		// 获取URL
+		URL rootDirURL = rootDirResource.getURL();
+		
+		// 初始化时为null
+		if (equinoxResolveMethod != null) {
+			if (rootDirURL.getProtocol().startsWith("bundle")) {
+				rootDirURL = (URL) ReflectionUtils.invokeMethod(equinoxResolveMethod, null, rootDirURL);
+				rootDirResource = new UrlResource(rootDirURL);
+			}
+		}
+		// 不同的处理方式
+		if (rootDirURL.getProtocol().startsWith(ResourceUtils.URL_PROTOCOL_VFS)) {
+			result.addAll(VfsResourceMatchingDelegate.findMatchingResources(rootDirURL, subPattern, getPathMatcher()));
+		} else if (ResourceUtils.isJarURL(rootDirURL) || isJarResource(rootDirResource)) {
+			result.addAll(doFindPathMatchingJarResources(rootDirResource, rootDirURL, subPattern));
+		} else {
+			// 获取所有的匹配的文件
+			result.addAll(doFindPathMatchingFileResources(rootDirResource, subPattern));
+		}
+	}
+	if (logger.isDebugEnabled()) {
+		logger.debug("Resolved location pattern [" + locationPattern + "] to resources " + result);
+	}
+	return result.toArray(new Resource[result.size()]);
+}
+
+// 获取配置文件路径
+location：PathMathingResourcePatternResolver
+protected String determineRootDir(String location) {
+	int prefixEnd = location.indexOf(":") + 1;
+	int rootDirEnd = location.length();
+	while (rootDirEnd > prefixEnd && getPathMatcher().isPattern(location.substring(prefixEnd, rootDirEnd))) {
+		rootDirEnd = location.lastIndexOf('/', rootDirEnd - 2) + 1;
+	}
+	if (rootDirEnd == 0) {
+		rootDirEnd = prefixEnd;
+	}
+	return location.substring(0, rootDirEnd);
+}
+
+//
+location：PathMathingResourcePatternResolver
+protected Resource[] findAllClassPathResources(String location) throws IOException {
+	String path = location;
+	// 判断是否是不是“/”开始的，如果是的话，去除第一个“/”继续执行，所有classpath*:后面写不写“/”没有影响。
+	if (path.startsWith("/")) {
+		path = path.substring(1);
+	}
+	// 返回给定路径下的资源集合
+	Set<Resource> result = doFindAllClassPathResources(path);
+	if (logger.isDebugEnabled()) {
+		logger.debug("Resolved classpath location [" + location + "] to resources " + result);
+	}
+	return result.toArray(new Resource[result.size()]);
+}
+
+// 获取所有的给定路径的所有资源。
+location：PathMathingResourcePatternResolver
+protected Set<Resource> doFindAllClassPathResources(String path) throws IOException {
+	Set<Resource> result = new LinkedHashSet<Resource>(16);
+
+	// 获取XmlWebApplicationContext的ClassLoader
+	ClassLoader cl = getClassLoader();
+
+	// 根据ClassLoader获取给定更目录下的URL
+	Enumeration<URL> resourceUrls = (cl != null ? cl.getResources(path) : ClassLoader.getSystemResources(path));
+	while (resourceUrls.hasMoreElements()) {
+		URL url = resourceUrls.nextElement();
+		result.add(convertClassLoaderURL(url));
+	}
+	
+	if ("".equals(path)) {
+		// 上述结果可能不完整，即仅包含文件系统引用。 我们需要指向类路径上的每个jar文件的指针.
+		addAllClassLoaderJarRoots(cl, result);
+	}
+	return result;
+}
+
+// 获取的获取所有的匹配的文件 rootDirResource  subPattern：*.xml
+protected Set<Resource> doFindPathMatchingFileResources(Resource rootDirResource, String subPattern) throws IOException {
+
+	File rootDir;
+	try {
+		rootDir = rootDirResource.getFile().getAbsoluteFile();
+	}
+	catch (IOException ex) {
+		if (logger.isWarnEnabled()) {
+			logger.warn("Cannot search for matching files underneath " + rootDirResource + " because it does not correspond to a directory in the file system", ex);
+		}
+		return Collections.emptySet();
+	}
+	return doFindMatchingFileSystemResources(rootDir, subPattern);
+}
+
+
+protected Set<Resource> doFindMatchingFileSystemResources(File rootDir, String subPattern) throws IOException {
+	if (logger.isDebugEnabled()) {
+		logger.debug("Looking for matching resources in directory tree [" + rootDir.getPath() + "]");
+	}
+	// 获取所有匹配的文件
+	Set<File> matchingFiles = retrieveMatchingFiles(rootDir, subPattern);
+	Set<Resource> result = new LinkedHashSet<Resource>(matchingFiles.size());
+	// 封装（转换格式）
+	for (File file : matchingFiles) {
+		result.add(new FileSystemResource(file));
+	}
+	return result;
+}
+
+
+// 通过给定文件路径和通配符，检索匹配的文件
+protected Set<File> retrieveMatchingFiles(File rootDir, String pattern) throws IOException {
+	// 判断文件是否存在
+	if (!rootDir.exists()) {
+		if (logger.isDebugEnabled()) {
+			logger.debug("Skipping [" + rootDir.getAbsolutePath() + "] because it does not exist");
+		}
+		return Collections.emptySet();
+	}
+	
+	// 判断可是文件夹
+	if (!rootDir.isDirectory()) {
+		// Complain louder if it exists but is no directory.
+		if (logger.isWarnEnabled()) {
+			logger.warn("Skipping [" + rootDir.getAbsolutePath() + "] because it does not denote a directory");
+		}
+		return Collections.emptySet();
+	}
+	
+	// 判断是否可读
+	if (!rootDir.canRead()) {
+		if (logger.isWarnEnabled()) {
+			logger.warn("Cannot search for matching files underneath directory [" + rootDir.getAbsolutePath() + "] because the application is not allowed to read the directory");
+		}
+		return Collections.emptySet();
+	}
+	String fullPattern = StringUtils.replace(rootDir.getAbsolutePath(), File.separator, "/");
+	if (!pattern.startsWith("/")) {
+		fullPattern += "/";
+	}
+	// 替换\ 为 / 
+	fullPattern = fullPattern + StringUtils.replace(pattern, File.separator, "/");
+	Set<File> result = new LinkedHashSet<File>(8);
+	// 获取文件夹下的所有匹配的文件
+	doRetrieveMatchingFiles(fullPattern, rootDir, result);
+	return result;
+}
+
+// 获取给定文件夹下给定文件名的所有文件
+protected void doRetrieveMatchingFiles(String fullPattern, File dir, Set<File> result) throws IOException {
+	if (logger.isDebugEnabled()) {
+		logger.debug("Searching directory [" + dir.getAbsolutePath() + "] for files matching pattern [" + fullPattern + "]");
+	}
+	// 获取文件夹下的所有文件。
+	File[] dirContents = dir.listFiles();
+	// 判断是否有文件
+	if (dirContents == null) {
+		if (logger.isWarnEnabled()) {
+			logger.warn("Could not retrieve contents of directory [" + dir.getAbsolutePath() + "]");
+		}
+		return;
+	}
+	Arrays.sort(dirContents);
+	
+	for (File content : dirContents) {
+		// 获取路径的字符串并把\ 替换为 /
+		String currPath = StringUtils.replace(content.getAbsolutePath(), File.separator, "/");
+		// content是否是文件夹 &&  是否匹配
+		if (content.isDirectory() && getPathMatcher().matchStart(fullPattern, currPath + "/")) {
+			// 是否可读
+			if (!content.canRead()) {
+				if (logger.isDebugEnabled()) {
+					logger.debug("Skipping subdirectory [" + dir.getAbsolutePath() + "] because the application is not allowed to read the directory");
+				}
+			} else {
+				doRetrieveMatchingFiles(fullPattern, content, result);
+			}
+		}
+		// 判断获取的文件是否满足给地的通配符匹配
+		if (getPathMatcher().match(fullPattern, currPath)) {
+			result.add(content);
+		}
+	}
+}
+
+
+########### 2-1 loaderBeandefinitions  #############
+
+location：AbstractBeanDefinitionReader
+public int loadBeanDefinitions(Resource... resources) throws BeanDefinitionStoreException {
+	Assert.notNull(resources, "Resource array must not be null");
+	int counter = 0;
+	for (Resource resource : resources) {
+		counter += loadBeanDefinitions(resource);
+	}
+	return counter;
+}
+
+		||
+		\/
+location：XmlWebBeanDefinition
+public int loadBeanDefinitions(Resource resource) throws BeanDefinitionStoreException {
+	return loadBeanDefinitions(new EncodedResource(resource));
+}
+
+// 加载BeanDefinitions的具体步骤
+location：XmlWebBeanDefinition
+public int loadBeanDefinitions(EncodedResource encodedResource) throws BeanDefinitionStoreException {
+	Assert.notNull(encodedResource, "EncodedResource must not be null");
+	if (logger.isInfoEnabled()) {
+		logger.info("Loading XML bean definitions from " + encodedResource.getResource());
+	}
+
+	// 初始化操作为null
+	Set<EncodedResource> currentResources = this.resourcesCurrentlyBeingLoaded.get();
+	if (currentResources == null) {
+		currentResources = new HashSet<EncodedResource>(4);
+		this.resourcesCurrentlyBeingLoaded.set(currentResources);
+	}
+	
+	if (!currentResources.add(encodedResource)) {
+		throw new BeanDefinitionStoreException("Detected cyclic loading of " + encodedResource + " - check your import definitions!");
+	}
+	
+	
+	try {
+		// 获取对应文件的输入流
+		InputStream inputStream = encodedResource.getResource().getInputStream();
+		try {
+			InputSource inputSource = new InputSource(inputStream);
+			
+			// 对应的Resources是否设置编码格式。
+			if (encodedResource.getEncoding() != null) {
+				inputSource.setEncoding(encodedResource.getEncoding());
+			}
+			return doLoadBeanDefinitions(inputSource, encodedResource.getResource());
+		} finally {
+			// 关闭流
+			inputStream.close();
+		}
+	} catch (IOException ex) {
+		throw new BeanDefinitionStoreException("IOException parsing XML document from " + encodedResource.getResource(), ex);
+	} finally {
+		// 从currentResources移除已经处理过的。
+		currentResources.remove(encodedResource);
+		if (currentResources.isEmpty()) {
+			this.resourcesCurrentlyBeingLoaded.remove();
+		}
+	}
+}
+
+// 加载xml中定义的Bean
+location：XmlBeanDefinitionsReader
+protected int doLoadBeanDefinitions(InputSource inputSource, Resource resource) throws BeanDefinitionStoreException {
+	try {
+		// 这是一个很繁琐的过程，可以看一下如何解析XML文件的。
+		Document doc = doLoadDocument(inputSource, resource);
+		
+		// 注册BeanDefinitions
+		return registerBeanDefinitions(doc, resource);
+	} catch (BeanDefinitionStoreException ex) {
+		throw ex;
+	} catch (SAXParseException ex) {
+		throw new XmlBeanDefinitionStoreException(resource.getDescription(), "Line " + ex.getLineNumber() + " in XML document from " + resource + " is invalid", ex);
+	} catch (SAXException ex) {
+		throw new XmlBeanDefinitionStoreException(resource.getDescription(), "XML document from " + resource + " is invalid", ex);
+	} catch (ParserConfigurationException ex) {
+		throw new BeanDefinitionStoreException(resource.getDescription(), "Parser configuration exception parsing XML from " + resource, ex);
+	} catch (IOException ex) {
+		throw new BeanDefinitionStoreException(resource.getDescription(), "IOException parsing XML document from " + resource, ex);
+	} catch (Throwable ex) {
+		throw new BeanDefinitionStoreException(resource.getDescription(), "Unexpected exception parsing XML document from " + resource, ex);
+	}
+}
+
+// 解析XMl过程
+protected Document doLoadDocument(InputSource inputSource, Resource resource) throws Exception {
+	return this.documentLoader.loadDocument(inputSource, getEntityResolver(), this.errorHandler, getValidationModeForResource(resource), isNamespaceAware());
+}
+
+
+// 根据某一个.xml文件的封装的Document对象和resource来注册BeanDefinition
+location：XmlBeanDefinitionReader
+public int registerBeanDefinitions(Document doc, Resource resource) throws BeanDefinitionStoreException {
+	// 创建BeanDefinitionDocumentReader对象
+	BeanDefinitionDocumentReader documentReader = createBeanDefinitionDocumentReader();
+	
+	// getRegistry获取初始化BeanDefinitionReader是传入的XmlWebApplicationContext。获取已经初始化的BeanDefinition的个数。
+	int countBefore = getRegistry().getBeanDefinitionCount();
+	
+	// 
+	documentReader.registerBeanDefinitions(doc, createReaderContext(resource));
+	return getRegistry().getBeanDefinitionCount() - countBefore;
+}
+
+// 创建BeanDefinitionDocumentReader对象
+location：XmlBeanDefinitionReader
+protected BeanDefinitionDocumentReader createBeanDefinitionDocumentReader() {	
+	// Class.cast(zlass)将Class对象强转为zlass对象表示的对象和接口。this.documentReaderClass = DefaultBeanDefinitionDocumentReader
+	// instantiateClass方法使用无参构造函数实例化一个对象。
+	return BeanDefinitionDocumentReader.class.cast(BeanUtils.instantiateClass(this.documentReaderClass));
+}
+
+// 创建XmlReaderContext
+location：XmlBeanDefinitionReader
+public XmlReaderContext createReaderContext(Resource resource) {
+	return new XmlReaderContext(resource, this.problemReporter, this.eventListener, this.sourceExtractor, this(XmlBeanDefinitionReader), getNamespaceHandlerResolver());
+}
+
+// 注册BeanDefinition
+location：DefaultBeanDefinitionDocumentReader。
+public void registerBeanDefinitions(Document doc, XmlReaderContext readerContext) {
+	// 【【XmlReaderContext readerContext包含XmlBeanDefinitionReader。XmlBeanDefinitionReader中包含DefaultListableBeanFactory】】
+	this.readerContext = readerContext;
+	logger.debug("Loading bean definitions");
+	Element root = doc.getDocumentElement();
+	doRegisterBeanDefinitions(root);
+}
+
+location：DefaultBeanDefinitionDocumentReader。
+protected void doRegisterBeanDefinitions(Element root) {
+	//任何<beans>标签中的元素都将递归调用这个方法。为了传播和保留当前的<beans> default-*属性。请跟踪当前(父)
+	// delegate，该委托可以为null。通过应用父委托创建一个新的子delegate为了回退，然后最终将this.dalegate回退为原始父类
+	// 引用。此行为模拟了一堆代理，而实际上并不需要一个代理。 BeanDefinitionParserDelegate parent = this.delegate;
+
+	// BeanDefinitionParserDelegate有状态代理类用于解析XML bean的定义。
+
+	BeanDefinitionParserDelegate parent = this.delegate;
+	this.delegate = createDelegate(getReaderContext(), root, parent);
+
+	if (this.delegate.isDefaultNamespace(root)) {
+		
+		// profile设置用于设置环境切换。 
+		String profileSpec = root.getAttribute(PROFILE_ATTRIBUTE);
+		
+		// 是否配合了profile。
+		if (StringUtils.hasText(profileSpec)) {
+			String[] specifiedProfiles = StringUtils.tokenizeToStringArray(profileSpec, BeanDefinitionParserDelegate.MULTI_VALUE_ATTRIBUTE_DELIMITERS);
+			if (!getReaderContext().getEnvironment().acceptsProfiles(specifiedProfiles)) {
+				if (logger.isInfoEnabled()) {
+					logger.info("Skipped XML bean definition file due to specified profiles [" + profileSpec + "] not matching: " + getReaderContext().getResource());
+				}
+				return;
+			}
+		}
+	}
+
+	// 前置没有做任何处理。
+	preProcessXml(root);
+	// 解析处理
+	parseBeanDefinitions(root, this.delegate);
+	// 后置处理。
+	postProcessXml(root);
+
+	this.delegate = parent;
+}
+
+// 创建BeanDefinitionParserDelegate。
+location：BeanDefinitionParserDelegate
+protected BeanDefinitionParserDelegate createDelegate(XmlReaderContext readerContext, Element root, BeanDefinitionParserDelegate parentDelegate) {
+	
+	BeanDefinitionParserDelegate delegate = new BeanDefinitionParserDelegate(readerContext);
+	delegate.initDefaults(root, parentDelegate);
+	return delegate;
+}
+
+// 初始化默认的lazy-init，autowire，依赖性检查设置，init-method，destroy-method和merge设置。 如果未在本地显式设置默认值，则通过回退到给定父级来支持嵌套的“beans”元素用例。
+location：BeanDefinitionParserDelegate
+public void initDefaults(Element root, BeanDefinitionParserDelegate parent) {
+	populateDefaults(this.defaults, (parent != null ? parent.defaults : null), root);
+	this.readerContext.fireDefaultsRegistered(this.defaults);
+}
+
+protected void populateDefaults(DocumentDefaultsDefinition defaults, DocumentDefaultsDefinition parentDefaults, Element root) {
+	// DEFAULT_LAZY_INIT_ATTRIBUTE = default-lazy-init 
+	String lazyInit = root.getAttribute(DEFAULT_LAZY_INIT_ATTRIBUTE);
+	
+	// DEFAULT_VALUE = default;
+	if (DEFAULT_VALUE.equals(lazyInit)) {
+		// Potentially inherited from outer <beans> sections, otherwise falling back to false.
+		lazyInit = (parentDefaults != null ? parentDefaults.getLazyInit() : FALSE_VALUE);
+	}
+	
+	// 设置懒加载为 false。XmlWebApplicationContext初始化加载，ClassPathXMLApplicationContext默认为加载为懒加载。
+	defaults.setLazyInit(lazyInit);
+
+	String merge = root.getAttribute(DEFAULT_MERGE_ATTRIBUTE);
+	if (DEFAULT_VALUE.equals(merge)) {
+		// 可能继承自外部<beans>部分，否则会回落为false。
+		merge = (parentDefaults != null ? parentDefaults.getMerge() : FALSE_VALUE);
+	}
+	defaults.setMerge(merge);
+
+	String autowire = root.getAttribute(DEFAULT_AUTOWIRE_ATTRIBUTE);
+	if (DEFAULT_VALUE.equals(autowire)) {
+		// 可能从外部<beans>部分继承，否则回落到'否'。
+		autowire = (parentDefaults != null ? parentDefaults.getAutowire() : AUTOWIRE_NO_VALUE);
+	}
+
+	defaults.setAutowire(autowire);
+
+	// 不要回退到parentDefaults进行依赖检查，因为从3.0开始不再支持<beans>。 因此，没有嵌套的<beans>需要回退到它。
+	defaults.setDependencyCheck(root.getAttribute(DEFAULT_DEPENDENCY_CHECK_ATTRIBUTE));
+
+	if (root.hasAttribute(DEFAULT_AUTOWIRE_CANDIDATES_ATTRIBUTE)) {
+		defaults.setAutowireCandidates(root.getAttribute(DEFAULT_AUTOWIRE_CANDIDATES_ATTRIBUTE));
+	} else if (parentDefaults != null) {
+		defaults.setAutowireCandidates(parentDefaults.getAutowireCandidates());
+	}
+
+	if (root.hasAttribute(DEFAULT_INIT_METHOD_ATTRIBUTE)) {
+		defaults.setInitMethod(root.getAttribute(DEFAULT_INIT_METHOD_ATTRIBUTE));
+	} else if (parentDefaults != null) {
+		defaults.setInitMethod(parentDefaults.getInitMethod());
+	}
+
+	if (root.hasAttribute(DEFAULT_DESTROY_METHOD_ATTRIBUTE)) {
+		defaults.setDestroyMethod(root.getAttribute(DEFAULT_DESTROY_METHOD_ATTRIBUTE));
+	} else if (parentDefaults != null) {
+		defaults.setDestroyMethod(parentDefaults.getDestroyMethod());
+	}
+
+	defaults.setSource(this.readerContext.extractSource(root));
+}
+
+location：AbstractBeanDefinitionReader
+public int loadBeanDefinitions(Resource... resources) throws BeanDefinitionStoreException {
+	Assert.notNull(resources, "Resource array must not be null");
+	int counter = 0;
+	for (Resource resource : resources) {
+		counter += loadBeanDefinitions(resource);
+	}
+	return counter;
+}
+
+
+location：AbstractBeanDefinitionReader
+public int loadBeanDefinitions(EncodedResource encodedResource) throws BeanDefinitionStoreException {
+	Assert.notNull(encodedResource, "EncodedResource must not be null");
+	if (logger.isInfoEnabled()) {
+		logger.info("Loading XML bean definitions from " + encodedResource.getResource());
+	}
+
+	Set<EncodedResource> currentResources = this.resourcesCurrentlyBeingLoaded.get();
+	// 初始化为null
+	if (currentResources == null) {
+		currentResources = new HashSet<EncodedResource>(4);
+		this.resourcesCurrentlyBeingLoaded.set(currentResources);
+	}
+	if (!currentResources.add(encodedResource)) {
+		throw new BeanDefinitionStoreException("Detected cyclic loading of " + encodedResource + " - check your import definitions!");
+	}
+	try {
+		InputStream inputStream = encodedResource.getResource().getInputStream();
+		try {
+			InputSource inputSource = new InputSource(inputStream);
+			
+			// 设置编码格式
+			if (encodedResource.getEncoding() != null) {
+				inputSource.setEncoding(encodedResource.getEncoding());
+			}
+			
+			// 【加载BeanDefinition真正实施过程】。
+			return doLoadBeanDefinitions(inputSource, encodedResource.getResource());
+		} finally {
+			inputStream.close();
+		}
+	} catch (IOException ex) {
+		throw new BeanDefinitionStoreException("IOException parsing XML document from " + encodedResource.getResource(), ex);
+	} finally {
+		currentResources.remove(encodedResource);
+		if (currentResources.isEmpty()) {
+			this.resourcesCurrentlyBeingLoaded.remove();
+		}
+	}
+}
+
+
+// 实施加载的过程
+location：XmlBeanDefinitionReader  391
+protected int doLoadBeanDefinitions(InputSource inputSource, Resource resource) throws BeanDefinitionStoreException {
+	try {
+		// 解析xml过程
+		Document doc = doLoadDocument(inputSource, resource);
+		
+		// 注册BeanDefinition过程
+		return registerBeanDefinitions(doc, resource);
+	} catch (BeanDefinitionStoreException ex) {
+		throw ex;
+	} catch (SAXParseException ex) {
+		throw new XmlBeanDefinitionStoreException(resource.getDescription(), "Line " + ex.getLineNumber() + " in XML document from " + resource + " is invalid", ex);
+	} catch (SAXException ex) {
+		throw new XmlBeanDefinitionStoreException(resource.getDescription(), "XML document from " + resource + " is invalid", ex);
+	} catch (ParserConfigurationException ex) {
+		throw new BeanDefinitionStoreException(resource.getDescription(), "Parser configuration exception parsing XML from " + resource, ex);
+	} catch (IOException ex) {
+		throw new BeanDefinitionStoreException(resource.getDescription(), "IOException parsing XML document from " + resource, ex);
+	} catch (Throwable ex) {
+		throw new BeanDefinitionStoreException(resource.getDescription(), "Unexpected exception parsing XML document from " + resource, ex);
+	}
+}
+
+// 将Resource资源转化为Document对象。
+location：【了解XMl的解析过程】
+protected Document doLoadDocument(InputSource inputSource, Resource resource) throws Exception {
+	return this.documentLoader.loadDocument(inputSource, getEntityResolver(), this.errorHandler, getValidationModeForResource(resource), isNamespaceAware());
+}
+
+// 实际加载过程，通过创建DocumentBuilderFactory创建对应DocumentBuilder进行解析对应的XML的输入流。
+location：DefaultDocumentLoader
+public Document loadDocument(InputSource inputSource, EntityResolver entityResolver, ErrorHandler errorHandler, int validationMode, boolean namespaceAware) throws Exception {
+
+	DocumentBuilderFactory factory = createDocumentBuilderFactory(validationMode, namespaceAware);
+	if (logger.isDebugEnabled()) {
+		logger.debug("Using JAXP provider [" + factory.getClass().getName() + "]");
+	}
+	
+	// 使用factory创建DocumentBuilder
+	DocumentBuilder builder = createDocumentBuilder(factory, entityResolver, errorHandler);
+	
+	// 把Xml对象解析为Document对象，这是JDK的接口，可以学习一下。
+	return builder.parse(inputSource);
+}
+
+
+// 创建DocumentBuilder并设置属性值。
+location：DefaultDocumentLoader
+protected DocumentBuilderFactory createDocumentBuilderFactory(int validationMode, boolean namespaceAware) throws ParserConfigurationException {
+	
+	DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+	
+	// 设置生成的解析器是将提供XML命名空间支持,默认为false；【可以看一下JDK的DocumentBuilderFactory】
+	factory.setNamespaceAware(namespaceAware);
+
+	// 设置XML验证类型：NONE = 0(表示禁用验证)；AUTO = 1(自动验证,可能在某些特殊字符上堵塞)；
+	// 				    DTD = 2(使用DTD验证)；XSD = 3(使用XSD验证,xml schema,有命名空间)
+	// 这里validationMode=XSD,在初始化initBeanDefinitionReader()是设置为ture,即为XSD
+	if (validationMode != XmlValidationModeDetector.VALIDATION_NONE) {
+	
+		// 开启验证
+		factory.setValidating(true);
+		
+		if (validationMode == XmlValidationModeDetector.VALIDATION_XSD) {
+			// 设置命名空间感知
+			factory.setNamespaceAware(true);
+			try {
+				factory.setAttribute(SCHEMA_LANGUAGE_ATTRIBUTE, XSD_SCHEMA_LANGUAGE);
+			} catch (IllegalArgumentException ex) {
+				ParserConfigurationException pcex = new ParserConfigurationException("Unable to validate using XSD: Your JAXP provider [" + factory +
+						"] does not support XML Schema. Are you running on Java 1.4 with Apache Crimson? " + "Upgrade to Apache Xerces (or Java 1.5) for full XSD support.");
+				pcex.initCause(ex);
+				throw pcex;
+			}
+		}
+	}
+
+	return factory;
+}
+
+location：XmlBeanDefinitionReader
+// xml解析得到Document对象,注册得到的BeanDefinition
+public int registerBeanDefinitions(Document doc, Resource resource) throws BeanDefinitionStoreException {
+	// 创建BeanDefinitionDocumentReader,默认为DefaultBeanDefinitionDocumentReader
+	BeanDefinitionDocumentReader documentReader = createBeanDefinitionDocumentReader();
+	
+	// 在loadBeanDefinitions方法中创建一个XmlBeanDefinitionReader实例,在初始化的时候会把DefaultListableBeanFactory传过去。
+	// registry 为传过来的DefaultListableBeanFactory。
+	int countBefore = getRegistry().getBeanDefinitionCount();
+	
+	// [01_XMLReaderContext]
+	documentReader.registerBeanDefinitions(doc, createReaderContext(resource));
+	return getRegistry().getBeanDefinitionCount() - countBefore;
+}
+
+// 创建XmlReaderContext对象是实例[01_XMLReaderContext]
+public XmlReaderContext createReaderContext(Resource resource) {
+	// problemReporter = FailFastProblemReporter; eventListener = EmptyReaderEventListener,sourceExtractor = NullSourceExtractor'
+	// this = XmlBeanDefinitionReader; DefaultNamespaceHandlerResolver
+	return new XmlReaderContext(resource, this.problemReporter, this.eventListener, this.sourceExtractor, this, getNamespaceHandlerResolver());
+}
+
+// 将XML转化得到的Document对象，把其中注册得到的Bean先注册为BeanDefinition。
+location：XmlReaderContext
+public void registerBeanDefinitions(Document doc, XmlReaderContext readerContext) {
+	this.readerContext = readerContext;
+	logger.debug("Loading bean definitions");
+	Element root = doc.getDocumentElement();
+	doRegisterBeanDefinitions(root);
+}
+
+【【承接上一个txt文件内容】】
+protected void doRegisterBeanDefinitions(Element root) {
+	
+	// 任何嵌套的<beans>元素都将导致此方法中的递归。 为了正确传播和保留<beans> default- *属性，
+	// 请跟踪当前（父）委托，该委托可以为null。 创建新的（子）委托，引用父项以进行回退，然后最终
+	// 将this.delegate重置为其原始（父）引用。 此行为模拟了一堆代理，而实际上并不需要一个代理。
+	BeanDefinitionParserDelegate parent = this.delegate;
+	
+	this.delegate = createDelegate(getReaderContext(), root, parent);
+
+	if (this.delegate.isDefaultNamespace(root)) {
+		String profileSpec = root.getAttribute(PROFILE_ATTRIBUTE);
+		if (StringUtils.hasText(profileSpec)) {
+			String[] specifiedProfiles = StringUtils.tokenizeToStringArray(profileSpec, BeanDefinitionParserDelegate.MULTI_VALUE_ATTRIBUTE_DELIMITERS);
+			if (!getReaderContext().getEnvironment().acceptsProfiles(specifiedProfiles)) {
+				if (logger.isInfoEnabled()) {
+					logger.info("Skipped XML bean definition file due to specified profiles [" + profileSpec + "] not matching: " + getReaderContext().getResource());
+				}
+				return;
+			}
+		}
+	}
+
+	//预处理
+	preProcessXml(root);
+	// 解析过程
+	parseBeanDefinitions(root, this.delegate);
+	// 后置处理
+	postProcessXml(root);
+
+	this.delegate = parent;
+}
+
+// 解析过程
+location：DefaultBeanDefinitionDocumentReader
+protected void parseBeanDefinitions(Element root, BeanDefinitionParserDelegate delegate) {
+	// 判断xml中的标签[也就是根节点<beans>]对应的命名空间是否是默认的命名空间,默认的命名空间为:http://www.springframework.org/schema/beans
+	if (delegate.isDefaultNamespace(root)) {
+		// 获取子节点集合
+		NodeList nl = root.getChildNodes();
+
+		// 遍历子节点。
+		for (int i = 0; i < nl.getLength(); i++) {
+			Node node = nl.item(i);
+			if (node instanceof Element) {
+				Element ele = (Element) node;
+
+				// 判断该子节点是否是默认xml命名空间设置的。默认的命名空间为：http://www.springframework.org/schema/beans
+				// 所有属于http://www.springframework.org/schema/beans的子节点都走默认解析过程。
+				if (delegate.isDefaultNamespace(ele)) {
+					parseDefaultElement(ele, delegate);
+
+				// 使用指定的BeanDefinitionParserDelegate
+				} else {
+					delegate.parseCustomElement(ele);
+				}
+			}
+		}
+	
+	// 使用给定的代理类解析。
+	} else {
+		delegate.parseCustomElement(root);
+	}
+}
+
+// =====>>>>http://www.springframework.org/schema/beans<<<<===== 命名空间的标签走的解析过程
+location：DefaultBeanDefinitionDocumentReader
+private void parseDefaultElement(Element ele, BeanDefinitionParserDelegate delegate) {
+	// <import>标签解析过程。
+	if (delegate.nodeNameEquals(ele, IMPORT_ELEMENT)) {
+		importBeanDefinitionResource(ele);
+	}
+
+	// <alias>标签解析过程。
+	else if (delegate.nodeNameEquals(ele, ALIAS_ELEMENT)) {
+		processAliasRegistration(ele);
+	} 
+	
+	// <bean>标签解析过程  请在本文搜索【第二个例子】查看Bean标签的解析过程。
+	else if (delegate.nodeNameEquals(ele, BEAN_ELEMENT)) {
+		processBeanDefinition(ele, delegate);
+	}
+	
+	// <beans>标签解析过程。
+	else if (delegate.nodeNameEquals(ele, NESTED_BEANS_ELEMENT)) {
+		// 在循环上一步。
+		doRegisterBeanDefinitions(ele);
+	}
+}
+
+// =====>>>> 【非】http://www.springframework.org/schema/beans  命名空间的标签走的解析过程<<<<===== 
+location：BeanDefinitionParserDelegate
+public BeanDefinition parseCustomElement(Element ele) {
+	return parseCustomElement(ele, null);
+}
+			||
+			||
+			\/
+location：BeanDefinitionParserDelegate
+public BeanDefinition parseCustomElement(Element ele, BeanDefinition containingBd) {
+	// 获取schema对应的namespace
+	String namespaceUri = getNamespaceURI(ele);
+	
+	// 这个this.readerContext是在DefaultBeanDefinitionsDocumentReader类的doRegisterBeanDefinitions方法的createDelegate(getReaderContext(), root, parent);
+	// 操作设置的。[01_XMLReaderContext]。XmlBeanDefinitionReader类的createReaderContext操作。
+	NamespaceHandler handler = this.readerContext.getNamespaceHandlerResolver().resolve(namespaceUri);
+
+	if (handler == null) {
+		error("Unable to locate Spring NamespaceHandler for XML schema namespace [" + namespaceUri + "]", ele);
+		return null;
+	}
+	// 使用对用的NamespaceHandler进行解析---->本文搜索[开始具体进行解析]
+	return handler.parse(ele, new ParserContext(this.readerContext, this, containingBd));
+}
+// =====>>>> 【非】http://www.springframework.org/schema/beans 结束
+
+
+// 通过命名空间获取对应的NamespaceHandler。
+public NamespaceHandler resolve(String namespaceUri) {
+	// 获取Map-->key：命名空间；key：对应的处理器。
+	Map<String, Object> handlerMappings = getHandlerMappings();
+	
+	// 通过命名空间获取对应的处理器
+	Object handlerOrClassName = handlerMappings.get(namespaceUri);
+	
+	if (handlerOrClassName == null) {
+		return null;
+	} else if (handlerOrClassName instanceof NamespaceHandler) {
+		return (NamespaceHandler) handlerOrClassName;
+	} else {
+		// 强转为String类型
+		String className = (String) handlerOrClassName;
+		try {
+			// 通过反射获取给定类的全限定名的Class对象
+			Class<?> handlerClass = ClassUtils.forName(className, this.classLoader);
+			
+			if (!NamespaceHandler.class.isAssignableFrom(handlerClass)) {
+				throw new FatalBeanException("Class [" + className + "] for namespace [" + namespaceUri + "] does not implement the [" + NamespaceHandler.class.getName() + "] interface");
+			}
+			
+			// 实例化NamespaceHandler的一个对象。
+			NamespaceHandler namespaceHandler = (NamespaceHandler) BeanUtils.instantiateClass(handlerClass);
+
+			// 初始化NamespaceHandler，以ContextNamespaceHandler为例
+			namespaceHandler.init();
+			
+			// 把初始化完成的NamespaceHandler放到Map中。
+			handlerMappings.put(namespaceUri, namespaceHandler);
+			return namespaceHandler;
+		} catch (ClassNotFoundException ex) {
+			throw new FatalBeanException("NamespaceHandler class [" + className + "] for namespace [" + namespaceUri + "] not found", ex);
+		} catch (LinkageError err) {
+			throw new FatalBeanException("Invalid NamespaceHandler class [" + className + "] for namespace [" + namespaceUri + "]: problem with handler class file or dependent class", err);
+		}
+	}
+}
+
+// 以ContextNamespaceHandler为例
+######################
+location：ContextNamespaceHandler
+public void init() {
+	// 注册各种Bean解析器。
+	registerBeanDefinitionParser("property-placeholder", new PropertyPlaceholderBeanDefinitionParser());
+	registerBeanDefinitionParser("property-override", new PropertyOverrideBeanDefinitionParser());
+	registerBeanDefinitionParser("annotation-config", new AnnotationConfigBeanDefinitionParser());
+	registerBeanDefinitionParser("component-scan", new ComponentScanBeanDefinitionParser());
+	registerBeanDefinitionParser("load-time-weaver", new LoadTimeWeaverBeanDefinitionParser());
+	registerBeanDefinitionParser("spring-configured", new SpringConfiguredBeanDefinitionParser());
+	registerBeanDefinitionParser("mbean-export", new MBeanExportBeanDefinitionParser());
+	registerBeanDefinitionParser("mbean-server", new MBeanServerBeanDefinitionParser());
+}
+
+####  META-INF/spring.handlers文件如下。
+http\://www.springframework.org/schema/context=org.springframework.context.config.ContextNamespaceHandler
+http\://www.springframework.org/schema/jee=org.springframework.ejb.config.JeeNamespaceHandler
+http\://www.springframework.org/schema/lang=org.springframework.scripting.config.LangNamespaceHandler
+http\://www.springframework.org/schema/task=org.springframework.scheduling.config.TaskNamespaceHandler
+http\://www.springframework.org/schema/cache=org.springframework.cache.config.CacheNamespaceHandler
+
+location：加载META-INF/spring.handlers文件,把读取的值放到Map中,注意spring.handlers放在对应的schema命名空间以及对应的处理器。
+private Map<String, Object> getHandlerMappings() {
+	if (this.handlerMappings == null) {
+		synchronized (this) {
+			if (this.handlerMappings == null) {
+				try {
+					// handlerMappingsLocation在getNamespaceHandlerResolver方法创建实例是加载文件为：META-INF/spring.handlers，很多包下面都有这样的配置。
+					Properties mappings = PropertiesLoaderUtils.loadAllProperties(this.handlerMappingsLocation, this.classLoader);
+					if (logger.isDebugEnabled()) {
+						logger.debug("Loaded NamespaceHandler mappings: " + mappings);
+					}
+					Map<String, Object> handlerMappings = new ConcurrentHashMap<String, Object>(mappings.size());
+					
+					// 将给定的Properties实例合并到给定的Map中
+					CollectionUtils.mergePropertiesIntoMap(mappings, handlerMappings);
+					this.handlerMappings = handlerMappings;
+				} catch (IOException ex) {
+					throw new IllegalStateException( "Unable to load NamespaceHandler mappings from location [" + this.handlerMappingsLocation + "]", ex);
+				}
+			}
+		}
+	}
+	return this.handlerMappings;
+}
+
+location：NameSpaceHandlerSupport
+public BeanDefinition parse(Element element, ParserContext parserContext) {
+	return findParserForElement(element, parserContext).parse(element, parserContext);
+}
+
+// 【开始具体进行解析】
+// 通过Element对象获取对应标签的解析器。parserContext：new ParserContext(this.readerContext, this, containingBd)[XmlReaderContext, BeanDefinitionParserDelegate, null]
+location：NamespaceHandlerSupport
+private BeanDefinitionParser findParserForElement(Element element, ParserContext parserContext) {
+	// 获取标签名。
+	String localName = parserContext.getDelegate().getLocalName(element);
+	
+	// parsers：为NamespaceHandler初始化时设置的属性,key:标签名,value：对应的解析器。
+	BeanDefinitionParser parser = this.parsers.get(localName);
+	if (parser == null) {
+		parserContext.getReaderContext().fatal("Cannot locate BeanDefinitionParser for element [" + localName + "]", element);
+	}
+	return parser;
+}
+
+// ########################## 第一个例子  start  context:component-scan ############################
+// ########################## 第一个例子  start  context:component-scan ############################
+location：ComponentScanBeanDefinitionParser
+public BeanDefinition parse(Element element, ParserContext parserContext) {
+	// 获取基础的扫描包
+	String basePackage = element.getAttribute(BASE_PACKAGE_ATTRIBUTE);
+	basePackage = parserContext.getReaderContext().getEnvironment().resolvePlaceholders(basePackage);
+	String[] basePackages = StringUtils.tokenizeToStringArray(basePackage, ConfigurableApplicationContext.CONFIG_LOCATION_DELIMITERS);
+
+	【实际上扫描BeanDefinition并注册他们】
+	ClassPathBeanDefinitionScanner scanner = configureScanner(parserContext, element);
+	
+	// 获取BeanDefinitions
+	Set<BeanDefinitionHolder> beanDefinitions = scanner.doScan(basePackages);
+
+	// 注册Components
+	registerComponents(parserContext.getReaderContext(), beanDefinitions, element);
+
+	return null;
+}
+
+// 解决占位符问题
+location：AbstractEvnironment
+public String resolvePlaceholders(String text) {
+	return this.propertyResolver.resolvePlaceholders(text);
+}
+			||
+			\/
+
+location：AbstractPropertyResolver
+public String resolvePlaceholders(String text) {
+	if (this.nonStrictHelper == null) {
+		// 创建占位符处理帮助类，可以处理text中的占位符，如com.apace.*.servce
+		this.nonStrictHelper = createPlaceholderHelper(true);
+	}
+	// 操作过程。
+	return doResolvePlaceholders(text, this.nonStrictHelper);
+}
+
+location：AbstractPropertyResolver
+private PropertyPlaceholderHelper createPlaceholderHelper(boolean ignoreUnresolvablePlaceholders) {
+	return new PropertyPlaceholderHelper(this.placeholderPrefix, this.placeholderSuffix, this.valueSeparator, ignoreUnresolvablePlaceholders);
+}
+
+location：AbstractPropertyResolver
+private String doResolvePlaceholders(String text, PropertyPlaceholderHelper helper) {
+	return helper.replacePlaceholders(text, new PropertyPlaceholderHelper.PlaceholderResolver() {
+		@Override
+		public String resolvePlaceholder(String placeholderName) {
+			return getPropertyAsRawString(placeholderName);
+		}
+	});
+}
+
+protected ClassPathBeanDefinitionScanner configureScanner(ParserContext parserContext, Element element) {
+	boolean useDefaultFilters = true;
+
+	// 判断element是否有“use-default-filters”。默认为true
+	if (element.hasAttribute(USE_DEFAULT_FILTERS_ATTRIBUTE)) {
+		useDefaultFilters = Boolean.valueOf(element.getAttribute(USE_DEFAULT_FILTERS_ATTRIBUTE));
+	}
+
+	// Delegate bean definition registration to scanner class.
+	// 创建ClassPathBeanDefinitionScanner类，并设置对应的BeanDefinition
+	ClassPathBeanDefinitionScanner scanner = createScanner(parserContext.getReaderContext(), useDefaultFilters);
+	scanner.setBeanDefinitionDefaults(parserContext.getDelegate().getBeanDefinitionDefaults());
+	scanner.setAutowireCandidatePatterns(parserContext.getDelegate().getAutowireCandidatePatterns());
+
+	// resource-pattern
+	if (element.hasAttribute(RESOURCE_PATTERN_ATTRIBUTE)) {
+		scanner.setResourcePattern(element.getAttribute(RESOURCE_PATTERN_ATTRIBUTE));
+	}
+
+	try {
+		parseBeanNameGenerator(element, scanner);
+	} catch (Exception ex) {
+		parserContext.getReaderContext().error(ex.getMessage(), parserContext.extractSource(element), ex.getCause());
+	}
+
+	try {
+		parseScope(element, scanner);
+	} catch (Exception ex) {
+		parserContext.getReaderContext().error(ex.getMessage(), parserContext.extractSource(element), ex.getCause());
+	}
+
+	parseTypeFilters(element, scanner, parserContext);
+
+	return scanner;
+}
+
+protected ClassPathBeanDefinitionScanner createScanner(XmlReaderContext readerContext, boolean useDefaultFilters) {
+	return new ClassPathBeanDefinitionScanner(readerContext.getRegistry(), useDefaultFilters, readerContext.getEnvironment(), readerContext.getResourceLoader());
+}
+
+protected void parseBeanNameGenerator(Element element, ClassPathBeanDefinitionScanner scanner) {
+	if (element.hasAttribute(NAME_GENERATOR_ATTRIBUTE)) {
+		BeanNameGenerator beanNameGenerator = (BeanNameGenerator) instantiateUserDefinedStrategy(element.getAttribute(NAME_GENERATOR_ATTRIBUTE), BeanNameGenerator.class,
+				scanner.getResourceLoader().getClassLoader());
+		scanner.setBeanNameGenerator(beanNameGenerator);
+	}
+}
+
+// 实例化用户定义的策略
+private Object instantiateUserDefinedStrategy(String className, Class<?> strategyType, ClassLoader classLoader) {
+	Object result;
+	try {
+		result = classLoader.loadClass(className).newInstance();
+	} catch (ClassNotFoundException ex) {
+		throw new IllegalArgumentException("Class [" + className + "] for strategy [" + strategyType.getName() + "] not found", ex);
+	} catch (Throwable ex) {
+		throw new IllegalArgumentException("Unable to instantiate class [" + className + "] for strategy [" + strategyType.getName() + "]: a zero-argument constructor is required", ex);
+	}
+
+	if (!strategyType.isAssignableFrom(result.getClass())) {
+		throw new IllegalArgumentException("Provided class name must be an implementation of " + strategyType);
+	}
+	return result;
+}
+
+// 解析范围
+protected void parseScope(Element element, ClassPathBeanDefinitionScanner scanner) {
+	// SCOPE_RESOLVER_ATTRIBUTE = scope-resolver
+	if (element.hasAttribute(SCOPE_RESOLVER_ATTRIBUTE)) {
+		if (element.hasAttribute(SCOPED_PROXY_ATTRIBUTE)) {
+			throw new IllegalArgumentException("Cannot define both 'scope-resolver' and 'scoped-proxy' on <component-scan> tag");
+		}
+		ScopeMetadataResolver scopeMetadataResolver = (ScopeMetadataResolver) instantiateUserDefinedStrategy(
+				element.getAttribute(SCOPE_RESOLVER_ATTRIBUTE), ScopeMetadataResolver.class,
+				scanner.getResourceLoader().getClassLoader());
+		scanner.setScopeMetadataResolver(scopeMetadataResolver);
+	}
+
+	// SCOPED_PROXY_ATTRIBUTE=scoped-proxy
+	if (element.hasAttribute(SCOPED_PROXY_ATTRIBUTE)) {
+		String mode = element.getAttribute(SCOPED_PROXY_ATTRIBUTE);
+		if ("targetClass".equals(mode)) {
+			scanner.setScopedProxyMode(ScopedProxyMode.TARGET_CLASS);
+		} else if ("interfaces".equals(mode)) {
+			scanner.setScopedProxyMode(ScopedProxyMode.INTERFACES);
+		} else if ("no".equals(mode)) {
+			scanner.setScopedProxyMode(ScopedProxyMode.NO);
+		} else {
+			throw new IllegalArgumentException("scoped-proxy only supports 'no', 'interfaces' and 'targetClass'");
+		}
+	}
+}
+
+protected void parseTypeFilters(Element element, ClassPathBeanDefinitionScanner scanner, ParserContext parserContext) {
+	// Parse exclude and include filter elements.
+	ClassLoader classLoader = scanner.getResourceLoader().getClassLoader();
+	NodeList nodeList = element.getChildNodes();
+	for (int i = 0; i < nodeList.getLength(); i++) {
+		Node node = nodeList.item(i);
+		if (node.getNodeType() == Node.ELEMENT_NODE) {
+			String localName = parserContext.getDelegate().getLocalName(node);
+			try {
+				if (INCLUDE_FILTER_ELEMENT.equals(localName)) {
+					TypeFilter typeFilter = createTypeFilter((Element) node, classLoader, parserContext);
+					scanner.addIncludeFilter(typeFilter);
+				} else if (EXCLUDE_FILTER_ELEMENT.equals(localName)) {
+					TypeFilter typeFilter = createTypeFilter((Element) node, classLoader, parserContext);
+					scanner.addExcludeFilter(typeFilter);
+				}
+			} catch (Exception ex) {
+				parserContext.getReaderContext().error( ex.getMessage(), parserContext.extractSource(element), ex.getCause());
+			}
+		}
+	}
+}
+
+
+location：ClassPathBeanDefinitionScanner
+protected Set<BeanDefinitionHolder> doScan(String... basePackages) {
+	// 参数验证。
+	Assert.notEmpty(basePackages, "At least one base package must be specified");
+
+	// Set存放，去重。
+	Set<BeanDefinitionHolder> beanDefinitions = new LinkedHashSet<BeanDefinitionHolder>();
+	for (String basePackage : basePackages) {
+
+		// 获取可以注入Spring得类的BeanDefinition。
+		Set<BeanDefinition> candidates = findCandidateComponents(basePackage);
+
+
+		for (BeanDefinition candidate : candidates) {
+			// 
+			ScopeMetadata scopeMetadata = this.scopeMetadataResolver.resolveScopeMetadata(candidate);
+
+			candidate.setScope(scopeMetadata.getScopeName());
+			String beanName = this.beanNameGenerator.generateBeanName(candidate, this.registry);
+
+			if (candidate instanceof AbstractBeanDefinition) {
+				postProcessBeanDefinition((AbstractBeanDefinition) candidate, beanName);
+			}
+
+			if (candidate instanceof AnnotatedBeanDefinition) {
+				AnnotationConfigUtils.processCommonDefinitionAnnotations((AnnotatedBeanDefinition) candidate);
+			}
+
+			if (checkCandidate(beanName, candidate)) {
+				BeanDefinitionHolder definitionHolder = new BeanDefinitionHolder(candidate, beanName);
+				definitionHolder = AnnotationConfigUtils.applyScopedProxyMode(scopeMetadata, definitionHolder, this.registry);
+				beanDefinitions.add(definitionHolder);
+				registerBeanDefinition(definitionHolder, this.registry);
+			}
+		}
+	}
+	return beanDefinitions;
+}
+
+// 【【非常重要，Resource  -->   BeanDefiition】】从文件-->对应的BeanDefinition。
+location：ClassPathScanningCandidateComponentProvider
+public Set<BeanDefinition> findCandidateComponents(String basePackage) {
+	Set<BeanDefinition> candidates = new LinkedHashSet<BeanDefinition>();
+	try {
+
+		// CLASSPATH_ALL_URL_PREFIX="classpath*:"  ---->  classpath*:com/liu/**/*.class
+		String packageSearchPath = ResourcePatternResolver.CLASSPATH_ALL_URL_PREFIX + resolveBasePackage(basePackage) + '/' + this.resourcePattern;
+
+		// 获取对应的所有Resource。
+		Resource[] resources = this.resourcePatternResolver.getResources(packageSearchPath);
+
+		boolean traceEnabled = logger.isTraceEnabled();
+		boolean debugEnabled = logger.isDebugEnabled();
+
+		// 遍历Resources
+		for (Resource resource : resources) {
+			if (traceEnabled) {
+				logger.trace("Scanning " + resource);
+			}
+			if (resource.isReadable()) {
+				try {	
+					// MetadataReader可以操作ClassMetadata。通过resource获取对应的MetadataReader。
+					MetadataReader metadataReader = this.metadataReaderFactory.getMetadataReader(resource);
+
+					// 确定给定的类是否与任何排除过滤器不匹配，并且确实匹配至少一个包含过滤器。
+					if (isCandidateComponent(metadataReader)) {
+
+						// 通过MetadataReader获取对应的BeanDefinition。
+						ScannedGenericBeanDefinition sbd = new ScannedGenericBeanDefinition(metadataReader);
+						
+						// 设置属性。
+						sbd.setResource(resource);
+						sbd.setSource(resource);
+
+						// 确定是否符合候选类
+						if (isCandidateComponent(sbd)) {
+							if (debugEnabled) {
+								logger.debug("Identified candidate component class: " + resource);
+							}
+							
+							// 把ScannedGenericBeanDefinition放到集合中
+							candidates.add(sbd);
+						} else {
+							if (debugEnabled) {
+								logger.debug("Ignored because not a concrete top-level class: " + resource);
+							}
+						}
+					} else {
+						if (traceEnabled) {
+							logger.trace("Ignored because not matching any filter: " + resource);
+						}
+					}
+				} catch (Throwable ex) {
+					throw new BeanDefinitionStoreException("Failed to read candidate component class: " + resource, ex);
+				}
+			} else {
+				if (traceEnabled) {
+					logger.trace("Ignored because not readable: " + resource);
+				}
+			}
+		}
+	} catch (IOException ex) {
+		throw new BeanDefinitionStoreException("I/O failure during classpath scanning", ex);
+	}
+	return candidates;
+}
+
+// resolveBasePackage：将给定文本的“.”替换为“/”
+// resolveRequiredPlaceholders：解析给定文本的占位符，将其替换为{@link #getProperty}解析的相应属性值。
+protected String resolveBasePackage(String basePackage) {
+	return ClassUtils.convertClassNameToResourcePath(this.environment.resolveRequiredPlaceholders(basePackage));
+}
+
+
+// 通过工厂类获取resource的MatedataReader
+location：CachingMetadataReaderFactory
+public MetadataReader getMetadataReader(Resource resource) throws IOException {
+	// 判断缓存里时候有值。
+	if (getCacheLimit() <= 0) {
+		return super.getMetadataReader(resource);
+	}
+
+	// metadataReaderCache是一个LinkedHashMap<Resource, MetadataReader>()
+	synchronized (this.metadataReaderCache) {
+		
+		// 先从缓存中取MetadataReader。
+		MetadataReader metadataReader = this.metadataReaderCache.get(resource);
+
+		// 如果缓存中没有。
+		if (metadataReader == null) {
+			// 使用父SimpleMetadataReaderFactory创建。new SimpleMetadataReader(resource, this.resourceLoader.getClassLoader());
+			metadataReader = super.getMetadataReader(resource);  
+			// 放入缓存中，key为resource,
+			this.metadataReaderCache.put(resource, metadataReader);
+		}
+		return metadataReader;
+	}
+}
+
+// SimpleMetadataReader的构造函数。
+location：SimpleMetadataReader
+SimpleMetadataReader(Resource resource, ClassLoader classLoader) throws IOException {
+	
+	// 输入流
+	InputStream is = new BufferedInputStream(resource.getInputStream());
+
+	【ASM：java字节码操作框架】
+	ClassReader classReader;
+	try {
+		classReader = new ClassReader(is);
+	} catch (IllegalArgumentException ex) {
+		throw new NestedIOException("ASM ClassReader failed to parse class file - " + "probably due to a new Java class file version that isn't supported yet: " + resource, ex);
+	} finally {
+		is.close();
+	}
+	
+	// AnnotationMetadataReadingVisitor是一个ClassMetadata
+	AnnotationMetadataReadingVisitor visitor = new AnnotationMetadataReadingVisitor(classLoader);
+
+	// 
+	classReader.accept(visitor, ClassReader.SKIP_DEBUG);
+
+	this.annotationMetadata = visitor;
+
+	// (since AnnotationMetadataReadingVisitor extends ClassMetadataReadingVisitor)
+	this.classMetadata = visitor;
+	this.resource = resource;
+}
+
+
+// 确定给定的类是否与任何排除过滤器不匹配，并且确实匹配至少一个包含过滤器。这个就是在compent-scan标签的属性use-default-filter,
+// include-filter、exclude-filter。
+location：ClassPathScanningCandidate
+protected boolean isCandidateComponent(MetadataReader metadataReader) throws IOException {
+	for (TypeFilter tf : this.excludeFilters) {
+		if (tf.match(metadataReader, this.metadataReaderFactory)) {
+			return false;
+		}
+	}
+	for (TypeFilter tf : this.includeFilters) {
+		if (tf.match(metadataReader, this.metadataReaderFactory)) {
+			return isConditionMatch(metadataReader);
+		}
+	}
+	return false;
+}
+
+// 确定给定的bean定义是否符合候选条件。
+// 默认判断这个类是否是一个接口，不依赖一个enclosing class。
+protected boolean isCandidateComponent(AnnotatedBeanDefinition beanDefinition) {
+	AnnotationMetadata metadata = beanDefinition.getMetadata();
+	return (metadata.isIndependent() && (metadata.isConcrete() || metadata.isAbstract() && metadata.hasAnnotatedMethods(Lookup.class.getName()))));
+}
+
+
+location：ComponentScanBeanDefinitionParser
+protected void registerComponents(XmlReaderContext readerContext, Set<BeanDefinitionHolder> beanDefinitions, Element element) {
+	Object source = readerContext.extractSource(element);
+
+	// 创建CompositeComponentDefinition实例
+	CompositeComponentDefinition compositeDef = new CompositeComponentDefinition(element.getTagName(), source);
+
+	for (BeanDefinitionHolder beanDefHolder : beanDefinitions) {
+		compositeDef.addNestedComponent(new BeanComponentDefinition(beanDefHolder));
+	}
+
+	// 如果需要，注册注解配置处理器。
+	boolean annotationConfig = true;
+
+	// 判断是否有“annotation-config”属性。annotation-config默认为ture
+	if (element.hasAttribute(ANNOTATION_CONFIG_ATTRIBUTE)) {
+		annotationConfig = Boolean.valueOf(element.getAttribute(ANNOTATION_CONFIG_ATTRIBUTE));
+	}
+	if (annotationConfig) {
+		Set<BeanDefinitionHolder> processorDefinitions =
+				AnnotationConfigUtils.registerAnnotationConfigProcessors(readerContext.getRegistry(), source);
+		for (BeanDefinitionHolder processorDefinition : processorDefinitions) {
+			compositeDef.addNestedComponent(new BeanComponentDefinition(processorDefinition));
+		}
+	}
+
+	readerContext.fireComponentRegistered(compositeDef);
+}
+
+// 向给定的注册表中注册所有注解后置处理器。registry注册表--》DefaultListableBeanFactory
+location：AnnotationConfigUtils
+public static Set<BeanDefinitionHolder> registerAnnotationConfigProcessors(BeanDefinitionRegistry registry, Object source) {
+
+		DefaultListableBeanFactory beanFactory = unwrapDefaultListableBeanFactory(registry);
+		if (beanFactory != null) {
+			if (!(beanFactory.getDependencyComparator() instanceof AnnotationAwareOrderComparator)) {
+				beanFactory.setDependencyComparator(AnnotationAwareOrderComparator.INSTANCE);
+			}
+			if (!(beanFactory.getAutowireCandidateResolver() instanceof ContextAnnotationAutowireCandidateResolver)) {
+				beanFactory.setAutowireCandidateResolver(new ContextAnnotationAutowireCandidateResolver());
+			}
+		}
+
+		Set<BeanDefinitionHolder> beanDefs = new LinkedHashSet<BeanDefinitionHolder>(4);
+
+		if (!registry.containsBeanDefinition(CONFIGURATION_ANNOTATION_PROCESSOR_BEAN_NAME)) {
+			RootBeanDefinition def = new RootBeanDefinition(ConfigurationClassPostProcessor.class);
+			def.setSource(source);
+			beanDefs.add(registerPostProcessor(registry, def, CONFIGURATION_ANNOTATION_PROCESSOR_BEAN_NAME));
+		}
+
+		if (!registry.containsBeanDefinition(AUTOWIRED_ANNOTATION_PROCESSOR_BEAN_NAME)) {
+			RootBeanDefinition def = new RootBeanDefinition(AutowiredAnnotationBeanPostProcessor.class);
+			def.setSource(source);
+			beanDefs.add(registerPostProcessor(registry, def, AUTOWIRED_ANNOTATION_PROCESSOR_BEAN_NAME));
+		}
+
+		if (!registry.containsBeanDefinition(REQUIRED_ANNOTATION_PROCESSOR_BEAN_NAME)) {
+			RootBeanDefinition def = new RootBeanDefinition(RequiredAnnotationBeanPostProcessor.class);
+			def.setSource(source);
+			beanDefs.add(registerPostProcessor(registry, def, REQUIRED_ANNOTATION_PROCESSOR_BEAN_NAME));
+		}
+
+		// Check for JSR-250 support, and if present add the CommonAnnotationBeanPostProcessor.
+		if (jsr250Present && !registry.containsBeanDefinition(COMMON_ANNOTATION_PROCESSOR_BEAN_NAME)) {
+			RootBeanDefinition def = new RootBeanDefinition(CommonAnnotationBeanPostProcessor.class);
+			def.setSource(source);
+			beanDefs.add(registerPostProcessor(registry, def, COMMON_ANNOTATION_PROCESSOR_BEAN_NAME));
+		}
+
+		// Check for JPA support, and if present add the PersistenceAnnotationBeanPostProcessor.
+		if (jpaPresent && !registry.containsBeanDefinition(PERSISTENCE_ANNOTATION_PROCESSOR_BEAN_NAME)) {
+			RootBeanDefinition def = new RootBeanDefinition();
+			try {
+				def.setBeanClass(ClassUtils.forName(PERSISTENCE_ANNOTATION_PROCESSOR_CLASS_NAME,
+						AnnotationConfigUtils.class.getClassLoader()));
+			}
+			catch (ClassNotFoundException ex) {
+				throw new IllegalStateException(
+						"Cannot load optional framework class: " + PERSISTENCE_ANNOTATION_PROCESSOR_CLASS_NAME, ex);
+			}
+			def.setSource(source);
+			beanDefs.add(registerPostProcessor(registry, def, PERSISTENCE_ANNOTATION_PROCESSOR_BEAN_NAME));
+		}
+
+		if (!registry.containsBeanDefinition(EVENT_LISTENER_PROCESSOR_BEAN_NAME)) {
+			RootBeanDefinition def = new RootBeanDefinition(EventListenerMethodProcessor.class);
+			def.setSource(source);
+			beanDefs.add(registerPostProcessor(registry, def, EVENT_LISTENER_PROCESSOR_BEAN_NAME));
+		}
+		if (!registry.containsBeanDefinition(EVENT_LISTENER_FACTORY_BEAN_NAME)) {
+			RootBeanDefinition def = new RootBeanDefinition(DefaultEventListenerFactory.class);
+			def.setSource(source);
+			beanDefs.add(registerPostProcessor(registry, def, EVENT_LISTENER_FACTORY_BEAN_NAME));
+		}
+
+		return beanDefs;
+	}
+
+// ########################## 第一个例子  end  ############################
+// ########################## 第一个例子  end  ############################
+
+// ########################## 第二个例子  start bean ############################
+// ########################## 第二个例子  start bean ############################
+<bean>标签处理过程。
+location:DefaultBeanDefinitionDocumentReader
+protected void processBeanDefinition(Element ele, BeanDefinitionParserDelegate delegate) {
+	// 根据Element，解析ele并创建对应的BeanDefinitionHolder。
+	BeanDefinitionHolder bdHolder = delegate.parseBeanDefinitionElement(ele);
+
+	if (bdHolder != null) {
+		// 装饰BeanDefinition。如果设置了Scope、lazy-init等等。
+		bdHolder = delegate.decorateBeanDefinitionIfRequired(ele, bdHolder);
+		try {
+
+			// 注册最后被装饰的实例。 【【【非常非常非常重要。】】】请搜索【_注册过程】
+			// 【【getReaderContext().getRegistry()这个获取到的是最开始DefaultListableBeanFactory实例。【【现在把BeanDefinition注册到DefaultListableBeanFactory实例中】】】】
+			BeanDefinitionReaderUtils.registerBeanDefinition(bdHolder, getReaderContext().getRegistry());
+		} catch (BeanDefinitionStoreException ex) {
+			getReaderContext().error("Failed to register bean definition with name '" + bdHolder.getBeanName() + "'", ele, ex);
+		}
+		
+		// 通知监听器，这个bean已经加载完成了。
+		getReaderContext().fireComponentRegistered(new BeanComponentDefinition(bdHolder));
+	}
+}
+
+// 解析Element并注册BeanDefinition。这个ele是bean标签。
+location：BeanDefinitionParserDelegate
+public BeanDefinitionHolder parseBeanDefinitionElement(Element ele) {
+	return parseBeanDefinitionElement(ele, null);
+}
+			||
+			\/
+
+// 解析Element并注册BeanDefinition
+location：BeanDefinitionParserDelegate
+public BeanDefinitionHolder parseBeanDefinitionElement(Element ele, BeanDefinition containingBean) {
+	// 获取对应的id和name。
+	String id = ele.getAttribute(ID_ATTRIBUTE);
+	String nameAttr = ele.getAttribute(NAME_ATTRIBUTE);
+
+	List<String> aliases = new ArrayList<String>();
+
+	// 判断是否有name属性。【【name可以使用,;等隔离】】
+	if (StringUtils.hasLength(nameAttr)) {
+		String[] nameArr = StringUtils.tokenizeToStringArray(nameAttr, MULTI_VALUE_ATTRIBUTE_DELIMITERS);
+		aliases.addAll(Arrays.asList(nameArr));
+	}
+	
+	// 使用id属性作为beanName。
+	String beanName = id;
+	
+	if (!StringUtils.hasText(beanName) && !aliases.isEmpty()) {
+		beanName = aliases.remove(0);
+		if (logger.isDebugEnabled()) {
+			logger.debug("No XML 'id' specified - using '" + beanName + "' as bean name and " + aliases + " as aliases");
+		}
+	}
+	
+	// 检查beanName是否唯一
+	if (containingBean == null) {
+		checkNameUniqueness(beanName, aliases, ele);
+	}
+
+	#####################################################################
+	###################         很重要             ######################
+	#####################################################################
+	AbstractBeanDefinition beanDefinition = parseBeanDefinitionElement(ele, beanName, containingBean);
+	
+	if (beanDefinition != null) {
+		
+		// 判断beanName是否不为空，如果不为空跳过。
+		if (!StringUtils.hasText(beanName)) {
+			try {
+				if (containingBean != null) {
+					beanName = BeanDefinitionReaderUtils.generateBeanName( beanDefinition, this.readerContext.getRegistry(), true);
+				} else {
+					beanName = this.readerContext.generateBeanName(beanDefinition);
+					String beanClassName = beanDefinition.getBeanClassName();
+					if (beanClassName != null && beanName.startsWith(beanClassName) && beanName.length() > beanClassName.length() && !this.readerContext.getRegistry().isBeanNameInUse(beanClassName)) {
+						aliases.add(beanClassName);
+					}
+				}
+				if (logger.isDebugEnabled()) {
+					logger.debug("Neither XML 'id' nor 'name' specified - " + "using generated bean name [" + beanName + "]");
+				}
+			} catch (Exception ex) {
+				error(ex.getMessage(), ele);
+				return null;
+			}
+		}
+		String[] aliasesArray = StringUtils.toStringArray(aliases);
+		
+		// 根据Element实例化一个BeanDefinitionHolder实例对象，BeanDefinitionHolder中包好BeanDefinition和beanName和aliasesArray成员属性。
+		return new BeanDefinitionHolder(beanDefinition, beanName, aliasesArray);
+	}
+
+	return null;
+}
+
+// 验证指定的beanName和别名尚未在当前bean元素嵌套级别中使用。
+location：BeanDefinitionParserDelegate
+protected void checkNameUniqueness(String beanName, List<String> aliases, Element beanElement) {
+	String foundName = null;
+	
+	// this.usedNames是一个set集合用户存放Bena的name的。
+	// 判断集合中是否已经存在即是否已经存在该名称的bean。
+	if (StringUtils.hasText(beanName) && this.usedNames.contains(beanName)) {
+		foundName = beanName;
+	}
+	if (foundName == null) {
+		foundName = CollectionUtils.findFirstMatch(this.usedNames, aliases);
+	}
+	
+	// 已经初始化过了，就报错。
+	if (foundName != null) {
+		error("Bean name '" + foundName + "' is already used in this <beans> element", beanElement);
+	}
+	
+	// 添加到已经存在的bean的名称集合中。
+	this.usedNames.add(beanName);
+	this.usedNames.addAll(aliases);
+}
+
+// 解析BeanDefinition通过Element。
+location：BeanDefinitionParserDelegate
+public AbstractBeanDefinition parseBeanDefinitionElement(Element ele, String beanName, BeanDefinition containingBean) {
+
+	// ParseState基于LinkedList数据结构
+	// push方法添加一个Parser.Entry到ParserState
+	this.parseState.push(new BeanEntry(beanName));
+
+	String className = null;
+	
+	// 获取Bean标签的Class属性。
+	if (ele.hasAttribute(CLASS_ATTRIBUTE)) {
+		className = ele.getAttribute(CLASS_ATTRIBUTE).trim();
+	}
+
+	try {
+		// 获取父属性。
+		String parent = null;
+		
+		// ele中是否与parent属性。
+		if (ele.hasAttribute(PARENT_ATTRIBUTE)) {
+			parent = ele.getAttribute(PARENT_ATTRIBUTE);
+		}
+		
+		// 创建一个AbstractBeanDefinition。会设置className和parentName。
+		AbstractBeanDefinition bd = createBeanDefinition(className, parent);
+		
+		// 为创建的BeanDefinition设置属性，这是bean标签的属性。
+		parseBeanDefinitionAttributes(ele, beanName, containingBean, bd);
+		bd.setDescription(DomUtils.getChildElementValueByTagName(ele, DESCRIPTION_ELEMENT));
+	
+		// 设置元数据
+		parseMetaElements(ele, bd);
+		
+		// 【lookup-method】获取器注入，是把一个方法声明为返回某种类型的bean，但实际要返回的bean是在配置文件里面配置的。该方法可以用于设计一些可插拔的功能上，解除程序依赖。
+		parseLookupOverrideSubElements(ele, bd.getMethodOverrides());
+		
+		// 【replaced-method】可以在运行时调用新的方法替换现有的方法，还能动态的更新原有方法的逻辑.
+		parseReplacedMethodSubElements(ele, bd.getMethodOverrides());
+
+		// 【constructor-arg】解析。
+		parseConstructorArgElements(ele, bd);
+		
+		//【property】解析。把注入对象包装成PropertyValue（其中有RuntimeBeanReference）实例对象，并保存到对应的BeanDefinition。
+		parsePropertyElements(ele, bd);
+		
+		//【qualifier】解析。
+		parseQualifierElements(ele, bd);
+
+		// 设置资源。
+		bd.setResource(this.readerContext.getResource());
+		bd.setSource(extractSource(ele));
+
+		return bd;
+	} catch (ClassNotFoundException ex) {
+		error("Bean class [" + className + "] not found", ele, ex);
+	} catch (NoClassDefFoundError err) {
+		error("Class that bean class [" + className + "] depends on not found", ele, err);
+	} catch (Throwable ex) {
+		error("Unexpected failure during bean definition parsing", ele, ex);
+	} finally {
+		this.parseState.pop();
+	}
+	return null;
+}
+
+// 根据ClassName和父parentName构造BeanDefinition。
+location：BeanDefinitionParserDelegate
+protected AbstractBeanDefinition createBeanDefinition(String className, String parentName) throws ClassNotFoundException {
+	return BeanDefinitionReaderUtils.createBeanDefinition(parentName, className, this.readerContext.getBeanClassLoader());
+}
+
+// 根据ClassName和父parentName构造BeanDefinition过程。
+location：BeanDefinitionReaderUtils
+public static AbstractBeanDefinition createBeanDefinition(String parentName, String className, ClassLoader classLoader) throws ClassNotFoundException {
+	GenericBeanDefinition bd = new GenericBeanDefinition();
+	bd.setParentName(parentName);
+	if (className != null) {
+		if (classLoader != null) {
+			bd.setBeanClass(ClassUtils.forName(className, classLoader));
+		} else {
+			bd.setBeanClassName(className);
+		}
+	}
+	return bd;
+}
+
+
+location：BeanDefinitionParserDelegate
+public AbstractBeanDefinition parseBeanDefinitionAttributes(Element ele, String beanName, BeanDefinition containingBean, AbstractBeanDefinition bd) {
+
+	// singleton。这个标签已经不在使用了。
+	if (ele.hasAttribute(SINGLETON_ATTRIBUTE)) {
+		error("Old 1.x 'singleton' attribute in use - upgrade to 'scope' declaration", ele);
+		
+	// scope.
+	} else if (ele.hasAttribute(SCOPE_ATTRIBUTE)) {
+		bd.setScope(ele.getAttribute(SCOPE_ATTRIBUTE));
+		
+	// containingBean。
+	} else if (containingBean != null) {
+		bd.setScope(containingBean.getScope());
+	}
+
+	// abstract属性
+	if (ele.hasAttribute(ABSTRACT_ATTRIBUTE)) {
+		bd.setAbstract(TRUE_VALUE.equals(ele.getAttribute(ABSTRACT_ATTRIBUTE)));
+	}
+
+	// lazy-init
+	String lazyInit = ele.getAttribute(LAZY_INIT_ATTRIBUTE);
+	 
+	// 如果lazy-init属性为default
+	if (DEFAULT_VALUE.equals(lazyInit)) {
+		lazyInit = this.defaults.getLazyInit();
+	}
+	bd.setLazyInit(TRUE_VALUE.equals(lazyInit));
+
+	// autowire
+	String autowire = ele.getAttribute(AUTOWIRE_ATTRIBUTE);
+	bd.setAutowireMode(getAutowireMode(autowire));
+
+	// dependency-check
+	String dependencyCheck = ele.getAttribute(DEPENDENCY_CHECK_ATTRIBUTE);
+	bd.setDependencyCheck(getDependencyCheck(dependencyCheck));
+
+	// depends-on
+	if (ele.hasAttribute(DEPENDS_ON_ATTRIBUTE)) {
+		String dependsOn = ele.getAttribute(DEPENDS_ON_ATTRIBUTE);
+		bd.setDependsOn(StringUtils.tokenizeToStringArray(dependsOn, MULTI_VALUE_ATTRIBUTE_DELIMITERS));
+	}
+
+	// autowire-candidate
+	String autowireCandidate = ele.getAttribute(AUTOWIRE_CANDIDATE_ATTRIBUTE);
+	if ("".equals(autowireCandidate) || DEFAULT_VALUE.equals(autowireCandidate)) {
+		String candidatePattern = this.defaults.getAutowireCandidates();
+		if (candidatePattern != null) {
+			String[] patterns = StringUtils.commaDelimitedListToStringArray(candidatePattern);
+			bd.setAutowireCandidate(PatternMatchUtils.simpleMatch(patterns, beanName));
+		}
+	} else {
+		bd.setAutowireCandidate(TRUE_VALUE.equals(autowireCandidate));
+	}
+
+	// primary
+	if (ele.hasAttribute(PRIMARY_ATTRIBUTE)) {
+		bd.setPrimary(TRUE_VALUE.equals(ele.getAttribute(PRIMARY_ATTRIBUTE)));
+	}
+
+	// init-method
+	if (ele.hasAttribute(INIT_METHOD_ATTRIBUTE)) {
+		String initMethodName = ele.getAttribute(INIT_METHOD_ATTRIBUTE);
+		if (!"".equals(initMethodName)) {
+			bd.setInitMethodName(initMethodName);
+		}
+	} else {
+		if (this.defaults.getInitMethod() != null) {
+			bd.setInitMethodName(this.defaults.getInitMethod());
+			bd.setEnforceInitMethod(false);
+		}
+	}
+
+	// destroy-method
+	if (ele.hasAttribute(DESTROY_METHOD_ATTRIBUTE)) {
+		String destroyMethodName = ele.getAttribute(DESTROY_METHOD_ATTRIBUTE);
+		bd.setDestroyMethodName(destroyMethodName);
+	} else {
+		if (this.defaults.getDestroyMethod() != null) {
+			bd.setDestroyMethodName(this.defaults.getDestroyMethod());
+			bd.setEnforceDestroyMethod(false);
+		}
+	}
+
+	// factory-method
+	if (ele.hasAttribute(FACTORY_METHOD_ATTRIBUTE)) {
+		bd.setFactoryMethodName(ele.getAttribute(FACTORY_METHOD_ATTRIBUTE));
+	}
+	
+	// factory-bean
+	if (ele.hasAttribute(FACTORY_BEAN_ATTRIBUTE)) {
+		bd.setFactoryBeanName(ele.getAttribute(FACTORY_BEAN_ATTRIBUTE));
+	}
+
+	return bd;
+}
+
+// meta所声明的key并不会在 Bean 中体现，只是一个额外的声明，当我们需要使用里面的信息时，通过BeanDefinition的getAttribute()获取。
+location：BeanDefinitionReaderUtils
+public void parseMetaElements(Element ele, BeanMetadataAttributeAccessor attributeAccessor) {
+	// 获取bean标签下的子标签。
+	NodeList nl = ele.getChildNodes();
+	
+	// 循环遍历。
+	for (int i = 0; i < nl.getLength(); i++) {
+		Node node = nl.item(i);
+		
+		if (isCandidateElement(node) && nodeNameEquals(node, META_ELEMENT)) {
+			Element metaElement = (Element) node;
+			// 获取信息属性。
+			String key = metaElement.getAttribute(KEY_ATTRIBUTE);
+			String value = metaElement.getAttribute(VALUE_ATTRIBUTE);
+			BeanMetadataAttribute attribute = new BeanMetadataAttribute(key, value);
+			attribute.setSource(extractSource(metaElement));
+			attributeAccessor.addMetadataAttribute(attribute);
+		}
+	}
+}
+
+
+############  以property属性为列，解析过程  ########################
+
+public void parsePropertyElements(Element beanEle, BeanDefinition bd) {
+	NodeList nl = beanEle.getChildNodes();
+	for (int i = 0; i < nl.getLength(); i++) {
+		Node node = nl.item(i);
+		if (isCandidateElement(node) && nodeNameEquals(node, PROPERTY_ELEMENT)) {
+			parsePropertyElement((Element) node, bd);
+		}
+	}
+}
+
+public void parsePropertyElement(Element ele, BeanDefinition bd) {
+	String propertyName = ele.getAttribute(NAME_ATTRIBUTE);
+	if (!StringUtils.hasLength(propertyName)) {
+		error("Tag 'property' must have a 'name' attribute", ele);
+		return;
+	}
+	this.parseState.push(new PropertyEntry(propertyName));
+	try {
+		if (bd.getPropertyValues().contains(propertyName)) {
+			error("Multiple 'property' definitions for property '" + propertyName + "'", ele);
+			return;
+		}
+		
+		// 主要是创建RuntimeBeanReference对象。
+		Object val = parsePropertyValue(ele, bd, propertyName);
+		
+		// 实例PropertyValue对象，用于保存到BeanDefinition实例上的。
+		PropertyValue pv = new PropertyValue(propertyName, val);
+		
+		// 设置元数据。
+		parseMetaElements(ele, pv);
+		pv.setSource(extractSource(ele));
+		
+		//保存到BeanDefinition的MutablePropertyValues实例对象的propertyValueList中。
+		bd.getPropertyValues().addPropertyValue(pv);
+	}
+	finally {
+		this.parseState.pop();
+	}
+}
+
+// 解析property的value属性。创建RuntimeBeanReference实例对象，在解析到依赖的Bean的时侯，解析器会依据依赖bean的name创建一个RuntimeBeanReference对像，将这个对像放入BeanDefinition的MutablePropertyValues中
+public Object parsePropertyValue(Element ele, BeanDefinition bd, String propertyName) {
+	String elementName = (propertyName != null) ? "<property> element for property '" + propertyName + "'" : "<constructor-arg> element";
+	
+	// 获取子标签。
+	NodeList nl = ele.getChildNodes();
+	Element subElement = null;
+	
+	for (int i = 0; i < nl.getLength(); i++) {
+		Node node = nl.item(i);
+		if (node instanceof Element && !nodeNameEquals(node, DESCRIPTION_ELEMENT) && !nodeNameEquals(node, META_ELEMENT)) {
+			if (subElement != null) {
+				error(elementName + " must not contain more than one sub-element", ele);
+			}
+			else {
+				subElement = (Element) node;
+			}
+		}
+	}
+	
+	// 是否有ref属性。
+	boolean hasRefAttribute = ele.hasAttribute(REF_ATTRIBUTE);
+	// 是否有value属性。
+	boolean hasValueAttribute = ele.hasAttribute(VALUE_ATTRIBUTE);
+	
+	if ((hasRefAttribute && hasValueAttribute) || ((hasRefAttribute || hasValueAttribute) && subElement != null)) {
+		error(elementName + " is only allowed to contain either 'ref' attribute OR 'value' attribute OR sub-element", ele);
+	}
+
+	if (hasRefAttribute) {
+		String refName = ele.getAttribute(REF_ATTRIBUTE);
+		if (!StringUtils.hasText(refName)) {
+			error(elementName + " contains empty 'ref' attribute", ele);
+		}
+		
+		// 创建RuntimeBeanReference实例对象。
+		RuntimeBeanReference ref = new RuntimeBeanReference(refName);
+		ref.setSource(extractSource(ele));
+		return ref;
+		
+	} else if (hasValueAttribute) {
+		TypedStringValue valueHolder = new TypedStringValue(ele.getAttribute(VALUE_ATTRIBUTE));
+		valueHolder.setSource(extractSource(ele));
+		return valueHolder;
+	}
+	else if (subElement != null) {
+		return parsePropertySubElement(subElement, bd);
+	}
+	else {
+		error(elementName + " must specify a ref or value", ele);
+		return null;
+	}
+}
+
+
+// 如果需要进行装饰BeanDefinition
+public BeanDefinitionHolder decorateBeanDefinitionIfRequired(Element ele, BeanDefinitionHolder definitionHolder) {
+	return decorateBeanDefinitionIfRequired(ele, definitionHolder, null);
+}
+
+// 如果需要进行装饰BeanDefinition
+public BeanDefinitionHolder decorateBeanDefinitionIfRequired(Element ele, BeanDefinitionHolder definitionHolder, BeanDefinition containingBd) {
+
+	BeanDefinitionHolder finalDefinition = definitionHolder;
+
+	// 首先根据自定义属性进行装饰
+	// 也就是写在<bean>中的lazy-init="default"；autowire="default"；autowire-candidate="default"
+	NamedNodeMap attributes = ele.getAttributes();
+	for (int i = 0; i < attributes.getLength(); i++) {
+		Node node = attributes.item(i);
+		finalDefinition = decorateIfRequired(node, finalDefinition, containingBd);
+	}
+
+	// 基于自定义嵌套元素进行装饰
+	// Bean的子节点，自定义的。
+	NodeList children = ele.getChildNodes();
+	for (int i = 0; i < children.getLength(); i++) {
+		Node node = children.item(i);
+		if (node.getNodeType() == Node.ELEMENT_NODE) {
+			finalDefinition = decorateIfRequired(node, finalDefinition, containingBd);
+		}
+	}
+	return finalDefinition;
+}
+
+
+############################    _注册过程    ################################################
+############################    _注册过程    ################################################
+############################    _注册过程    ################################################
+// 【【把BeanDefinitionHolder注册到BeanDefinitionRegistry中即【DefaultListableBeanFactory】】】
+location：BeanDefinitionReaderUtils
+public static void registerBeanDefinition(BeanDefinitionHolder definitionHolder, BeanDefinitionRegistry registry) throws BeanDefinitionStoreException {
+
+	String beanName = definitionHolder.getBeanName();
+	
+	// 
+	registry.registerBeanDefinition(beanName, definitionHolder.getBeanDefinition());
+
+	// Register aliases for bean name, if any.
+	String[] aliases = definitionHolder.getAliases();
+	if (aliases != null) {
+		for (String alias : aliases) {
+			registry.registerAlias(beanName, alias);
+		}
+	}
+}
+
+// 【【【注册过程。】】】
+location：DefaultListableBeanFactroy
+public void registerBeanDefinition(String beanName, BeanDefinition beanDefinition) throws BeanDefinitionStoreException {
+
+	Assert.hasText(beanName, "Bean name must not be empty");
+	Assert.notNull(beanDefinition, "BeanDefinition must not be null");
+
+	if (beanDefinition instanceof AbstractBeanDefinition) {
+		try {
+			//  beanDefinition教研过程。
+			((AbstractBeanDefinition) beanDefinition).validate();
+		} catch (BeanDefinitionValidationException ex) {
+			throw new BeanDefinitionStoreException(beanDefinition.getResourceDescription(), beanName, "Validation of bean definition failed", ex);
+		}
+	}
+
+	BeanDefinition oldBeanDefinition;
+	
+	// this.beanDefinitionMap存放已经注册的BeanDefinition，key为BeanName，Value为BeanDefinition。
+	// 判断将要使用的beanName是否已经存在以注册的BeanDefinition。
+	oldBeanDefinition = this.beanDefinitionMap.get(beanName);
+	if (oldBeanDefinition != null) {
+		if (!isAllowBeanDefinitionOverriding()) {
+			throw new BeanDefinitionStoreException(beanDefinition.getResourceDescription(), beanName, "Cannot register bean definition [" + beanDefinition + "] for bean '" + beanName + "': There is already [" + oldBeanDefinition + "] bound.");
+		} else if (oldBeanDefinition.getRole() < beanDefinition.getRole()) {
+			if (this.logger.isWarnEnabled()) {
+				this.logger.warn("Overriding user-defined bean definition for bean '" + beanName + "' with a framework-generated bean definition: replacing [" + oldBeanDefinition + "] with [" beanDefinition + "]");
+			}
+		} else if (!beanDefinition.equals(oldBeanDefinition)) {
+			if (this.logger.isInfoEnabled()) {
+				this.logger.info("Overriding bean definition for bean '" + beanName + "' with a different definition: replacing [" + oldBeanDefinition + "] with [" + beanDefinition + "]");
+			}
+		} else {
+			if (this.logger.isDebugEnabled()) {
+				this.logger.debug("Overriding bean definition for bean '" + beanName + "' with an equivalent definition: replacing [" + oldBeanDefinition + "] with [" + beanDefinition + "]");
+			}
+		}
+			
+		// 覆盖。
+		this.beanDefinitionMap.put(beanName, beanDefinition);
+	} else {
+	
+		if (hasBeanCreationStarted()) {
+			// 上锁。
+			synchronized (this.beanDefinitionMap) {
+				// 放入map中
+				this.beanDefinitionMap.put(beanName, beanDefinition);
+
+				// 把注入的BeanDefinition的BeanName放入以加载BeanName集合
+				List<String> updatedDefinitions = new ArrayList<String>(this.beanDefinitionNames.size() + 1);
+				updatedDefinitions.addAll(this.beanDefinitionNames);
+				updatedDefinitions.add(beanName);
+				this.beanDefinitionNames = updatedDefinitions;
+	
+				// manualSingletonNames单例注册表
+				if (this.manualSingletonNames.contains(beanName)) {
+					Set<String> updatedSingletons = new LinkedHashSet<String>(this.manualSingletonNames);
+					updatedSingletons.remove(beanName);
+					this.manualSingletonNames = updatedSingletons;
+				}
+			}
+		} else {
+			// 注册到BeanDefinition集合中
+			this.beanDefinitionMap.put(beanName, beanDefinition);
+			// 注册到BeanDefinitionNames集合中	
+			this.beanDefinitionNames.add(beanName);
+			// 注册到BeanDefinition集合
+			this.manualSingletonNames.remove(beanName);
+		}
+		this.frozenBeanDefinitionNames = null;
+	}
+
+	if (oldBeanDefinition != null || containsSingleton(beanName)) {
+		resetBeanDefinition(beanName);
+	}
+}
+
+// 校验BeanDefinition。
+location：AbstractBeanDefinition
+public void validate() throws BeanDefinitionValidationException {
+	if (!getMethodOverrides().isEmpty() && getFactoryMethodName() != null) {
+		throw new BeanDefinitionValidationException("Cannot combine static factory method with method overrides: " + "the static factory method must create the instance");
+	}
+
+	if (hasBeanClass()) {
+		prepareMethodOverrides();
+	}
+}
+
+//检查此工厂的bean创建阶段是否已经开始，即是否在此期间将任何bean标记为已创建。
+protected boolean hasBeanCreationStarted() {
+	return !this.alreadyCreated.isEmpty();
+}
+// ########################## 第二个例子  end  ############################
+// ########################## 第二个例子  end  ############################
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+############################  annotationConfigParser   start #####################
+// 以annotationConfigParser为例
+public BeanDefinition parse(Element element, ParserContext parserContext) {
+	// 返回为null
+	Object source = parserContext.extractSource(element);
+
+	// 获取所有相关BeanPostProcessors的bean定义
+	Set<BeanDefinitionHolder> processorDefinitions = AnnotationConfigUtils.registerAnnotationConfigProcessors(parserContext.getRegistry(), source);
+
+	// Register component for the surrounding <context:annotation-config> element.
+	CompositeComponentDefinition compDefinition = new CompositeComponentDefinition(element.getTagName(), source);
+	parserContext.pushContainingComponent(compDefinition);
+
+	// Nest the concrete beans in the surrounding component.
+	for (BeanDefinitionHolder processorDefinition : processorDefinitions) {
+		parserContext.registerComponent(new BeanComponentDefinition(processorDefinition));
+	}
+
+	// Finally register the composite component.
+	parserContext.popAndRegisterContainingComponent();
+
+	return null;
+}
+
+// createReaderContext方法在初始化XmlReaderContext是sourceExtractor = NullSourceExtractor
+public Object extractSource(Object sourceCandidate) {
+	return this.sourceExtractor.extractSource(sourceCandidate, this.resource);
+}
+
+
+public static Set<BeanDefinitionHolder> registerAnnotationConfigProcessors(BeanDefinitionRegistry registry, Object source) {
+
+	DefaultListableBeanFactory beanFactory = unwrapDefaultListableBeanFactory(registry);
+	if (beanFactory != null) {
+		if (!(beanFactory.getDependencyComparator() instanceof AnnotationAwareOrderComparator)) {
+			beanFactory.setDependencyComparator(AnnotationAwareOrderComparator.INSTANCE);
+		}
+		if (!(beanFactory.getAutowireCandidateResolver() instanceof ContextAnnotationAutowireCandidateResolver)) {
+			beanFactory.setAutowireCandidateResolver(new ContextAnnotationAutowireCandidateResolver());
+		}
+	}
+
+	Set<BeanDefinitionHolder> beanDefs = new LinkedHashSet<BeanDefinitionHolder>(4);
+
+	if (!registry.containsBeanDefinition(CONFIGURATION_ANNOTATION_PROCESSOR_BEAN_NAME)) {
+		RootBeanDefinition def = new RootBeanDefinition(ConfigurationClassPostProcessor.class);
+		def.setSource(source);
+		beanDefs.add(registerPostProcessor(registry, def, CONFIGURATION_ANNOTATION_PROCESSOR_BEAN_NAME));
+	}
+
+	if (!registry.containsBeanDefinition(AUTOWIRED_ANNOTATION_PROCESSOR_BEAN_NAME)) {
+		RootBeanDefinition def = new RootBeanDefinition(AutowiredAnnotationBeanPostProcessor.class);
+		def.setSource(source);
+		beanDefs.add(registerPostProcessor(registry, def, AUTOWIRED_ANNOTATION_PROCESSOR_BEAN_NAME));
+	}
+
+	if (!registry.containsBeanDefinition(REQUIRED_ANNOTATION_PROCESSOR_BEAN_NAME)) {
+		RootBeanDefinition def = new RootBeanDefinition(RequiredAnnotationBeanPostProcessor.class);
+		def.setSource(source);
+		beanDefs.add(registerPostProcessor(registry, def, REQUIRED_ANNOTATION_PROCESSOR_BEAN_NAME));
+	}
+
+	// Check for JSR-250 support, and if present add the CommonAnnotationBeanPostProcessor.
+	if (jsr250Present && !registry.containsBeanDefinition(COMMON_ANNOTATION_PROCESSOR_BEAN_NAME)) {
+		RootBeanDefinition def = new RootBeanDefinition(CommonAnnotationBeanPostProcessor.class);
+		def.setSource(source);
+		beanDefs.add(registerPostProcessor(registry, def, COMMON_ANNOTATION_PROCESSOR_BEAN_NAME));
+	}
+
+	// Check for JPA support, and if present add the PersistenceAnnotationBeanPostProcessor.
+	if (jpaPresent && !registry.containsBeanDefinition(PERSISTENCE_ANNOTATION_PROCESSOR_BEAN_NAME)) {
+		RootBeanDefinition def = new RootBeanDefinition();
+		try {
+			def.setBeanClass(ClassUtils.forName(PERSISTENCE_ANNOTATION_PROCESSOR_CLASS_NAME,
+					AnnotationConfigUtils.class.getClassLoader()));
+		}
+		catch (ClassNotFoundException ex) {
+			throw new IllegalStateException(
+					"Cannot load optional framework class: " + PERSISTENCE_ANNOTATION_PROCESSOR_CLASS_NAME, ex);
+		}
+		def.setSource(source);
+		beanDefs.add(registerPostProcessor(registry, def, PERSISTENCE_ANNOTATION_PROCESSOR_BEAN_NAME));
+	}
+
+	if (!registry.containsBeanDefinition(EVENT_LISTENER_PROCESSOR_BEAN_NAME)) {
+		RootBeanDefinition def = new RootBeanDefinition(EventListenerMethodProcessor.class);
+		def.setSource(source);
+		beanDefs.add(registerPostProcessor(registry, def, EVENT_LISTENER_PROCESSOR_BEAN_NAME));
+	}
+	if (!registry.containsBeanDefinition(EVENT_LISTENER_FACTORY_BEAN_NAME)) {
+		RootBeanDefinition def = new RootBeanDefinition(DefaultEventListenerFactory.class);
+		def.setSource(source);
+		beanDefs.add(registerPostProcessor(registry, def, EVENT_LISTENER_FACTORY_BEAN_NAME));
+	}
+
+	return beanDefs;
+}
+############################  annotationConfigParser   end #####################
+
+
+
+########################  2019 01 28 ##############
+bean 默认属性值：lazy-init="default"；autowire="default"；autowire-candidate="default"

@@ -1,0 +1,1222 @@
+【spring 4.3.12】
+refresh()方法的第五步骤。
+	invokeBeanFactoryPostProcessors(ConfigurableListableBeanFactory beanFactory)：实例化并调用所有已经注册的BeanFactoryPostProcessor的Bean。注意和BeanPostProcessor的区别。
+
+
+invokeBeanFactoryPostProcessors：【注意是BeanFactoryPostProcessor】 BeanFactoryPostProcessor可以操作BeanDefinition。
+
+// 个人感觉这些BeanFactoryPostProcessor的后置处理，主要针对@Import、@ComponentScan、@Bean这样的注解的BeanDifinition进行处理。
+// 注册BeanFactoryPostProcessor接口的Bean
+
+
+// 实例化并调用所有已经注册的BeanFactoryPostProcessor的bean。如果有给定顺序，则遵守显式顺序。
+location：AbstractApplicationContext
+protected void invokeBeanFactoryPostProcessors(ConfigurableListableBeanFactory beanFactory) {
+	// 内置是ApplicationContext的内置beanFactory
+	PostProcessorRegistrationDelegate.invokeBeanFactoryPostProcessors(beanFactory, getBeanFactoryPostProcessors());
+
+	// 
+	if (beanFactory.getTempClassLoader() == null && beanFactory.containsBean(LOAD_TIME_WEAVER_BEAN_NAME)) {
+		beanFactory.addBeanPostProcessor(new LoadTimeWeaverAwareProcessor(beanFactory));
+		beanFactory.setTempClassLoader(new ContextTypeMatchClassLoader(beanFactory.getBeanClassLoader()));
+	}
+}
+
+// 获取该ApplicationContent中BeanFactoryPostProcessor集合。
+location：AbstractApplicationContext
+public List<BeanFactoryPostProcessor> getBeanFactoryPostProcessors() {
+	// BeanFactoryPostProcessor允许自定的修改Context中的bean definition和改写Context下的BeanFactory中的Bean的属性值。
+	// Context能够自动侦测bean definitions中BeanFactoryPostProcessor beans并在其他Beans创建前，调用他们。
+	// BeanFactoryPostProcessor可以与Bean Definitions交互，并修改Bean Definitions。但是不能够够作用于Bean instance。
+	// 这样做可能会导致过早的bean实例化，违反容器并导致意外的副作用。如果需要与Bean instance做交互，可以看BeanPostProcessor接口。
+	return this.beanFactoryPostProcessors;
+}
+
+// 调用BeanFactory的PostProcessor
+location；PostProcessorRegistrationDelegate
+public static void invokeBeanFactoryPostProcessors(ConfigurableListableBeanFactory beanFactory, List<BeanFactoryPostProcessor> beanFactoryPostProcessors) {
+	// beanFactoryPostProcessors这个时候还没有值。
+	
+	// 如果有的话，首先调用BeanDefinitionRegistryPostProcessors
+	Set<String> processedBeans = new HashSet<String>();
+
+	//  ###########  --->   BeanDefinitionRegistryPostProcessors
+	if (beanFactory instanceof BeanDefinitionRegistry) {
+	
+		BeanDefinitionRegistry registry = (BeanDefinitionRegistry) beanFactory;
+		List<BeanFactoryPostProcessor> regularPostProcessors = new LinkedList<BeanFactoryPostProcessor>();
+		List<BeanDefinitionRegistryPostProcessor> registryProcessors = new LinkedList<BeanDefinitionRegistryPostProcessor>();
+	
+		// beanFactoryPostProcessors为空。如果没有
+		for (BeanFactoryPostProcessor postProcessor : beanFactoryPostProcessors) {
+			if (postProcessor instanceof BeanDefinitionRegistryPostProcessor) {
+				BeanDefinitionRegistryPostProcessor registryProcessor = (BeanDefinitionRegistryPostProcessor) postProcessor;
+				registryProcessor.postProcessBeanDefinitionRegistry(registry);
+				registryProcessors.add(registryProcessor);
+			} else {
+				regularPostProcessors.add(postProcessor);
+			}
+		}
+
+		// 不要在这初始化FactoryBeans，我们需要保留所有的未初始化的常规的Beans，让BeanFactory的PostProcessor处理他们。
+		// 将BeanDefinitionRegistryPostProcessors进行分类，分为实现PriorityOrdered，实现Ordered和其余的。
+		List<BeanDefinitionRegistryPostProcessor> currentRegistryProcessors = new ArrayList<BeanDefinitionRegistryPostProcessor>();
+
+		// 【01】调用实现了PriorityOrdered接口的BeanDefinitionRegistryPostProcessors。
+		// 获取BeanDefinitionRegistryPostProcessor的子类的名称。
+		String[] postProcessorNames = beanFactory.getBeanNamesForType(BeanDefinitionRegistryPostProcessor.class, true, false);
+		for (String ppName : postProcessorNames) {
+	
+			// 检查具有给定名称的bean是否与指定的类型匹配。
+			if (beanFactory.isTypeMatch(ppName, PriorityOrdered.class)) {
+			
+				// 从BeanFactory中取出对应的BeanFactory的Bean。需要进行后置处理的。
+				currentRegistryProcessors.add(beanFactory.getBean(ppName, BeanDefinitionRegistryPostProcessor.class));
+				processedBeans.add(ppName);
+				
+			}
+		}
+		
+		// 集合排序。
+		sortPostProcessors(currentRegistryProcessors, beanFactory);		
+		// 放到registryProcessors中
+		registryProcessors.addAll(currentRegistryProcessors);
+		// 调用过程
+		invokeBeanDefinitionRegistryPostProcessors(currentRegistryProcessors, registry);
+		// 清空currentRegistryProcessors ---》 需要调用的BeanFactoryProcessor。
+		currentRegistryProcessors.clear();
+
+		// 【02】接下来，调用实现Ordered的BeanDefinitionRegistryPostProcessors。
+		postProcessorNames = beanFactory.getBeanNamesForType(BeanDefinitionRegistryPostProcessor.class, true, false);
+		for (String ppName : postProcessorNames) {
+			if (!processedBeans.contains(ppName) && beanFactory.isTypeMatch(ppName, Ordered.class)) {
+				currentRegistryProcessors.add(beanFactory.getBean(ppName, BeanDefinitionRegistryPostProcessor.class));
+				processedBeans.add(ppName);
+			}
+		}
+		sortPostProcessors(currentRegistryProcessors, beanFactory);
+		registryProcessors.addAll(currentRegistryProcessors);
+		invokeBeanDefinitionRegistryPostProcessors(currentRegistryProcessors, registry);
+		currentRegistryProcessors.clear();
+
+		// 【03】最后，调用所有其他BeanDefinitionRegistryPostProcessors直到不再出现其他BeanDefinitionRegistryPostProcessors。
+		// 非上面两种的BeanFactoryProcessor，其他的处理。
+		boolean reiterate = true;
+		while (reiterate) {
+			reiterate = false;
+			postProcessorNames = beanFactory.getBeanNamesForType(BeanDefinitionRegistryPostProcessor.class, true, false);
+			for (String ppName : postProcessorNames) {
+				if (!processedBeans.contains(ppName)) {
+					currentRegistryProcessors.add(beanFactory.getBean(ppName, BeanDefinitionRegistryPostProcessor.class));
+					processedBeans.add(ppName);
+					reiterate = true;
+				}
+			}
+			sortPostProcessors(currentRegistryProcessors, beanFactory);
+			registryProcessors.addAll(currentRegistryProcessors);
+			invokeBeanDefinitionRegistryPostProcessors(currentRegistryProcessors, registry);
+			currentRegistryProcessors.clear();
+		}
+
+		// 现在，调用到目前为止处理了所有处理器的postProcessBeanFactory回调。
+		// 调用给定bean（BeanFactoryPostProcessor类型）postProcessBeanFactory()方法。
+		invokeBeanFactoryPostProcessors(registryProcessors, beanFactory);
+		invokeBeanFactoryPostProcessors(regularPostProcessors, beanFactory);
+	} else {
+		// 调用在上下文实例中注册的工厂处理器。
+		invokeBeanFactoryPostProcessors(beanFactoryPostProcessors, beanFactory);
+	}
+
+	// 不要在这里初始化FactoryBeans：我们需要保留所有未初始化的常规bean，以使bean Factory的post-Processor适用于它们！
+
+	// 获取所有的BeanFactoryPostProcessor的子类
+	String[] postProcessorNames = beanFactory.getBeanNamesForType(BeanFactoryPostProcessor.class, true, false);
+
+	// 让实现PriorityOrdered、Ordered的BeanFactoryPostProcessors和其它的分开。
+	List<BeanFactoryPostProcessor> priorityOrderedPostProcessors = new ArrayList<BeanFactoryPostProcessor>();   // PriorityOrdered
+	List<String> orderedPostProcessorNames = new ArrayList<String>();			//  Ordered
+	List<String> nonOrderedPostProcessorNames = new ArrayList<String>();		//  other
+	
+	// 分类
+	for (String ppName : postProcessorNames) {
+		// 判断是否已经处理过了 
+		if (processedBeans.contains(ppName)) {
+			// skip - already processed in first phase above
+		} else if (beanFactory.isTypeMatch(ppName, PriorityOrdered.class)) {
+			priorityOrderedPostProcessors.add(beanFactory.getBean(ppName, BeanFactoryPostProcessor.class));
+		} else if (beanFactory.isTypeMatch(ppName, Ordered.class)) {
+			orderedPostProcessorNames.add(ppName);
+		} else {
+			nonOrderedPostProcessorNames.add(ppName);
+		}
+	}
+
+	// 【01】首先，调用实现PriorityOrdered的BeanFactoryPostProcessors
+	sortPostProcessors(priorityOrderedPostProcessors, beanFactory);
+	invokeBeanFactoryPostProcessors(priorityOrderedPostProcessors, beanFactory);
+
+	// 【02】接着，调用实现Ordered的BeanFactoryPostProcessors
+	List<BeanFactoryPostProcessor> orderedPostProcessors = new ArrayList<BeanFactoryPostProcessor>();
+	for (String postProcessorName : orderedPostProcessorNames) {
+		orderedPostProcessors.add(beanFactory.getBean(postProcessorName, BeanFactoryPostProcessor.class));
+	}
+	sortPostProcessors(orderedPostProcessors, beanFactory);
+	invokeBeanFactoryPostProcessors(orderedPostProcessors, beanFactory);
+
+	// 【03】最后，调用所有其他BeanFactoryPostProcessors
+	List<BeanFactoryPostProcessor> nonOrderedPostProcessors = new ArrayList<BeanFactoryPostProcessor>();
+	for (String postProcessorName : nonOrderedPostProcessorNames) {
+		nonOrderedPostProcessors.add(beanFactory.getBean(postProcessorName, BeanFactoryPostProcessor.class));
+	}
+	invokeBeanFactoryPostProcessors(nonOrderedPostProcessors, beanFactory);
+
+	// 清除缓存的合并bean定义，因为后处理器可能已经修改了原始元数据，例如， 替换值中的占位符...
+	beanFactory.clearMetadataCache();
+}
+
+
+
+
+
+location：DefaultListableBeanFactory
+public String[] getBeanNamesForType(Class<?> type, boolean includeNonSingletons, boolean allowEagerInit) {
+	// includeNonSingletons=ture;   allowEagerInit=false。
+	
+	if (!isConfigurationFrozen() || type == null || !allowEagerInit) {
+		// 【【result：BeanDefinitionRegistryPostProcessor接口的实现类的名称】】
+		return doGetBeanNamesForType(ResolvableType.forRawClass(type), includeNonSingletons, allowEagerInit);
+	}
+	
+	Map<Class<?>, String[]> cache = (includeNonSingletons ? this.allBeanNamesByType : this.singletonBeanNamesByType);
+	String[] resolvedBeanNames = cache.get(type);
+	if (resolvedBeanNames != null) {
+		return resolvedBeanNames;
+	}
+	resolvedBeanNames = doGetBeanNamesForType(ResolvableType.forRawClass(type), includeNonSingletons, true);
+	if (ClassUtils.isCacheSafe(type, getBeanClassLoader())) {
+		cache.put(type, resolvedBeanNames);
+	}
+	return resolvedBeanNames;
+}
+
+// 是否为所有的bean缓存bean definition metadata。 默认为false。
+location：DefaultListableBeanFactory
+public boolean isConfigurationFrozen() {
+	return this.configurationFrozen;
+}
+
+private String[] doGetBeanNamesForType(ResolvableType type, boolean includeNonSingletons, boolean allowEagerInit) {
+	// includeNonSingletons=ture;   allowEagerInit=false。
+	
+	List<String> result = new ArrayList<String>();
+
+	// 遍历所有的BeanDefinition。
+	for (String beanName : this.beanDefinitionNames) {
+	
+		// 如果bean名称未定义为某些其他bean的别名，则仅将bean视为合格。
+		if (!isAlias(beanName)) {
+			try {
+				RootBeanDefinition mbd = getMergedLocalBeanDefinition(beanName);
+
+				// 仅仅检查bean Definition是否完成，
+				if (!mbd.isAbstract() && (allowEagerInit || ((mbd.hasBeanClass() || !mbd.isLazyInit() || 
+								isAllowEagerClassLoading())) && !requiresEagerInitForType(mbd.getFactoryBeanName()))) {
+					// In case of FactoryBean, match object created by FactoryBean.
+					
+					// 判断是否是FactoryBean
+					boolean isFactoryBean = isFactoryBean(beanName, mbd);
+					
+					// 获取RootBeanDefinition的BeanDefinitionHolder
+					BeanDefinitionHolder dbd = mbd.getDecoratedDefinition();
+					
+					// 匹配发现
+					boolean matchFound = (allowEagerInit || !isFactoryBean || (dbd != null && !mbd.isLazyInit()) || containsSingleton(beanName)) &&
+							(includeNonSingletons || (dbd != null ? mbd.isSingleton() : isSingleton(beanName))) && isTypeMatch(beanName, type);
+							
+					// 如果是FactoryBean，请尝试下一步匹配FactoryBean实例。
+					if (!matchFound && isFactoryBean) {
+						beanName = FACTORY_BEAN_PREFIX + beanName;
+						matchFound = (includeNonSingletons || mbd.isSingleton()) && isTypeMatch(beanName, type);
+					}
+					
+					if (matchFound) {
+						result.add(beanName);
+					}
+				}
+			} catch (CannotLoadBeanClassException ex) {
+				if (allowEagerInit) {
+					throw ex;
+				}
+				
+				if (this.logger.isDebugEnabled()) {
+					this.logger.debug("Ignoring bean class loading failure for bean '" + beanName + "'", ex);
+				}
+				onSuppressedException(ex);
+			} catch (BeanDefinitionStoreException ex) {
+				if (allowEagerInit) {
+					throw ex;
+				}
+				
+				if (this.logger.isDebugEnabled()) {
+					this.logger.debug("Ignoring unresolvable metadata in bean definition '" + beanName + "'", ex);
+				}
+				onSuppressedException(ex);
+			}
+		}
+	}
+	// 【【result：BeanDefinitionRegistryPostProcessor接口的实现类。】】
+
+	// 也可以手动注册单例。this.manualSingletonNames是refresh()方法第三步注册的。
+	for (String beanName : this.manualSingletonNames) {
+		try {
+			// In case of FactoryBean, match object created by FactoryBean.
+			if (isFactoryBean(beanName)) {
+				if ((includeNonSingletons || isSingleton(beanName)) && isTypeMatch(beanName, type)) {
+					result.add(beanName);
+					// Match found for this bean: do not match FactoryBean itself anymore.
+					continue;
+				}
+				// In case of FactoryBean, try to match FactoryBean itself next.
+				beanName = FACTORY_BEAN_PREFIX + beanName;
+			}
+			// Match raw bean instance (might be raw FactoryBean).
+			if (isTypeMatch(beanName, type)) {
+				result.add(beanName);
+			}
+		}
+		catch (NoSuchBeanDefinitionException ex) {
+			// Shouldn't happen - probably a result of circular reference resolution...
+			if (logger.isDebugEnabled()) {
+				logger.debug("Failed to check manually registered singleton with name '" + beanName + "'", ex);
+			}
+		}
+	}
+
+	return StringUtils.toStringArray(result);
+}
+
+location:AbstractBeanDefinition
+protected RootBeanDefinition getMergedLocalBeanDefinition(String beanName) throws BeansException {
+	// 首先快速检查并发Map，锁定最小。初始化化mergedBeanDefinitions为空
+	RootBeanDefinition mbd = this.mergedBeanDefinitions.get(beanName);
+	if (mbd != null) {
+		return mbd;
+	}
+	return getMergedBeanDefinition(beanName, getBeanDefinition(beanName));
+}
+
+				||
+				\/
+				
+location:AbstractBeanDefinition				
+protected RootBeanDefinition getMergedBeanDefinition(String beanName, BeanDefinition bd) throws BeanDefinitionStoreException {
+	return getMergedBeanDefinition(beanName, bd, null);
+}
+
+// 通过beanName获取到BeanDefinition。
+location：DefaultListableBeanFactory
+public BeanDefinition getBeanDefinition(String beanName) throws NoSuchBeanDefinitionException {
+	BeanDefinition bd = this.beanDefinitionMap.get(beanName);
+	if (bd == null) {
+		if (this.logger.isTraceEnabled()) {
+			this.logger.trace("No bean named '" + beanName + "' found in " + this);
+		}
+		throw new NoSuchBeanDefinitionException(beanName);
+	}
+	return bd;
+}
+
+// 如果给定bean的Definition是子bean Definition，则通过与父项合并返回给定bean的RootBeanDefinition。
+location：AbstractBeanFactory
+protected RootBeanDefinition getMergedBeanDefinition(String beanName, BeanDefinition bd, BeanDefinition containingBd) throws BeanDefinitionStoreException {
+	//this.mergedBeanDefinitions为空。containingBd = null
+	synchronized (this.mergedBeanDefinitions) {
+		RootBeanDefinition mbd = null;
+
+		// 现在检查完全锁定以强制执行相同的合并实例。
+		if (containingBd == null) {
+			mbd = this.mergedBeanDefinitions.get(beanName);
+		}
+
+		if (mbd == null) {
+			if (bd.getParentName() == null) {
+				// 使用rootBeanDefinition。
+				if (bd instanceof RootBeanDefinition) {
+					// 赋值RootBeanDefinition。使用给定根beanDefinition的副本。
+					mbd = ((RootBeanDefinition) bd).cloneBeanDefinition();
+				} else {
+					mbd = new RootBeanDefinition(bd);
+				}
+			} else {
+				// Child bean definition: 需要合并父
+				BeanDefinition pbd;
+				try {
+					// 获取父BeanName
+					String parentBeanName = transformedBeanName(bd.getParentName());
+					if (!beanName.equals(parentBeanName)) {
+						pbd = getMergedBeanDefinition(parentBeanName);
+					} else {
+						BeanFactory parent = getParentBeanFactory();
+						if (parent instanceof ConfigurableBeanFactory) {
+							pbd = ((ConfigurableBeanFactory) parent).getMergedBeanDefinition(parentBeanName);
+						} else {
+							throw new NoSuchBeanDefinitionException(parentBeanName, "Parent name '" + parentBeanName + "' is equal to bean name '" + beanName +
+									"': cannot be resolved without an AbstractBeanFactory parent");
+						}
+					}
+				} catch (NoSuchBeanDefinitionException ex) {
+					throw new BeanDefinitionStoreException(bd.getResourceDescription(), beanName, "Could not resolve parent bean definition '" + bd.getParentName() + "'", ex);
+				}
+				
+				// 具有重写值的深层复制。
+				mbd = new RootBeanDefinition(pbd);
+				mbd.overrideFrom(bd);
+			}
+
+			// 如果之前没有配置。设置默认的域：单例。
+			if (!StringUtils.hasLength(mbd.getScope())) {
+				mbd.setScope(RootBeanDefinition.SCOPE_SINGLETON);
+			}
+			
+			// 如果一个包含非单例的Bean，这个Bean不能是单例模式。让我们在这里动态更正，因为这可能是外部bean的父子合并的结果，
+			// 在这种情况下，原始内部bean定义将不会继承合并的外部bean的单例状态。
+			if (containingBd != null && !containingBd.isSingleton() && mbd.isSingleton()) {
+				mbd.setScope(containingBd.getScope());
+			}
+
+			// 暂时缓存合并的bean定义（稍后可能仍会重新合并以获取元数据更改）
+			if (containingBd == null && isCacheBeanMetadata()) {
+				// 放到合并BeanDefinition的Map中。
+				this.mergedBeanDefinitions.put(beanName, mbd);
+			}
+		}
+
+		return mbd;
+	}
+}
+
+location：DefaultBeanFactory
+public boolean isFactoryBean(String name) throws NoSuchBeanDefinitionException {
+	String beanName = transformedBeanName(name);
+
+	Object beanInstance = getSingleton(beanName, false);
+	if (beanInstance != null) {
+		return (beanInstance instanceof FactoryBean);
+	}
+	else if (containsSingleton(beanName)) {
+		// null instance registered
+		return false;
+	}
+
+	// No singleton instance found -> check bean definition.
+	if (!containsBeanDefinition(beanName) && getParentBeanFactory() instanceof ConfigurableBeanFactory) {
+		// No bean definition found in this factory -> delegate to parent.
+		return ((ConfigurableBeanFactory) getParentBeanFactory()).isFactoryBean(name);
+	}
+
+	return isFactoryBean(beanName, getMergedLocalBeanDefinition(beanName));
+}
+
+// 检查
+location：AbstractBeanFactory
+public boolean isTypeMatch(String name, Class<?> typeToMatch) throws NoSuchBeanDefinitionException {
+	return isTypeMatch(name, ResolvableType.forRawClass(typeToMatch));
+}
+
+location：AbstractBeanFactory
+public boolean isTypeMatch(String name, ResolvableType typeToMatch) throws NoSuchBeanDefinitionException {
+	String beanName = transformedBeanName(name);
+
+	// Check manually registered singletons.
+	Object beanInstance = getSingleton(beanName, false);
+	if (beanInstance != null) {
+		if (beanInstance instanceof FactoryBean) {
+			if (!BeanFactoryUtils.isFactoryDereference(name)) {
+				Class<?> type = getTypeForFactoryBean((FactoryBean<?>) beanInstance);
+				return (type != null && typeToMatch.isAssignableFrom(type));
+			} else {
+				return typeToMatch.isInstance(beanInstance);
+			}
+		} else if (!BeanFactoryUtils.isFactoryDereference(name)) {
+			if (typeToMatch.isInstance(beanInstance)) {
+				// Direct match for exposed instance?
+				return true;
+			} else if (typeToMatch.hasGenerics() && containsBeanDefinition(beanName)) {
+				// Generics potentially only match on the target class, not on the proxy...
+				RootBeanDefinition mbd = getMergedLocalBeanDefinition(beanName);
+				Class<?> targetType = mbd.getTargetType();
+				if (targetType != null && targetType != ClassUtils.getUserClass(beanInstance) &&
+						typeToMatch.isAssignableFrom(targetType)) {
+					// Check raw class match as well, making sure it's exposed on the proxy.
+					Class<?> classToMatch = typeToMatch.resolve();
+					return (classToMatch == null || classToMatch.isInstance(beanInstance));
+				}
+			}
+		}
+		return false;
+	} else if (containsSingleton(beanName) && !containsBeanDefinition(beanName)) {
+		// null instance registered
+		return false;
+	}
+
+	// No singleton instance found -> check bean definition.
+	BeanFactory parentBeanFactory = getParentBeanFactory();
+	if (parentBeanFactory != null && !containsBeanDefinition(beanName)) {
+		// No bean definition found in this factory -> delegate to parent.
+		return parentBeanFactory.isTypeMatch(originalBeanName(name), typeToMatch);
+	}
+
+	// Retrieve corresponding bean definition.
+	RootBeanDefinition mbd = getMergedLocalBeanDefinition(beanName);
+
+	Class<?> classToMatch = typeToMatch.resolve();
+	if (classToMatch == null) {
+		classToMatch = FactoryBean.class;
+	}
+	Class<?>[] typesToMatch = (FactoryBean.class == classToMatch ?
+			new Class<?>[] {classToMatch} : new Class<?>[] {FactoryBean.class, classToMatch});
+
+	// Check decorated bean definition, if any: We assume it'll be easier
+	// to determine the decorated bean's type than the proxy's type.
+	BeanDefinitionHolder dbd = mbd.getDecoratedDefinition();
+	if (dbd != null && !BeanFactoryUtils.isFactoryDereference(name)) {
+		RootBeanDefinition tbd = getMergedBeanDefinition(dbd.getBeanName(), dbd.getBeanDefinition(), mbd);
+		Class<?> targetClass = predictBeanType(dbd.getBeanName(), tbd, typesToMatch);
+		if (targetClass != null && !FactoryBean.class.isAssignableFrom(targetClass)) {
+			return typeToMatch.isAssignableFrom(targetClass);
+		}
+	}
+
+	Class<?> beanType = predictBeanType(beanName, mbd, typesToMatch);
+	if (beanType == null) {
+		return false;
+	}
+
+	// Check bean class whether we're dealing with a FactoryBean.
+	if (FactoryBean.class.isAssignableFrom(beanType)) {
+		if (!BeanFactoryUtils.isFactoryDereference(name)) {
+			// If it's a FactoryBean, we want to look at what it creates, not the factory class.
+			beanType = getTypeForFactoryBean(beanName, mbd);
+			if (beanType == null) {
+				return false;
+			}
+		}
+	} else if (BeanFactoryUtils.isFactoryDereference(name)) {
+		// Special case: A SmartInstantiationAwareBeanPostProcessor returned a non-FactoryBean
+		// type but we nevertheless are being asked to dereference a FactoryBean...
+		// Let's check the original bean class and proceed with it if it is a FactoryBean.
+		beanType = predictBeanType(beanName, mbd, FactoryBean.class);
+		if (beanType == null || !FactoryBean.class.isAssignableFrom(beanType)) {
+			return false;
+		}
+	}
+
+	ResolvableType resolvableType = mbd.targetType;
+	if (resolvableType == null) {
+		resolvableType = mbd.factoryMethodReturnType;
+	}
+	if (resolvableType != null && resolvableType.resolve() == beanType) {
+		return typeToMatch.isAssignableFrom(resolvableType);
+	}
+	return typeToMatch.isAssignableFrom(beanType);
+}
+
+
+// 排序
+private static void sortPostProcessors(List<?> postProcessors, ConfigurableListableBeanFactory beanFactory) {
+	Comparator<Object> comparatorToUse = null;
+	if (beanFactory instanceof DefaultListableBeanFactory) {
+		comparatorToUse = ((DefaultListableBeanFactory) beanFactory).getDependencyComparator();
+	}
+	if (comparatorToUse == null) {
+		comparatorToUse = OrderComparator.INSTANCE;
+	}
+	Collections.sort(postProcessors, comparatorToUse);
+}
+
+// 【【【调用BeanDefinitionRegistryPostProcessor的postProcessBeanDefinitionRegistry的方法。】】】
+private static void invokeBeanDefinitionRegistryPostProcessors(Collection<? extends BeanDefinitionRegistryPostProcessor> postProcessors, BeanDefinitionRegistry registry) {
+	// registry就是内置的BeanFactory。
+	for (BeanDefinitionRegistryPostProcessor postProcessor : postProcessors) {
+		postProcessor.postProcessBeanDefinitionRegistry(registry);
+	}
+}
+
+
+##########################  以ConfigurationClassPostProcessor为列   #############
+// 在【标准初始化】之后【修改】应用程序上下文的内部【bean Definition】注册表。将加载所有的常规的bean Definition，但是
+// 没有Bean被实例化。允许在下一个post-processor阶段之前添加（further）bean Definitions
+location：ConfigurationClassPostProcessor
+public void postProcessBeanDefinitionRegistry(BeanDefinitionRegistry registry) {
+	// registry就是内置的BeanFactory。
+	// 获取对应的HashCode。这里传过来的就是DefaultListableBeanFactory。AbstractApplicationContext类中refresh第三步创建的BeanFactory。
+	int registryId = System.identityHashCode(registry);
+
+	// 判断BeanDefinitionRegistryPostProcessor是否已经注册，registriesPostProcessed保存已经注册的BeanDefinitionRegistry的HashCode
+	if (this.registriesPostProcessed.contains(registryId)) {
+		throw new IllegalStateException("postProcessBeanDefinitionRegistry already called on this post-processor against " + registry);
+	}
+	if (this.factoriesPostProcessed.contains(registryId)) {
+		throw new IllegalStateException("postProcessBeanFactory already called on this post-processor against " + registry);
+	}
+	
+	// 把BeanDefinitionRegistry的hashcode注入已经调用过的列表中。
+	this.registriesPostProcessed.add(registryId);
+	
+	// 调用【【【重点】】】
+	processConfigBeanDefinitions(registry);
+}
+
+
+// 基于Configuration类的注册表构建和验证配置模型。
+location：ConfigurationClassPathProcessor
+public void processConfigBeanDefinitions(BeanDefinitionRegistry registry) {
+	// registry就是内置的BeanFactory。
+	
+	List<BeanDefinitionHolder> configCandidates = new ArrayList<BeanDefinitionHolder>();
+	// 获取已经注册的BeanDefinition的BeanName
+	String[] candidateNames = registry.getBeanDefinitionNames();
+
+	// 遍历BeanDefinition。
+	for (String beanName : candidateNames) {
+
+		// 获取注册表中BeanDefinition对象。从DefaultListableBeanFactory实例中取（初始化BeanFactory的时候保存在beanDefinitionMap变量中）。
+		BeanDefinition beanDef = registry.getBeanDefinition(beanName);
+	
+		// 判断给定的BeanDefinition时候有@Configuration注解，或者方法有@Bean注解。
+		if (ConfigurationClassUtils.isFullConfigurationClass(beanDef) || ConfigurationClassUtils.isLiteConfigurationClass(beanDef)) {
+			if (logger.isDebugEnabled()) {
+				logger.debug("Bean definition has already been processed as a configuration class: " + beanDef);
+			}
+		
+		// 检查给定的beanDefinition是否是配置类的候选者。
+		} else if (ConfigurationClassUtils.checkConfigurationClassCandidate(beanDef, this.metadataReaderFactory)) {
+			// 使用@Component、@Service、@Import等注解的类会进行如这个方法,基本上都是自定义的。
+			// 创建BeanDefinitionHolder对象并加入configCandidates
+			configCandidates.add(new BeanDefinitionHolder(beanDef, beanName));
+		}
+	}
+
+	// 如果没有找到@Configuration类，则立即返回
+	if (configCandidates.isEmpty()) {
+		return;
+	}
+
+	// 按先前确定的@Order值排序
+	Collections.sort(configCandidates, new Comparator<BeanDefinitionHolder>() {
+		@Override
+		public int compare(BeanDefinitionHolder bd1, BeanDefinitionHolder bd2) {
+			int i1 = ConfigurationClassUtils.getOrder(bd1.getBeanDefinition());
+			int i2 = ConfigurationClassUtils.getOrder(bd2.getBeanDefinition());
+			return (i1 < i2) ? -1 : (i1 > i2) ? 1 : 0;
+		}
+	});
+
+	// 检测通过封闭的应用程序上下文提供的任何自定义bean名称生成策略
+	SingletonBeanRegistry sbr = null;
+
+	// registry是内置的BeanFactory也就是DefaultListableBeanFactory，也是SingletonBeanRegistry的子类。
+	if (registry instanceof SingletonBeanRegistry) {
+		sbr = (SingletonBeanRegistry) registry;
+		
+		// localBeanNameGeneratorSet默认为false。CONFIGURATION_BEAN_NAME_GENERATOR = "org.springframework.context.annotation.internalConfigurationBeanNameGenerator"
+		if (!this.localBeanNameGeneratorSet && sbr.containsSingleton(CONFIGURATION_BEAN_NAME_GENERATOR)) {
+			BeanNameGenerator generator = (BeanNameGenerator) sbr.getSingleton(CONFIGURATION_BEAN_NAME_GENERATOR);
+			this.componentScanBeanNameGenerator = generator;
+			this.importBeanNameGenerator = generator;
+		}
+	}
+
+	// 解析每一个@Configurtion注解的Bean
+	ConfigurationClassParser parser = new ConfigurationClassParser(this.metadataReaderFactory, this.problemReporter, 
+										this.environment, this.resourceLoader, this.componentScanBeanNameGenerator, registry);
+
+	Set<BeanDefinitionHolder> candidates = new LinkedHashSet<BeanDefinitionHolder>(configCandidates); 
+
+	// 创建的ConfigurationClass集合用于存放已经解析ConfigurationClass。注意长度。
+	Set<ConfigurationClass> alreadyParsed = new HashSet<ConfigurationClass>(configCandidates.size());
+	do {
+		解析过程。【【很重要的解析过程】】
+		parser.parse(candidates);
+		parser.validate();
+
+		// parser.getConfigurationClasses()获取this.configurationClasses的key，parser.getConfigurationClasses()是
+		// parser.parse(candidates);把满足条件的放入configurationClasses集合中。
+		Set<ConfigurationClass> configClasses = new LinkedHashSet<ConfigurationClass>(parser.getConfigurationClasses());
+		configClasses.removeAll(alreadyParsed);
+
+		// 如果reader为null这创建新的。
+		if (this.reader == null) {
+			this.reader = new ConfigurationClassBeanDefinitionReader(registry, this.sourceExtractor, this.resourceLoader, this.environment, this.importBeanNameGenerator, parser.getImportRegistry());
+		}
+	
+		// 加载BeanDefinition过程。
+		this.reader.loadBeanDefinitions(configClasses);
+
+		// 放到已经解析过的集合中
+		alreadyParsed.addAll(configClasses);
+		
+		// 清除
+		candidates.clear();
+
+		// 说明有BeanDefinition没有
+		if (registry.getBeanDefinitionCount() > candidateNames.length) {
+			String[] newCandidateNames = registry.getBeanDefinitionNames();
+			Set<String> oldCandidateNames = new HashSet<String>(Arrays.asList(candidateNames));
+			Set<String> alreadyParsedClasses = new HashSet<String>();
+			for (ConfigurationClass configurationClass : alreadyParsed) {
+				alreadyParsedClasses.add(configurationClass.getMetadata().getClassName());
+			}
+			for (String candidateName : newCandidateNames) {
+				if (!oldCandidateNames.contains(candidateName)) {
+					BeanDefinition bd = registry.getBeanDefinition(candidateName);
+					if (ConfigurationClassUtils.checkConfigurationClassCandidate(bd, this.metadataReaderFactory) &&
+							!alreadyParsedClasses.contains(bd.getBeanClassName())) {
+						candidates.add(new BeanDefinitionHolder(bd, candidateName));
+					}
+				}
+			}
+			candidateNames = newCandidateNames;
+		}
+	} while (!candidates.isEmpty());
+
+	// Register the ImportRegistry as a bean in order to support ImportAware @Configuration classes
+	if (sbr != null) {
+		
+		// 判断BeanFactory中是否
+		if (!sbr.containsSingleton(IMPORT_REGISTRY_BEAN_NAME)) {
+			sbr.registerSingleton(IMPORT_REGISTRY_BEAN_NAME, parser.getImportRegistry());
+		}
+	}
+
+	// 清理缓存。
+	if (this.metadataReaderFactory instanceof CachingMetadataReaderFactory) {
+		((CachingMetadataReaderFactory) this.metadataReaderFactory).clearCache();
+	}
+}
+
+// 通过检查{@link #checkConfigurationClassCandidate}的元数据标记，确定给定的bean Definition是否表示【完整】的{@code @Configuration}类。
+// checkConfigurationClassCandidate方法中，如果BeanDefinition有使用@Configuration注解，者把这个BeanDefinition设置CONFIGURATION_CLASS_ATTRIBUTE的属性值为Full
+location：ConfigurationClassPathProcessor
+public static boolean isFullConfigurationClass(BeanDefinition beanDef) {
+	// CONFIGURATION_CLASS_FULL=full。这是这里没有调用checkConfigurationClassCandidate方法，checkConfigurationClassCandidate方法有给BeanDefinition设置CONFIGURATION_CLASS_ATTRIBUTE属性值
+	// 判断给定的Bean Definition的ConfigurationClassPostProcessor.configurationClass属性值是否为full
+	return CONFIGURATION_CLASS_FULL.equals(beanDef.getAttribute(CONFIGURATION_CLASS_ATTRIBUTE));
+}
+
+// 通过检查{@link #checkConfigurationClassCandidate}的元数据标记，确定给定的bean定义是否指示【精简】{@code @Configuration}类。
+// checkConfigurationClassCandidate方法中，如果BeanDefinition有的@method注解的方法，者把这个BeanDefinition设置CONFIGURATION_CLASS_ATTRIBUTE的属性值为lite
+location：ConfigurationClassPathProcessor
+public static boolean isLiteConfigurationClass(BeanDefinition beanDef) {
+	// 判断给定的Bean Definition的ConfigurationClassPostProcessor.configurationClass属性值是否为lite。这是这里没有调用checkConfigurationClassCandidate方法，checkConfigurationClassCandidate方法有给BeanDefinition设置CONFIGURATION_CLASS_ATTRIBUTE属性值
+	return CONFIGURATION_CLASS_LITE.equals(beanDef.getAttribute(CONFIGURATION_CLASS_ATTRIBUTE));
+}
+
+// 检查给定的beanDefinition是否是配置类的候选者（或者在配置/组件类中声明的嵌套组件类，也要自动注册），并相应地标记它。
+location：ConfigurationClassUtils
+public static boolean checkConfigurationClassCandidate(BeanDefinition beanDef, MetadataReaderFactory metadataReaderFactory) {
+	String className = beanDef.getBeanClassName();
+	if (className == null || beanDef.getFactoryMethodName() != null) {
+		return false;
+	}
+
+	AnnotationMetadata metadata;
+
+	// 判断BeanDefinition是否是AnnotatedBeanDefinition  &&  beanName是否和时候和beanDefinition的Metadata是否一致
+	if (beanDef instanceof AnnotatedBeanDefinition && className.equals(((AnnotatedBeanDefinition) beanDef).getMetadata().getClassName())) {
+		// Can reuse the pre-parsed metadata from the given BeanDefinition...
+		metadata = ((AnnotatedBeanDefinition) beanDef).getMetadata();
+
+	// 判断BeanDefinition是否是AbstractBeanDefinition &&  beanName是否和时候和beanDefinition的Metadata是否一致
+	} else if (beanDef instanceof AbstractBeanDefinition && ((AbstractBeanDefinition) beanDef).hasBeanClass()) {
+		Class<?> beanClass = ((AbstractBeanDefinition) beanDef).getBeanClass();
+		metadata = new StandardAnnotationMetadata(beanClass, true);
+
+	// 都不是
+	} else {
+		try {
+			MetadataReader metadataReader = metadataReaderFactory.getMetadataReader(className);
+			metadata = metadataReader.getAnnotationMetadata();
+		} catch (IOException ex) {
+			if (logger.isDebugEnabled()) {
+				logger.debug("Could not find class file for introspecting configuration annotations: " + className, ex);
+			}
+			return false;
+		}
+	}
+
+	// 判断给地BeanDefinition是否是@Configuration注册的类，或者包含@Bean主机的方法。
+	if (isFullConfigurationCandidate(metadata)) {
+		beanDef.setAttribute(CONFIGURATION_CLASS_ATTRIBUTE, CONFIGURATION_CLASS_FULL);
+	} else if (isLiteConfigurationCandidate(metadata)) {
+		beanDef.setAttribute(CONFIGURATION_CLASS_ATTRIBUTE, CONFIGURATION_CLASS_LITE);
+	} else {
+		return false;
+	}
+
+	// 它是一个完整的或精简配置候选者...让我们确定订单价值，如果有的话。
+
+	// 获取注解metadata的所有@Order注解
+	Map<String, Object> orderAttributes = metadata.getAnnotationAttributes(Order.class.getName());
+
+	// 如果获取得@order的值不为空，
+	if (orderAttributes != null) {
+		// 给BeanDefinition设置order对应的属性值。
+		beanDef.setAttribute(ORDER_ATTRIBUTE, orderAttributes.get(AnnotationUtils.VALUE));
+	}
+
+	return true;
+}
+
+// 解析过程。【【很重要的解析过程】】
+location：ConfigurationClassParser 
+public void parse(Set<BeanDefinitionHolder> configCandidates) {
+	
+	// configCandidates是上一步获取到的@Configuration获取到的BeanDefinition对应的BeanDefinitionHolder集合。
+	this.deferredImportSelectors = new LinkedList<DeferredImportSelectorHolder>();
+
+	// 遍历configCandidates
+	for (BeanDefinitionHolder holder : configCandidates) {
+		
+		// 获取对应的BeanDefinition
+		BeanDefinition bd = holder.getBeanDefinition();
+		try {
+		
+			【可以比较一下这一个的区别】
+			// 注解解析过程
+			if (bd instanceof AnnotatedBeanDefinition) {
+				parse(((AnnotatedBeanDefinition) bd).getMetadata(), holder.getBeanName());
+			} 
+			
+			// 抽象解析过程
+			else if (bd instanceof AbstractBeanDefinition && ((AbstractBeanDefinition) bd).hasBeanClass()) {
+				parse(((AbstractBeanDefinition) bd).getBeanClass(), holder.getBeanName());
+			}
+			
+			// 其他解析过程。
+			else {
+				parse(bd.getBeanClassName(), holder.getBeanName());
+			}
+		} catch (BeanDefinitionStoreException ex) {
+			throw ex;
+		} catch (Throwable ex) {
+			throw new BeanDefinitionStoreException(
+					"Failed to parse configuration class [" + bd.getBeanClassName() + "]", ex);
+		}
+	}
+
+	processDeferredImportSelectors();
+}
+
+
+
+###############################  AnnotatedBeanDefinition  解析过程  ###############
+###############################  AnnotatedBeanDefinition  解析过程  ###############
+location：ConfigurationClassParser
+protected final void parse(AnnotationMetadata metadata, String beanName) throws IOException {
+	processConfigurationClass(new ConfigurationClass(metadata, beanName));
+}
+
+location：ConfigurationClassParser
+protected void processConfigurationClass(ConfigurationClass configClass) throws IOException {
+
+	// ConfigurationClass包含BeanDefinition的Metadata、beanName
+	if (this.conditionEvaluator.shouldSkip(configClass.getMetadata(), ConfigurationPhase.PARSE_CONFIGURATION)) {
+		return;
+	}
+	
+	// 获取ConfigurationClass。
+	ConfigurationClass existingClass = this.configurationClasses.get(configClass);
+
+	// existingClass是否为null。第一次解析都为null
+	if (existingClass != null) {
+		if (configClass.isImported()) {
+			if (existingClass.isImported()) {
+				existingClass.mergeImportedBy(configClass);
+			}
+			// 热忽略新导入的配置类; 现有的非导入类会覆盖它。
+			return;
+		} else {
+			// 找到显式bean Befinition，可能替换导入。让我们删除旧的并使用新的。
+			this.configurationClasses.remove(configClass);
+			for (Iterator<ConfigurationClass> it = this.knownSuperclasses.values().iterator(); it.hasNext();) {
+				if (configClass.equals(it.next())) {
+					it.remove();
+				}
+			}
+		}
+	}
+
+	// 递归处理配置类及其超类层次结构。
+	SourceClass sourceClass = asSourceClass(configClass);
+	do {
+		sourceClass = doProcessConfigurationClass(configClass, sourceClass);
+	}
+	while (sourceClass != null);
+
+	this.configurationClasses.put(configClass, configClass);
+}
+
+
+// 判断是否应该跳过。
+location：ConditionEvaluator
+public boolean shouldSkip(AnnotatedTypeMetadata metadata, ConfigurationPhase phase) {
+	// 判断metadata是否问null  &&  ！metadata没有被@Conditional注解过
+	if (metadata == null || !metadata.isAnnotated(Conditional.class.getName())) {
+		return false;
+	}
+	
+	// 判断phase是否为null
+	if (phase == null) {
+		if (metadata instanceof AnnotationMetadata && ConfigurationClassUtils.isConfigurationCandidate((AnnotationMetadata) metadata)) {
+			return shouldSkip(metadata, ConfigurationPhase.PARSE_CONFIGURATION);
+		}
+		
+		// 递归判断。
+		return shouldSkip(metadata, ConfigurationPhase.REGISTER_BEAN);
+	}
+
+	List<Condition> conditions = new ArrayList<Condition>();
+	
+	// getConditionClasses(metadata)获取BeanDefinition中@Conditional的value值。
+	for (String[] conditionClasses : getConditionClasses(metadata)) {
+
+		// 遍历@Conditional的Value值。
+		for (String conditionClass : conditionClasses) {
+
+			// 获取对应的Condition。
+			Condition condition = getCondition(conditionClass, this.context.getClassLoader());
+			conditions.add(condition);
+		}
+	}
+
+	// 排序。
+	AnnotationAwareOrderComparator.sort(conditions);
+
+	// 遍历获取到的Conditions
+	for (Condition condition : conditions) {
+		ConfigurationPhase requiredPhase = null;
+
+		// 判断condition是否是ConfigurationCondition的子类
+		if (condition instanceof ConfigurationCondition) {
+			requiredPhase = ((ConfigurationCondition) condition).getConfigurationPhase();
+		}
+		if (requiredPhase == null || requiredPhase == phase) {
+			if (!condition.matches(this.context, metadata)) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+
+// 通过给定的ConfigurationClass获取到SourceClass
+location：ConfigurationClassParser
+private SourceClass asSourceClass(ConfigurationClass configurationClass) throws IOException {
+	AnnotationMetadata metadata = configurationClass.getMetadata();
+	if (metadata instanceof StandardAnnotationMetadata) {
+		return asSourceClass(((StandardAnnotationMetadata) metadata).getIntrospectedClass());
+	}
+	return asSourceClass(metadata.getClassName());
+}
+
+location：ConfigurationClassParser
+private SourceClass asSourceClass(ConfigurationClass configurationClass) throws IOException {
+	// 获取BeanDefinition对应元数据。
+	AnnotationMetadata metadata = configurationClass.getMetadata();
+
+	// 判断是否是StandardAnnotationMetadata类型
+	if (metadata instanceof StandardAnnotationMetadata) {
+		return asSourceClass(((StandardAnnotationMetadata) metadata).getIntrospectedClass());
+	}
+	return asSourceClass(metadata.getClassName());
+}
+
+// 通过读取源类中的注释，成员和方法，应用处理并构建完整的{@link ConfigurationClass}。 在发现相关源时，可以多次调用此方法。
+// ########################     ！StandardAnnotationMetadata为例   #############################################
+location：ConfigurationClassParser
+SourceClass asSourceClass(String className) throws IOException {
+	if (className.startsWith("java")) {
+		// 不使用ASM用于核心java类型。
+		try {
+			return new SourceClass(this.resourceLoader.getClassLoader().loadClass(className));
+		} catch (ClassNotFoundException ex) {
+			throw new NestedIOException("Failed to load class [" + className + "]", ex);
+		}
+	}
+
+	// 实例一个SourceClass对象。
+	return new SourceClass(this.metadataReaderFactory.getMetadataReader(className));
+}
+
+
+// 通过读取源类中的注释，成员和方法，应用处理并构建完整的{@link ConfigurationClass}。 在发现相关源时，可以多次调用此方法。
+location：ConfigurationClassParser
+protected final SourceClass doProcessConfigurationClass(ConfigurationClass configClass, SourceClass sourceClass) throws IOException {
+
+	// sourceClass包含BeanDefinition的Metadata、beanName
+
+	// 首先递归处理任何成员（嵌套）类
+	processMemberClasses(configClass, sourceClass);
+
+	// 处理所有@PropertySource注解
+	for (AnnotationAttributes propertySource : AnnotationConfigUtils.attributesForRepeatable(sourceClass.getMetadata(), PropertySources.class, org.springframework.context.annotation.PropertySource.class)) {
+		if (this.environment instanceof ConfigurableEnvironment) {
+			processPropertySource(propertySource);
+		} else {
+			logger.warn("Ignoring @PropertySource annotation on [" + sourceClass.getMetadata().getClassName() + "]. Reason: Environment must implement ConfigurableEnvironment");
+		}
+	}
+
+	// 处理所有的@ComponentScan的注解
+	Set<AnnotationAttributes> componentScans = AnnotationConfigUtils.attributesForRepeatable(sourceClass.getMetadata(), ComponentScans.class, ComponentScan.class);
+	if (!componentScans.isEmpty() && !this.conditionEvaluator.shouldSkip(sourceClass.getMetadata(), ConfigurationPhase.REGISTER_BEAN)) {
+		for (AnnotationAttributes componentScan : componentScans) {
+			// The config class is annotated with @ComponentScan -> perform the scan immediately
+			Set<BeanDefinitionHolder> scannedBeanDefinitions = this.componentScanParser.parse(componentScan, sourceClass.getMetadata().getClassName());
+			// Check the set of scanned definitions for any further config classes and parse recursively if needed
+			for (BeanDefinitionHolder holder : scannedBeanDefinitions) {
+				if (ConfigurationClassUtils.checkConfigurationClassCandidate(
+						holder.getBeanDefinition(), this.metadataReaderFactory)) {
+					parse(holder.getBeanDefinition().getBeanClassName(), holder.getBeanName());
+				}
+			}
+		}
+	}
+
+	// 处理所有的@import注解
+	processImports(configClass, sourceClass, getImports(sourceClass), true);
+
+	// 处理所有@ImportResource注解
+	if (sourceClass.getMetadata().isAnnotated(ImportResource.class.getName())) {
+		AnnotationAttributes importResource = AnnotationConfigUtils.attributesFor(sourceClass.getMetadata(), ImportResource.class);
+		String[] resources = importResource.getStringArray("locations");
+		Class<? extends BeanDefinitionReader> readerClass = importResource.getClass("reader");
+		for (String resource : resources) {
+			String resolvedResource = this.environment.resolveRequiredPlaceholders(resource);
+			configClass.addImportedResource(resolvedResource, readerClass);
+		}
+	}
+
+	// 处理个别@Bean方法
+	Set<MethodMetadata> beanMethods = retrieveBeanMethodMetadata(sourceClass);
+	for (MethodMetadata methodMetadata : beanMethods) {
+		configClass.addBeanMethod(new BeanMethod(methodMetadata, configClass));
+	}
+
+	// 处理接口上的默认方法
+	processInterfaces(configClass, sourceClass);
+
+	// 如果有父类处理父类
+	if (sourceClass.getMetadata().hasSuperClass()) {
+		String superclass = sourceClass.getMetadata().getSuperClassName();
+		if (!superclass.startsWith("java") && !this.knownSuperclasses.containsKey(superclass)) {
+			this.knownSuperclasses.put(superclass, configClass);
+			// Superclass found, return its annotation metadata and recurse
+			return sourceClass.getSuperClass();
+		}
+	}
+
+	// 如果没有父类，处理完成。
+	return null;
+}
+
+// Collection<SourceClass>
+location：ConfigurationClassParser
+private void processMemberClasses(ConfigurationClass configClass, SourceClass sourceClass) throws IOException {
+	【有一个栈的操作。】
+	// sourceClass.getMemberClasses()获取的是Collection<SourceClass>
+	for (SourceClass memberClass : sourceClass.getMemberClasses()) {
+		if (ConfigurationClassUtils.isConfigurationCandidate(memberClass.getMetadata()) && !memberClass.getMetadata	().getClassName().equals(configClass.getMetadata().getClassName())) {
+			if (this.importStack.contains(configClass)) {
+				this.problemReporter.error(new CircularImportProblem(configClass, this.importStack));
+			} else {
+				this.importStack.push(configClass);
+				try {
+					processConfigurationClass(memberClass.asConfigClass(configClass));
+				}
+				finally {
+					this.importStack.pop();
+				}
+			}
+		}
+	}
+}
+
+
+// 
+location：ConfigurationClassParser
+private void processDeferredImportSelectors() {
+	List<DeferredImportSelectorHolder> deferredImports = this.deferredImportSelectors;
+	this.deferredImportSelectors = null;
+	Collections.sort(deferredImports, DEFERRED_IMPORT_COMPARATOR);
+
+	for (DeferredImportSelectorHolder deferredImport : deferredImports) {
+		ConfigurationClass configClass = deferredImport.getConfigurationClass();
+		try {
+			String[] imports = deferredImport.getImportSelector().selectImports(configClass.getMetadata());
+			processImports(configClass, asSourceClass(configClass), asSourceClasses(imports), false);
+		}
+		catch (BeanDefinitionStoreException ex) {
+			throw ex;
+		}
+		catch (Throwable ex) {
+			throw new BeanDefinitionStoreException(
+					"Failed to process import candidates for configuration class [" +
+					configClass.getMetadata().getClassName() + "]", ex);
+		}
+	}
+}
+
+################################  校验过程   ##################################
+public void validate() {
+	for (ConfigurationClass configClass : this.configurationClasses.keySet()) {
+		configClass.validate(this.problemReporter);
+	}
+}
+
+public void validate(ProblemReporter problemReporter) {
+	// A configuration class may not be final (CGLIB limitation)
+	if (getMetadata().isAnnotated(Configuration.class.getName())) {
+		if (getMetadata().isFinal()) {
+			problemReporter.error(new FinalConfigurationProblem());
+		}
+	}
+
+	for (BeanMethod beanMethod : this.beanMethods) {
+		beanMethod.validate(problemReporter);
+	}
+}
+
+
+################################### 加载BeanDefinition过程  ############################### 
+public void loadBeanDefinitions(Set<ConfigurationClass> configurationModel) {
+	TrackedConditionEvaluator trackedConditionEvaluator = new TrackedConditionEvaluator();
+	for (ConfigurationClass configClass : configurationModel) {
+		loadBeanDefinitionsForConfigurationClass(configClass, trackedConditionEvaluator);
+	}
+}
+
+// 读取特定的ConfigurationClass。为这个类本身以及这个类中被@Bean注解的方法注册BeanDefinition。
+location：ConfigurationClassBeanDefinitionReader
+private void loadBeanDefinitionsForConfigurationClass(ConfigurationClass configClass, TrackedConditionEvaluator trackedConditionEvaluator) {
+
+	// 跳过处理
+	if (trackedConditionEvaluator.shouldSkip(configClass)) {
+		String beanName = configClass.getBeanName();
+		if (StringUtils.hasLength(beanName) && this.registry.containsBeanDefinition(beanName)) {
+			this.registry.removeBeanDefinition(beanName);
+		}
+		this.importRegistry.removeImportingClass(configClass.getMetadata().getClassName());
+		return;
+	}
+
+	// 返回此配置类是通过@ {@link Import}注册还是由于嵌套在另一个配置类中而自动注册。
+	// 注册@import
+	if (configClass.isImported()) {
+		registerBeanDefinitionForImportedConfigurationClass(configClass);
+	}
+
+	// 注册@Bean注解的
+	for (BeanMethod beanMethod : configClass.getBeanMethods()) {
+		loadBeanDefinitionsForBeanMethod(beanMethod);
+	}
+
+	// 
+	loadBeanDefinitionsFromImportedResources(configClass.getImportedResources());
+	loadBeanDefinitionsFromRegistrars(configClass.getImportBeanDefinitionRegistrars());
+}
+
+// 判断给定的ConfigurationClass是否应该跳过。
+public boolean shouldSkip(ConfigurationClass configClass) {
+	Boolean skip = this.skipped.get(configClass);
+	if (skip == null) {
+		
+		// 判断configClass是否有Import注解
+		if (configClass.isImported()) {
+			boolean allSkipped = true;
+			for (ConfigurationClass importedBy : configClass.getImportedBy()) {
+				if (!shouldSkip(importedBy)) {
+					allSkipped = false;
+					break;
+				}
+			}
+			if (allSkipped) {
+				// The config classes that imported this one were all skipped, therefore we are skipped...
+				skip = true;
+			}
+		}
+		if (skip == null) {
+			skip = conditionEvaluator.shouldSkip(configClass.getMetadata(), ConfigurationPhase.REGISTER_BEAN);
+		}
+		this.skipped.put(configClass, skip);
+	}
+	return skip;
+}
+
+
+private void loadBeanDefinitionsFromImportedResources(Map<String, Class<? extends BeanDefinitionReader>> importedResources) {
+
+	Map<Class<?>, BeanDefinitionReader> readerInstanceCache = new HashMap<Class<?>, BeanDefinitionReader>();
+
+	// 遍历
+	for (Map.Entry<String, Class<? extends BeanDefinitionReader>> entry : importedResources.entrySet()) {
+		String resource = entry.getKey();
+		Class<? extends BeanDefinitionReader> readerClass = entry.getValue();
+
+		// Default reader selection necessary?
+		if (BeanDefinitionReader.class == readerClass) {
+			if (StringUtils.endsWithIgnoreCase(resource, ".groovy")) {
+				// When clearly asking for Groovy, that's what they'll get...
+				readerClass = GroovyBeanDefinitionReader.class;
+			}
+			else {
+				// Primarily ".xml" files but for any other extension as well
+				readerClass = XmlBeanDefinitionReader.class;
+			}
+		}
+
+		BeanDefinitionReader reader = readerInstanceCache.get(readerClass);
+		if (reader == null) {
+			try {
+				// Instantiate the specified BeanDefinitionReader
+				reader = readerClass.getConstructor(BeanDefinitionRegistry.class).newInstance(this.registry);
+				// Delegate the current ResourceLoader to it if possible
+				if (reader instanceof AbstractBeanDefinitionReader) {
+					AbstractBeanDefinitionReader abdr = ((AbstractBeanDefinitionReader) reader);
+					abdr.setResourceLoader(this.resourceLoader);
+					abdr.setEnvironment(this.environment);
+				}
+				readerInstanceCache.put(readerClass, reader);
+			}
+			catch (Throwable ex) {
+				throw new IllegalStateException(
+						"Could not instantiate BeanDefinitionReader class [" + readerClass.getName() + "]");
+			}
+		}
+
+		// TODO SPR-6310: qualify relative path locations as done in AbstractContextLoader.modifyLocations
+		reader.loadBeanDefinitions(resource);
+	}
+}
+
+
+private void loadBeanDefinitionsFromRegistrars(Map<ImportBeanDefinitionRegistrar, AnnotationMetadata> registrars) {
+	for (Map.Entry<ImportBeanDefinitionRegistrar, AnnotationMetadata> entry : registrars.entrySet()) {
+		entry.getKey().registerBeanDefinitions(entry.getValue(), this.registry);
+	}
+}
+
+
+
+
+
+
+
+#####################  【】
+private static void invokeBeanFactoryPostProcessors(Collection<? extends BeanFactoryPostProcessor> postProcessors, ConfigurableListableBeanFactory beanFactory) {
+	for (BeanFactoryPostProcessor postProcessor : postProcessors) {
+		postProcessor.postProcessBeanFactory(beanFactory);
+	}
+}

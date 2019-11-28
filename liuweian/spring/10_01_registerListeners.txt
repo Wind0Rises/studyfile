@@ -1,0 +1,66 @@
+refresh()
+	registerListeners()：注册监听器。
+
+
+// 注册监听器
+location：AbstractApplicationContext
+protected void registerListeners() {
+
+	// 首先注册特殊的静态监听器【SourceFilteringListener】
+	for (ApplicationListener<?> listener : getApplicationListeners()) {
+		// getApplicationEventMulticaster()这个能够获取到initApplicationEventMulticaster()【第八步】时候设置的SimpleApplicationEventMulticaster【事件源】
+		// 然后并把事件监听器添加到事件源中。
+		getApplicationEventMulticaster().addApplicationListener(listener);
+	}
+
+	// 不要在这里初始化FactoryBeans：我们需要保留所有常规bean未初始化让后处理器适用于他们！
+	
+	// 获取监听器Bean所对应的BeanName
+	String[] listenerBeanNames = getBeanNamesForType(ApplicationListener.class, true, false);
+	
+	// getApplicationEventMulticaster()可以获取refresh方法中第八步注册的事件源。
+	// addApplicationListenerBean(..)为时间源设置监听器。
+	for (String listenerBeanName : listenerBeanNames) {
+		// 把事件监听器Bean添加到事件源中。
+		getApplicationEventMulticaster().addApplicationListenerBean(listenerBeanName);
+	}
+
+	// 现在我们终于有了一个多播器，发布早期的应用程序事件......
+	
+	// 获取更早发布的ApplicationEvents【事件】
+	Set<ApplicationEvent> earlyEventsToProcess = this.earlyApplicationEvents;
+	
+	this.earlyApplicationEvents = null;
+	
+	// 如果事件不为null的话，调用事件监听器。
+	if (earlyEventsToProcess != null) {
+		for (ApplicationEvent earlyEvent : earlyEventsToProcess) {
+			getApplicationEventMulticaster().multicastEvent(earlyEvent);
+		}
+	}
+}
+
+
+// 获取监听器
+public Collection<ApplicationListener<?>> getApplicationListeners() {
+	return this.applicationListeners;
+}
+
+
+// 获取Context的内部ApplicationEventMulticaster
+location：AbstractApplicationContext
+ApplicationEventMulticaster getApplicationEventMulticaster() throws IllegalStateException {
+	if (this.applicationEventMulticaster == null) {
+		throw new IllegalStateException("ApplicationEventMulticaster not initialized - " + "call 'refresh' before multicasting events via the context: " + this);
+	}
+	以获取refresh方法中第八步注册的事件源。
+	return this.applicationEventMulticaster;
+}
+
+location：添加监听器beanName的名称。
+public void addApplicationListenerBean(String listenerBeanName) {
+	synchronized (this.retrievalMutex) {
+		this.defaultRetriever.applicationListenerBeans.add(listenerBeanName);
+		this.retrieverCache.clear();
+	}
+}

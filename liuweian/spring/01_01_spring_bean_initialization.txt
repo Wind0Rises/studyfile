@@ -1,0 +1,145 @@
+###################  XmlWebApplicationContext  ##################
+
+DefaultResourceLoader
+	AbstractApplicationContext
+		AbstractRefreshableApplicationContext
+			AbstractRefreshableConfigApplicationContext
+				AbstractRefreshableWebApplicationContext
+					XmlWebApplicationContext
+					
+					
+
+					
+Spring对Bean的加载、解析、注册。
+					
+
+// 初始化全过程
+location：AbstractApplicationContext
+public void refresh() throws BeansException, IllegalStateException {
+	synchronized (this.startupShutdownMonitor) {
+	
+		// 第一步：刷新准备工作 
+		prepareRefresh();
+
+		// 第二步：告诉子类刷新内部Bean Factory,这里有加载BeanDefinition的全过程，这个步骤完成以后，
+		// 获取到的BeanFactory中有保存着加载的BeanDefinition集合。
+		// ☆☆☆☆☆  很重要 ☆☆☆☆☆
+		ConfigurableListableBeanFactory beanFactory = obtainFreshBeanFactory();
+
+		// Prepare the bean factory for use in this context.
+		prepareBeanFactory(beanFactory);
+
+		try {
+			// Allows post-processing of the bean factory in context subclasses.
+			postProcessBeanFactory(beanFactory);
+
+			// Invoke factory processors registered as beans in the context.
+			invokeBeanFactoryPostProcessors(beanFactory);
+
+			// Register bean processors that intercept bean creation.
+			registerBeanPostProcessors(beanFactory);
+
+			// Initialize message source for this context.
+			initMessageSource();
+
+			// Initialize event multicaster for this context.
+			initApplicationEventMulticaster();
+
+			// Initialize other special beans in specific context subclasses.
+			onRefresh();
+
+			// Check for listener beans and register them.
+			registerListeners();
+
+			// Instantiate all remaining (non-lazy-init) singletons.
+			finishBeanFactoryInitialization(beanFactory);
+
+			// Last step: publish corresponding event.
+			finishRefresh();
+		}
+
+		catch (BeansException ex) {
+			if (logger.isWarnEnabled()) {
+				logger.warn("Exception encountered during context initialization - " +
+						"cancelling refresh attempt: " + ex);
+			}
+
+			// Destroy already created singletons to avoid dangling resources.
+			destroyBeans();
+
+			// Reset 'active' flag.
+			cancelRefresh(ex);
+
+			// Propagate exception to caller.
+			throw ex;
+		}
+
+		finally {
+			// Reset common introspection caches in Spring's core, since we
+			// might not ever need metadata for singleton beans anymore...
+			resetCommonCaches();
+		}
+	}
+}
+
+##################### 第一步  ################
+为刷新操作做准备
+protected void prepareRefresh() {
+	// Context做refresh开始时间
+	this.startupDate = System.currentTimeMillis();
+	
+	// Context是否为关闭状态的标记字段，AtomicBoolean类型
+	this.closed.set(false);
+	
+	// Context是否为活跃状态的标记字段，AtomicBoolean类型
+	this.active.set(true);
+
+	if (logger.isInfoEnabled()) {
+		logger.info("Refreshing " + this);
+	}
+
+	// 初始化所有占位符属性源（这个占位符是Servlet的，系统的【怎么理解】）
+	initPropertySources();
+
+	// Validate that all properties marked as required are resolvable
+	// see ConfigurablePropertyResolver#setRequiredProperties
+	getEnvironment().validateRequiredProperties();
+
+	// Allow for the collection of early ApplicationEvents,
+	// to be published once the multicaster is available...
+	// 允许更早的ApplicationEvents集合被刷新 	 	
+	this.earlyApplicationEvents = new LinkedHashSet<ApplicationEvent>();
+}
+
+
+location：AbstractRefreshWebApplicationContext
+protected void initPropertySources() {
+	ConfigurableEnvironment env = getEnvironment();
+	if (env instanceof ConfigurableWebEnvironment) {
+		((ConfigurableWebEnvironment) env).initPropertySources(this.servletContext, this.servletConfig);
+	}
+}
+
+
+location：AbstractApplication
+public ConfigurableEnvironment getEnvironment() {
+	if (this.environment == null) {
+		this.environment = createEnvironment();
+	}
+	return this.environment;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+【【【参考02-02_LoadBeanDefinition】】】

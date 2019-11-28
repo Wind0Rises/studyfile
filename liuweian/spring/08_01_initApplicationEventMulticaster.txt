@@ -1,0 +1,146 @@
+refresh()方法的第五步骤。
+	initApplicationEventMulticaster():初始化ApplicationEventMulticaster。判断BeanFactory中是否有applicationEventMulticaster对应的Bean，如果有取出来并把值赋给ApplicationContext，如果没有则实例化一个SimpleApplicationEventMulticaster
+									  对象，并把这个实例对象赋值给ApplicationContext中。
+	
+	ApplicationEventMulticaster（接口）：实现该接口的对象，能够管理ApplicationListener对象，并且发布时间给ApplicationListener。
+
+protected void initApplicationEventMulticaster() {
+
+	// 获取内置的BeanFactory。
+	ConfigurableListableBeanFactory beanFactory = getBeanFactory();
+	
+	// BeanFactory是否包含applicationEventMulticaster的Bean
+	if (beanFactory.containsLocalBean(APPLICATION_EVENT_MULTICASTER_BEAN_NAME)) {
+		
+		// 把内置BeanFactory中的applicationEventMulticaster的Bean复制给xmlWebApplicationContext
+		this.applicationEventMulticaster = beanFactory.getBean(APPLICATION_EVENT_MULTICASTER_BEAN_NAME, ApplicationEventMulticaster.class);
+		if (logger.isDebugEnabled()) {
+			logger.debug("Using ApplicationEventMulticaster [" + this.applicationEventMulticaster + "]");
+		}
+		
+	} else {
+	
+		// 创建applicationEventMulticaster的Bean并注册到BeanFactory中。【【事件源】】
+		this.applicationEventMulticaster = new SimpleApplicationEventMulticaster(beanFactory);
+		beanFactory.registerSingleton(APPLICATION_EVENT_MULTICASTER_BEAN_NAME, this.applicationEventMulticaster);
+		if (logger.isDebugEnabled()) {
+			logger.debug("Unable to locate ApplicationEventMulticaster with name '" + APPLICATION_EVENT_MULTICASTER_BEAN_NAME + "': using default [" + this.applicationEventMulticaster + "]");
+		}
+		
+	}
+}
+
+
+###################  类介绍   ########################
+
+SimpleApplicationEventMulticaster：继承AbstractApplicationEventMulticaster
+
+public void multicastEvent(final ApplicationEvent event, ResolvableType eventType) {
+	ResolvableType type = (eventType != null ? eventType : resolveDefaultEventType(event));
+	for (final ApplicationListener<?> listener : getApplicationListeners(event, type)) {
+		Executor executor = getTaskExecutor();
+		if (executor != null) {
+			executor.execute(new Runnable() {
+				@Override
+				public void run() {
+					invokeListener(listener, event);
+				}
+			});
+		} else {
+			invokeListener(listener, event);
+		}
+	}
+}
+
+
+// 根据事件、事件类型获取到对应的监听器。
+protected Collection<ApplicationListener<?>> getApplicationListeners(ApplicationEvent event, ResolvableType eventType) {
+
+	Object source = event.getSource();
+	
+	Class<?> sourceType = (source != null ? source.getClass() : null);
+	// 获取监听器的缓存key。
+	ListenerCacheKey cacheKey = new ListenerCacheKey(eventType, sourceType);
+	
+	ListenerRetriever retriever = this.retrieverCache.get(cacheKey);
+	if (retriever != null) {
+		return retriever.getApplicationListeners();
+	}
+
+	if (this.beanClassLoader == null || (ClassUtils.isCacheSafe(event.getClass(), this.beanClassLoader) && (sourceType == null || ClassUtils.isCacheSafe(sourceType, this.beanClassLoader)))) {
+		
+		synchronized (this.retrievalMutex) {
+			retriever = this.retrieverCache.get(cacheKey);
+			if (retriever != null) {
+				return retriever.getApplicationListeners();
+			}
+			retriever = new ListenerRetriever(true);
+			Collection<ApplicationListener<?>> listeners = retrieveApplicationListeners(eventType, sourceType, retriever);
+			this.retrieverCache.put(cacheKey, retriever);
+			return listeners;
+		}
+	} else {
+		return retrieveApplicationListeners(eventType, sourceType, null);
+	}
+}
+
+// 调用监听器。
+protected void invokeListener(ApplicationListener<?> listener, ApplicationEvent event) {
+	ErrorHandler errorHandler = getErrorHandler();
+	if (errorHandler != null) {
+		try {
+			doInvokeListener(listener, event);
+		} catch (Throwable err) {
+			errorHandler.handleError(err);
+		}
+	} else {
+		doInvokeListener(listener, event);
+	}
+}
+
+// 监听器执行时间。
+private void doInvokeListener(ApplicationListener listener, ApplicationEvent event) {
+	try {
+		listener.onApplicationEvent(event);
+	} catch (ClassCastException ex) {
+		String msg = ex.getMessage();
+		if (msg == null || msg.startsWith(event.getClass().getName())) {
+			Log logger = LogFactory.getLog(getClass());
+			if (logger.isDebugEnabled()) {
+				logger.debug("Non-matching event type for listener: " + listener, ex);
+			}
+		} else {
+			throw ex;
+		}
+	}
+}
+
+
+【事件处理中转还是事件源。】个人感觉可以认为是事件源。
+ApplicationEventMulticaster：
+	void addApplicationListener(ApplicationListener<?> listener);添加一个监听器通知所有的事件。
+	void addApplicationListenerBean(String listenerBeanName);添加一个监听器bean通知所有的事件。
+	void removeApplicationListener(ApplicationListener<?> listener);从监听器列表从删除给定的监听器。
+	void removeAllListeners();移除所有的监听器。
+	void multicastEvent(ApplicationEvent event);
+	
+
+AbstractApplicationEventMulticaster：
+	
+	内部类：ListenerRetriever
+			Set<ApplicationListener<?>> applicationListeners; 监听器。
+			Set<String> applicationListenerBeans；监听器Bean的Beanname。
+			
+			
+			
+ApplicationListener:【监听器】继承了EventListener。
+	void onApplicationEvent(E event);处理给定的事件。
+	
+
+ApplicationEvent：【时间】继承EventObject。
+	protected transient Object  source;
+	
+	
+时间源：
+时间：
+监听器：

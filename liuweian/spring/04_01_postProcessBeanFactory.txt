@@ -1,0 +1,112 @@
+refresh()
+	postProcessBeanFactory()：允许在上下文子类中对bean factory进行后处理。
+
+
+
+上一步：
+	beanPostProcessors：ApplicationContextAwareProcessor、ApplicationListenerDetector
+
+
+这一步：
+	beanPostProcessors：ServletContextAwareProcessor
+	ignoredDependencyInterfaces：ServletContextAware、ServletConfigAware
+	resolvableDependencies：ServletRequest、ServletResponse、HttpSession、WebRequest
+
+// BeanFactory后置处理过程。
+location；AbstractRefreshableWebApplicationContext
+protected void postProcessBeanFactory(ConfigurableListableBeanFactory beanFactory) {
+	// beanFactory：为内部创建的BeanFactory。
+	// 添加后置处理对应。ServletContextAware实现的基础。
+	beanFactory.addBeanPostProcessor(new ServletContextAwareProcessor(this.servletContext, this.servletConfig));
+
+	// 忽略依赖接口。
+	beanFactory.ignoreDependencyInterface(ServletContextAware.class);
+	beanFactory.ignoreDependencyInterface(ServletConfigAware.class);
+
+	WebApplicationContextUtils.registerWebApplicationScopes(beanFactory, this.servletContext);
+	WebApplicationContextUtils.registerEnvironmentBeans(beanFactory, this.servletContext, this.servletConfig);
+}
+
+// 注册WebApplication的域
+location：WebApplicationContextUtils
+public static void registerWebApplicationScopes(ConfigurableListableBeanFactory beanFactory, ServletContext sc) {
+	// 设置WebApplication的域
+	SCOPE_REQUEST=request；SCOPE_SESSION=session；SCOPE_GLOBAL_SESSION=global_session。
+	beanFactory.registerScope(WebApplicationContext.SCOPE_REQUEST, new RequestScope());
+	beanFactory.registerScope(WebApplicationContext.SCOPE_SESSION, new SessionScope(false));
+	beanFactory.registerScope(WebApplicationContext.SCOPE_GLOBAL_SESSION, new SessionScope(true));
+
+	// 判断ServletContext是否为null。
+	if (sc != null) {
+		ServletContextScope appScope = new ServletContextScope(sc);
+		//  SCOPE_APPLICATION=application
+		beanFactory.registerScope(WebApplicationContext.SCOPE_APPLICATION, appScope);
+		// Register as ServletContext attribute, for ContextCleanupListener to detect it.
+		sc.setAttribute(ServletContextScope.class.getName(), appScope);
+	}
+
+	beanFactory.registerResolvableDependency(ServletRequest.class, new RequestObjectFactory());
+	beanFactory.registerResolvableDependency(ServletResponse.class, new ResponseObjectFactory());
+	beanFactory.registerResolvableDependency(HttpSession.class, new SessionObjectFactory());
+	beanFactory.registerResolvableDependency(WebRequest.class, new WebRequestObjectFactory());
+	
+	// jsfPresent默认为false
+	if (jsfPresent) {
+		FacesDependencyRegistrar.registerFacesDependencies(beanFactory);
+	}
+}
+
+
+//
+location：WebApplicationContextUtils
+public static void registerEnvironmentBeans(ConfigurableListableBeanFactory bf, ServletContext servletContext, ServletConfig servletConfig) {
+	// bf内置BeanFactory、servletContext=WebAppContext、servletConfig=null
+	
+	// 判断servletContext是否为null && ！ bf是否包含ServletContext Bean  SERVLET_CONTEXT_BEAN_NAME=servletContext
+	if (servletContext != null && !bf.containsBean(WebApplicationContext.SERVLET_CONTEXT_BEAN_NAME)) {
+		// 注册 ServletContext
+		bf.registerSingleton(WebApplicationContext.SERVLET_CONTEXT_BEAN_NAME, servletContext);
+	}
+
+	// 设置servletConfig
+	if (servletConfig != null && !bf.containsBean(ConfigurableWebApplicationContext.SERVLET_CONFIG_BEAN_NAME)) {
+		bf.registerSingleton(ConfigurableWebApplicationContext.SERVLET_CONFIG_BEAN_NAME, servletConfig);
+	}
+
+	// 判断内置BeanFactory中是否包含name为contextParameters的Bean
+	if (!bf.containsBean(WebApplicationContext.CONTEXT_PARAMETERS_BEAN_NAME)) {
+		
+		Map<String, String> parameterMap = new HashMap<String, String>();
+		if (servletContext != null) {
+			Enumeration<?> paramNameEnum = servletContext.getInitParameterNames();
+			// 获取到contextConfigLocation=classpath*:spring/*.xml, org.eclipse.jetty.servlet.Default.useFileMappedBuffer=false
+			while (paramNameEnum.hasMoreElements()) {
+				String paramName = (String) paramNameEnum.nextElement();
+				parameterMap.put(paramName, servletContext.getInitParameter(paramName));
+			}
+		}
+		if (servletConfig != null) {
+			Enumeration<?> paramNameEnum = servletConfig.getInitParameterNames();
+			while (paramNameEnum.hasMoreElements()) {
+				String paramName = (String) paramNameEnum.nextElement();
+				parameterMap.put(paramName, servletConfig.getInitParameter(paramName));
+			}
+		}
+		// 注册contextParameters的Bean
+		bf.registerSingleton(WebApplicationContext.CONTEXT_PARAMETERS_BEAN_NAME, Collections.unmodifiableMap(parameterMap));
+	}
+
+	// 判断内置BeanFactory中是否包含name为contextAttributes的Bean
+	if (!bf.containsBean(WebApplicationContext.CONTEXT_ATTRIBUTES_BEAN_NAME)) {
+		Map<String, Object> attributeMap = new HashMap<String, Object>();
+		if (servletContext != null) {
+			Enumeration<?> attrNameEnum = servletContext.getAttributeNames();
+			while (attrNameEnum.hasMoreElements()) {
+				String attrName = (String) attrNameEnum.nextElement();
+				attributeMap.put(attrName, servletContext.getAttribute(attrName));
+			}
+		}
+		// 注册contextAttributes的Bean
+		bf.registerSingleton(WebApplicationContext.CONTEXT_ATTRIBUTES_BEAN_NAME, Collections.unmodifiableMap(attributeMap));
+	}
+}

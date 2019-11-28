@@ -1,0 +1,61 @@
+refresh()	
+initMessageSource():初始化MessageSource信息，如果BeanFactory中有MessageSource对应的Bean则获取出来，把这个Bean赋给ApplicationContext；如果没有这实例化一个DelegatingMessageSource对象，并把这个实例对象
+				    赋给ApplicationContext。【ApplicationContext中有一个MessageSource属性。】
+
+
+location：AbstractApplicationContext
+protected void initMessageSource() {
+	// 获取内置的BeanFactory。
+	ConfigurableListableBeanFactory beanFactory = getBeanFactory();
+
+	// 判断是否有BeanName为messageSource的bean。
+	if (beanFactory.containsLocalBean(MESSAGE_SOURCE_BEAN_NAME)) {
+		
+		// 获取BeanFactory中的MessageSource的Bean
+		this.messageSource = beanFactory.getBean(MESSAGE_SOURCE_BEAN_NAME, MessageSource.class);
+
+		// 让MessageSource知道付MessageSource.
+		if (this.parent != null && this.messageSource instanceof HierarchicalMessageSource) {
+
+			HierarchicalMessageSource hms = (HierarchicalMessageSource) this.messageSource;
+			if (hms.getParentMessageSource() == null) {
+				设置MessageSource的父MessageSource
+				hms.setParentMessageSource(getInternalParentMessageSource());
+			}
+		}
+		if (logger.isDebugEnabled()) {
+			logger.debug("Using MessageSource [" + this.messageSource + "]");
+		}
+		
+	// 如果没有bean命名为：messageSource
+	} else {
+		// DelegatingMessageSource继承MessageSourceSupport，实现了HierarchicalMessageSource、MessageSource
+		DelegatingMessageSource dms = new DelegatingMessageSource();
+
+		// getInternalParentMessageSource()这是父为null
+		dms.setParentMessageSource(getInternalParentMessageSource());
+
+		// Context的messageSource为DelegatingMessageSource
+		this.messageSource = dms;
+
+		// 注册messageSource。
+		beanFactory.registerSingleton(MESSAGE_SOURCE_BEAN_NAME, this.messageSource);
+		if (logger.isDebugEnabled()) {
+			logger.debug("Unable to locate MessageSource with name '" + MESSAGE_SOURCE_BEAN_NAME + "': using default [" + this.messageSource + "]");
+		}
+	}
+}
+
+
+location：AbstractBeanFactory
+public boolean containsLocalBean(String name) {
+		String beanName = transformedBeanName(name);
+		// 判断单例实体里是否存在，判断BeanDefinition中是否存在，判断bean的依赖是否存在，判断是否是FactoryBean。
+		return ((containsSingleton(beanName) || containsBeanDefinition(beanName)) && (!BeanFactoryUtils.isFactoryDereference(name) || isFactoryBean(beanName)));
+	}
+
+
+//  如果它也是AbstractApplicationContext，则返回父上下文的内部消息源; 否则，返回父上下文本身。
+protected MessageSource getInternalParentMessageSource() {
+	return (getParent() instanceof AbstractApplicationContext) ? ((AbstractApplicationContext) getParent()).messageSource : getParent();
+}
