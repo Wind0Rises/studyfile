@@ -1,0 +1,321 @@
+非常重要的成员变量：
+
+	// 同步状态。
+	private volatile int state;
+
+	// 尾节点。
+	private transient volatile Node tail;
+	
+	// 头节点。
+	private transient volatile Node head;
+
+非常重要的成员方法：
+	getState()：获取当前AQS的同步状态
+	setState()：设置AQS的同步状态。
+	
+获取锁：
+	acquire(): 以独占方式获取锁。   可以仔细研究多个线程获取锁的过程？？？
+	
+	
+释放锁：
+
+
+#############################   内部类   #######################################
+内部类：Node节点。
+class Node {
+	static final Node SHARED = new Node();
+	
+	static final Node EXCLUSIVE = null;
+	// 在同步队列中等待的线程等待超时或被中断，需要从同步队列中取消该Node的结点，其结点的waitStatus为CANCELLED，即结束状态，进入该状态后的结点将不会再变化。
+	static final int CANCELLED =  1;
+	// 就是处于唤醒状态，只要前继结点释放锁，就会通知标识为SIGNAL状态的后继结点的线程执行。
+	static final int SIGNAL    = -1;
+	// 与Condition相关，该标识的结点处于等待队列中，结点的线程等待在Condition上，当其他线程调用了Condition的signal()方法后，CONDITION状态的结点将从等待队列转移到同步队列中，等待获取同步锁。
+	static final int CONDITION = -2;
+	// 与共享模式相关，在共享模式中，该状态标识结点的线程处于可运行状态。
+	static final int PROPAGATE = -3;
+
+	// 当前节点的一个等待状态标志位
+	volatile int waitStatus;
+
+	// 该节点的前驱节点
+	volatile Node prev;
+  
+	// 该节点的后继节点
+	volatile Node next;
+
+	// 当前节点持有的线程。
+	volatile Thread thread;
+ 
+	// AQS中阻塞队列采用的是用双向链表保存，用prve和next相互链接。
+	// 而AQS中条件队列是使用单向列表保存的，用nextWaiter来连接。阻塞队列和条件队列并不是使用的相同的数据结构。
+	// Condition队列中指向结点在队列中的后继；在CLH队列中共享模式下值取SHARED,独占模式下为null。
+	Node nextWaiter;
+	
+	Node() { 
+	}
+
+	Node(Thread thread, Node mode) { 
+		this.nextWaiter = mode;
+		this.thread = thread;
+	}
+
+	Node(Thread thread, int waitStatus) {
+		this.waitStatus = waitStatus;
+		this.thread = thread;
+	}
+
+	final boolean isShared() {
+		return nextWaiter == SHARED;
+	}
+
+	final Node predecessor() throws NullPointerException {
+		Node p = prev;
+		if (p == null) {
+			throw new NullPointerException();
+		}  else {
+			return p;
+		}
+	}
+}
+
+
+
+/**
+ * 
+ */
+
+#######################################################################################################################################################
+#########################################                            代码解析                    ######################################################
+#######################################################################################################################################################
+
+// 以独占的方式获取锁，忽略中断。
+// 通过至少调用一次{@link #tryAcquire}并成功返回来实现。否者线程将进入等待队里，线程并被堵塞，直到调用tryAcquire成功。
+// AQS中的tryAcquire是需要子类进行重写的。
+public final void acquire(int arg) {
+	// tryAcquire尝试获取到锁
+	// 如果获取锁失败   【并且】 加入队列失败      --直接-->   中断线程。
+ 	if (!tryAcquire(arg) && acquireQueued(addWaiter(Node.EXCLUSIVE), arg)) {
+		selfInterrupt();
+	}	
+}
+
+
+// 尝试以独占方式获取锁。查询对象的状态是否允许以独占模式获取对象，如果允许则获取对象。
+protected boolean tryAcquire(int arg) {
+	throw new UnsupportedOperationException();
+}
+
+
+/**
+ * 创建一个线的节点，并把节点添加到等待队里的尾部。（这个队列是AQS的双向链表，由tail尾节点和head头结点组成）
+ * 并返回刚刚创建并设置为尾结点的节点。
+ */
+// 如果是以独占的方式传入的是Node.EXCLUSIVE = null;
+// 如果是以共享的方式传入的是Node.SHARED = new Node();  这个参数在Node中是用final修饰的。
+private Node addWaiter(Node mode) {
+	// 创建链表节点
+	Node node = new Node(Thread.currentThread(), mode);
+	
+	// 把等待队列的尾节点复制给pred。
+	Node pred = tail;
+	
+	// 当尾节点不为空时进入if
+	if (pred != null) {
+		// 把刚刚new出来的节点的前驱节点指向尾节点。
+		node.prev = pred;
+		
+		// 把当前的AQS的尾节点更新为刚刚new的节点。
+		if (compareAndSetTail(pred, node)) {
+			// 把当前的AQS的尾节点更新为刚刚new的节点成功以后，把开始尾节点的后继节点设置为刚刚new的节点。
+			pred.next = node;
+			return node;
+		}
+	}
+	
+	// 如果尾节点为空，或者是CAS更新尾节点失败时需要：不断尝试把传入的Node放入AQS节点上，相当于一个自旋操作。
+	enq(node);
+	
+	return node;
+}
+
+// 这是一个原子操作。
+private final boolean compareAndSetTail(Node expect, Node update) {
+	return unsafe.compareAndSwapObject(this, tailOffset, expect, update);
+}
+
+/**
+ * 由此可以看出头节点就是一个空的Node，
+ *
+ */
+// 不断尝试把传入的Node放入AQS节点上。
+private Node enq(final Node node) {
+	for (;;) {
+		Node t = tail;
+		if (t == null) {
+			// 如果尾节点为空，new一个新节点，并把这个节点设置为AQS的头节点，成功以后把尾节点设置为刚刚设置的头结点。然后进入下一次循环，这是可以看到头节点就是一个空Node。
+			// 这是头尾节点都是一个节点。
+			if (compareAndSetHead(new Node())) {
+				tail = head;
+			}
+		} else {
+			// 如果尾节点不为空，把AQS的尾节点设置为传入的node。就是把传入的节点放入AQS的队列（链表）后。
+			node.prev = t;
+			if (compareAndSetTail(t, node)) {
+				t.next = node;
+				return t;
+			}
+		}
+	}
+}
+
+// cas设置头节点，尾节点为空时，头节点也为空，这个是头尾是一个节点。
+private final boolean compareAndSetHead(Node update) {
+	return unsafe.compareAndSwapObject(this, headOffset, null, update);
+}
+
+
+/**
+ * head   <-----------> tail
+ *    p(可能是head也可能不是)  <-->  node 
+ */ 
+// node为刚刚设置的尾节点。这个时候尾节点可能已经变了。
+final boolean acquireQueued(final Node node, int arg) {
+	boolean failed = true;	
+	try {
+		boolean interrupted = false;
+		for (;;) {
+			// 获取node的前驱节点。
+			final Node p = node.predecessor();
+			
+			// 如果node的前驱节点是头节点【并且】尝试获取锁并且成功了，进入if语句，说明这个时候这个节点已经获取到锁了。
+			if (p == head && tryAcquire(arg)) {	
+				// 把该节点设置为头节点，头节点的thread为空，并且没有前驱节点。
+				setHead(node);
+				// 把以前的头节点的后继节点设置为null，这个时候头结点就出队来。
+				p.next = null;
+				failed = false;
+				return interrupted;
+			}
+			
+			// parkAndCheckInterrupt()方法中的LockSupport.park(this)方法会让线程挂起。
+			if (shouldParkAfterFailedAcquire(p, node) && parkAndCheckInterrupt()) {
+				interrupted = true;
+			}
+		}
+	} finally {
+		if (failed) {
+			cancelAcquire(node);
+		}
+	}
+}
+
+// 设置head节点，node的thread和前驱设为空。
+private void setHead(Node node) {
+	head = node;
+	node.thread = null;
+	node.prev = null;
+}
+
+##############################################################################################
+#    状态		#	判断结果		#			说明                                         #
+# waitStatus=0	#	代表初始化状态	#	该节点尚未被初始化完成                               #
+# waitStatus>0	#	取消状态		#	说明该线程中断或者等待超时，需要移除该线程           #
+# waitStatus<0	#	有效状态		#	该线程处于可以被唤醒的状态                           #
+##############################################################################################
+
+/**
+ * 判断前驱节点的状态。
+ *		唤醒状态：返回ture。
+ *		CANCELLED状态：从队列中删除这些出于cancelled节点。
+ */
+private static boolean shouldParkAfterFailedAcquire(Node pred, Node node) {
+	// 获取前驱的状态。
+	int ws = pred.waitStatus;
+	
+	// 前驱节点为。SIGNAL = -1；就是处于唤醒状态，只要前继结点释放锁，就会通知标识为SIGNAL状态的后继结点的线程执行。
+	if (ws == Node.SIGNAL) {
+		return true;
+	}
+	
+	// 该节点已经取消。
+	if (ws > 0) {
+		do {
+			// 把node的前驱的前驱复制给node前驱，就是从队列中取出pred节点。这个会一直判断，直到找到node的上面的第一个waitStatus不大于0的节点。
+			/**
+			 *  pred.prev  <-->  pred   <-->   node
+			 *  pred.prev  <-->  node
+			 */
+			node.prev = pred = pred.prev;
+		} while (pred.waitStatus > 0);
+		pred.next = node;
+	} else {
+		// waitStatus必须等于0或者是PROPAGATE = -3
+		// 设置前驱节点得waitStatus为-1。
+		compareAndSetWaitStatus(pred, ws, Node.SIGNAL);
+	}
+	return false;
+}
+
+// 这只节点得状态。
+private static final boolean compareAndSetWaitStatus(Node node, int expect, int update) {
+	return unsafe.compareAndSwapInt(node, waitStatusOffset, expect, update);
+}
+
+// 暂停一下，并检查中断。中断返回true。
+private final boolean parkAndCheckInterrupt() {
+	LockSupport.park(this);
+	return Thread.interrupted();
+}
+
+
+###############################################    独占锁--解锁  #########################################################################
+/**
+ * 解锁过程。
+ */
+public final boolean release(int arg) {
+	if (tryRelease(arg)) {
+		Node h = head;
+		
+		// 头节点不为空，并且状态不等于0(0代表是初始化状态)
+		if (h != null && h.waitStatus != 0) {
+			unparkSuccessor(h);
+		}
+		return true;
+	}
+	return false;
+}
+
+/**
+ * 尝试解锁，留给子类实现。
+ */
+protected boolean tryRelease(int arg) {
+	throw new UnsupportedOperationException();
+}
+
+private void unparkSuccessor(Node node) {
+	// 获取节点的状态
+	int ws = node.waitStatus;
+	
+	if (ws < 0) {
+		// 通过CAS把状态更改0。
+		compareAndSetWaitStatus(node, ws, 0);
+	}
+
+	// 获取node的下一个节点。
+	Node s = node.next;
+	
+	// 后继节点为空或者是节点已经取消。
+	if (s == null || s.waitStatus > 0) {
+		s = null;
+		for (Node t = tail; t != null && t != node; t = t.prev) {
+			if (t.waitStatus <= 0) {
+				s = t;
+			}
+		}
+	}
+	
+	if (s != null) {
+		LockSupport.unpark(s.thread);
+	}
+}
