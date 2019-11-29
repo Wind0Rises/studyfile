@@ -15,7 +15,7 @@ public class TestReadWriteLock {
     class ProcessObject {
         private Object object;
 
-        private ReentrantReadWriteLock readWriteLock = new ReentrantReadWriteLock();
+        public ReentrantReadWriteLock readWriteLock = new ReentrantReadWriteLock();
 
         public void get() throws InterruptedException {
             // 读上锁。
@@ -27,7 +27,7 @@ public class TestReadWriteLock {
 
                 /**/
                 //  testGetWriteLock()测试使用。
-                    TimeUnit.SECONDS.sleep(3);
+                    TimeUnit.SECONDS.sleep(100);
 
                 System.out.println(Thread.currentThread().getName() + ": 读取数据为" + this.object);
             } finally {
@@ -54,20 +54,109 @@ public class TestReadWriteLock {
                     TimeUnit.SECONDS.sleep(3);
                 */
 
+                TimeUnit.SECONDS.sleep(100);
+
                 this.object = object;
                 System.out.println(Thread.currentThread().getName() + ": 写数据完成，现在的值" + this.object);
             } finally {
                 readWriteLock.writeLock().unlock();
             }
         }
+
+        public void put(Object object, long timeOut) throws InterruptedException {
+            System.out.println("dddddddddddddddddddddddddddddddddddd");
+            // 写上锁
+            readWriteLock.writeLock().lock();
+            try {
+                System.out.println(Thread.currentThread().getName() + ": 准备写数据");
+                // TimeUnit.SECONDS.sleep(new Random().nextInt(10));
+
+                /*
+                    testGetWriteLock()测试使用。
+                    TimeUnit.SECONDS.sleep(10);
+                */
+
+                /*
+                    // multiWriteLock()测试使用。
+                    TimeUnit.SECONDS.sleep(3);
+                */
+
+                TimeUnit.SECONDS.sleep(timeOut);
+
+                this.object = object;
+                System.out.println(Thread.currentThread().getName() + ": 写数据完成，现在的值" + this.object);
+            } finally {
+                readWriteLock.writeLock().unlock();
+            }
+        }
+
+        public ReadWriteLock getReadWriteLock() {
+            return readWriteLock;
+        }
     }
 
 
-    public static void main(String[] args) {
+    public static void main(String[] args) throws Exception {
         // testGetWriteLock();
         // testReadLock();
         // multiReadLock();
-        multiWriteLock();
+        // multiWriteLock();
+        test2();
+    }
+
+    public static void test2() throws Exception {
+        final ProcessObject processObject = new TestReadWriteLock().new ProcessObject();
+        Thread writeLock1 = new Thread(() -> {
+            try {
+                processObject.put(1000, 30);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        },"writeLock1");
+        Thread writeLock2 = new Thread(() -> {
+            try {
+                processObject.put(2000, 100);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        },"writeLock2");
+        Thread readLock1 = new Thread(() -> {
+            try {
+                processObject.get();
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        },"readLock1");
+        Thread readLock2 = new Thread(() -> {
+            try {
+                processObject.get();
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        },"readLock2");
+        Thread readLock3 = new Thread(() -> {
+            try {
+                processObject.get();
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        },"readLock3");
+
+        writeLock1.start();
+        TimeUnit.SECONDS.sleep(1);
+        writeLock2.start();
+        TimeUnit.SECONDS.sleep(1);
+
+        readLock1.start();
+        TimeUnit.SECONDS.sleep(1);
+        readLock2.start();
+        TimeUnit.SECONDS.sleep(1);
+        readLock3.start();
+        TimeUnit.SECONDS.sleep(1);
+
+
+        TimeUnit.SECONDS.sleep(5000);
+
     }
 
     /**

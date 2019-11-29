@@ -1,0 +1,82 @@
+null值的问题：
+
+Map  -->  ConcurrentHashMap
+List -->  CopyOnWriteArrayList   --  使用ReentrantLock上锁。能够保持线程安全，但是读没有上锁。
+Set  -->  CopyOnWriteArraySet	 --  是基于CopyOnWriteArrayList操作的。
+
+
+
+
+CopyOnWriteArrayList：
+
+
+public boolean addIfAbsent(E e) {
+	// 获取CopyOnWriteArrayList内部维护的数组。
+	Object[] snapshot = getArray();
+	return indexOf(e, snapshot, 0, snapshot.length) >= 0 ? false : addIfAbsent(e, snapshot);
+}
+
+
+/**
+ * 判断给定元素，在CopyOnWriteArrayList中是否存在。如果存在返回元素在数组中的下标。
+ */
+private static int indexOf(Object o, Object[] elements, int index, int fence) {
+	if (o == null) {
+		for (int i = index; i < fence; i++)
+			if (elements[i] == null) {
+				return i;
+			}
+	} else {
+		for (int i = index; i < fence; i++)
+			if (o.equals(elements[i])) {
+				return i;
+			}
+	}
+	return -1;
+}
+
+/**
+ * list中还没有这个元素，进行添加操作。
+ * 这个方法一进来就是使用ReentrantLock加锁的。
+ */
+private boolean addIfAbsent(E e, Object[] snapshot) {
+	final ReentrantLock lock = this.lock;
+	lock.lock();
+	
+	try {
+		Object[] current = getArray();
+		int len = current.length;
+		
+		// 判断从开始到这里内部数组是否发生改变了。
+		if (snapshot != current) {
+			// 返回开始获取的数组的长度 和 现在获取的数组的长度中的比较小的那个。
+			int common = Math.min(snapshot.length, len);
+			for (int i = 0; i < common; i++) {
+			
+				// 如果当前数组元素和开始的数组一直，就不用判断，因为indexOf方法已经判断过了。
+				// 只用判断当前数组元素和开始的数组不一致的数据。
+				if (current[i] != snapshot[i] && eq(e, current[i])) {
+					return false;
+				}
+			}
+			
+			// 判读当前数组从common到len是否包含e元素。
+			if (indexOf(e, current, common, len) >= 0){
+				return false;
+			}
+		}
+		
+		// 数组copy。
+		Object[] newElements = Arrays.copyOf(current, len + 1);
+		
+		// 把新数组的第len位置设置为e。
+		newElements[len] = e;
+		
+		// 把新数组赋值给内部数组。
+		setArray(newElements);
+		
+		return true;
+	} finally {
+		lock.unlock();
+	}
+}

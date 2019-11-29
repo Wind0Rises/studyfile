@@ -37,21 +37,6 @@ public class ZooCuratorLock {
     }
 
     /**
-     * 释放锁
-     */
-    public void releaseLock(){
-        try {
-            if(interProcessMutex != null && interProcessMutex.isAcquiredInThisProcess()){
-                interProcessMutex.release();
-                curatorFramework.delete().inBackground().forPath(LOCK_ROOT + lockName);
-                LOG.info("Thread:"+Thread.currentThread().getId()+" release distributed lock  success");
-            }
-        }catch (Exception e){
-            LOG.info("Thread:"+Thread.currentThread().getId()+" release distributed lock  exception="+e);
-        }
-    }
-
-    /**
      * 获取锁。
      */
     public void acquireLock() {
@@ -73,6 +58,21 @@ public class ZooCuratorLock {
             LOG.info("Thread:"+Thread.currentThread().getId() + " acquire distributed lock busy");
         }else{
             LOG.info("Thread:"+Thread.currentThread().getId() + " acquire distributed lock  success");
+        }
+    }
+
+    /**
+     * 释放锁
+     */
+    public void releaseLock(){
+        try {
+            if(interProcessMutex != null && interProcessMutex.isAcquiredInThisProcess()){
+                interProcessMutex.release();
+                curatorFramework.delete().inBackground().forPath(LOCK_ROOT + lockName);
+                LOG.info("Thread:"+Thread.currentThread().getId()+" release distributed lock  success");
+            }
+        }catch (Exception e){
+            LOG.info("Thread:"+Thread.currentThread().getId()+" release distributed lock  exception="+e);
         }
     }
 }

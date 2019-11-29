@@ -31,9 +31,9 @@
 	
 	
 	
-	
-ZooKeeper是一个分布式的，开放源码的分布式应用程序协调服务
-	配置管理、命名服务、分布式锁、集群管理。
+强一致性（Consistency）、可用性（Availability）、分区容错性（Partition tolerance）。
+ZooKeeper：是一个分布式的，开放源码的分布式应用程序协调服务。可以为分布式系统提供配置管理、命名服务、分布式锁、集群管理等服务。zookeeper主要保证C（强一致性）
+		   P（分区容错性）。
 
 zookeeper命令：
 	connect host:port
@@ -46,8 +46,8 @@ zookeeper命令：
 	
 	create [-s] [-e] path data acl
 		create创建一个节点。默认创建持久化节点。
-			-s：表示顺序节点
-			-e：表示临时节点，在客户端退出以后会自定删除。	
+			-s：表示顺序节点。[sort：有序的]
+			-e：表示临时节点，在客户端退出以后会自定删除。[ephemeral：短暂的]
 		acl：用于设置权限的。
 	
 	
@@ -189,11 +189,15 @@ zookeeper命令：
 	zkClient、Curator
 	
 	
-5、使用zookeeper实现分布式锁。
+5、使用zookeeper实现分布式锁。  https://www.cnblogs.com/tong-yuan/p/11619006.html
 	* 获取锁
-	首先创建一个持久化节点persistNode，用于表示某一个锁的表示，如果有一个线程需要获取锁，需要在持久化节点persistNode下创建一个临时顺序节点。如果持久化
-	节点下没有任何节点，该线程创建的节点为第一个节点，直接获取锁。如果又有其他线程过来获取锁，则继续创建锁，并在前一个临时节点上添加Watch。这样组成了一个
-	等待队列。
-	当第一个线程结束以后，会删除第一个临时节点，由于第二节点监听第一个节点，当第一节点被删除后，第二节点会立即接收到通知，如此线程二就可以获取到锁。
+		首先创建一个持久化节点persistNode，用于表示某一个锁，如果有一个线程需要获取锁，需要在持久化节点persistNode下创建一个临时顺序节点。如果持久化节点下没有
+		任何节点，该线程创建的节点为第一个节点，直接获取锁。如果又有其他线程过来获取锁，则继续创建锁，并在前一个临时节点上添加Watch。这样组成了一个等待队列。当
+		第一个线程结束以后，会删除第一个临时节点，由于第二节点监听第一个节点，当第一节点被删除后，第二节点会立即接收到通知，如此线程二就可以获取锁。
+		
+	* 命令：
+		create /persistNode dataMessage
+			线程一： create -s -e /persistNode/thread1 thread1Message;
+			线程二： create -s -e /persistNode/thread2 thread2Message;
 	
 6、比较redis和zookeeper实现分布式锁的优缺点。
