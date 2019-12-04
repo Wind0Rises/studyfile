@@ -42,3 +42,13 @@ InitializingBean.afterPropertiesSet(): 被BeanFactory在设置所有bean属性�
 DestructionAwareBeanPostProcessor.postProcessBeforeDestruction(): 在销毁之前将此BeanPostProcessor 应用于给定的bean实例。能够调用自定义回调，像是DisposableBean 的销毁和自定义销毁方法，这个回调仅仅适用于工厂中的单例bean(包括内部bean)
 
 实现了自定义的destory()方法
+
+
+
+
+
+
+
+
+2、Cglib与JDK的动态代理。
+

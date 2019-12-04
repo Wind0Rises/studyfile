@@ -1,4 +1,4 @@
-idea：
+ idea：
 	Ctrl + Alt + 向左：Back
 	Ctrl + Alt + 向右：Froward
 	

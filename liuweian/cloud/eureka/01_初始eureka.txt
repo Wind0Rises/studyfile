@@ -1,0 +1,11 @@
+1、什么是Eureka
+	* 服务注册：eureka client会向eureka server注册，注册时client会提供自己的元数据（IP地址、端口、运行状态）。
+	* 服务续约：【client】会每隔30秒发送一次心跳进行服务续约。通过服务续约告诉Server该client是可用的。如果Server在90秒内没有收到Client的心跳，Server会把对应的Client
+	            从注册表中剔除。
+	* 服务列表获取：Client从Server获取注册列表信息，并将其缓存到本地。Client的注册表会每隔一段时间进行更新操作。
+
+
+
+启动Spring boot项目时会在finishRefresh()方法里会对实现了Lifecycle接口的类进行处理，会调用对应Bean的start()方法。
+
+

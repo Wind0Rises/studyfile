@@ -36,6 +36,9 @@ spring boot:
 分布式：
 	https://coolshell.cn/articles/10910.html
 
+
+spring的事件驱动模型：
+	https://www.iteye.com/blog/jinnianshilongnian-1902886
 	
 nio：
 	https://www.iteye.com/blog/bijian1013-2277792
@@ -44,6 +47,8 @@ nio：
 spring boot：
 	刷新配置文件：https://blog.csdn.net/liuyueyi25/article/details/83244208
 	RefreshScope
+
+深入理解JVM视频教程
 	
 	
 others:
