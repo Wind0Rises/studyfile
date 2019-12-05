@@ -49,7 +49,12 @@ spring boot：
 	RefreshScope
 
 深入理解JVM视频教程
-	
+	https://item.taobao.com/item.htm?spm=a1z10.1-c.w4004-11125216860.4.5a207199MtZd2R&id=583495452706
+
+
+spring：
+	https://blog.csdn.net/u013423085/article/details/82872533
+
 	
 others:
 	unsafe解析：https://tech.meituan.com/2019/02/14/talk-about-java-magic-class-unsafe.html
