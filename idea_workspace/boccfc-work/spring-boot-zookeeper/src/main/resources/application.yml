@@ -12,3 +12,14 @@ zookeeper:
 spring:
     datasource:
         driver-class-name:
+
+
+custom:
+    myself:
+        age: 15
+        like: like
+        name: name
+
+start:
+    student:
+        name: liuweian

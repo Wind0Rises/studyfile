@@ -24,6 +24,7 @@ zookeeper:
 	https://crossoverjie.top
 	https://www.cnblogs.com/crazymakercircle/p/9904544.html
 	https://tech.meituan.com/   ----->  美团技术
+	https://github.com/zcswl7961
 	
 数据库：
 	https://blog.csdn.net/mzglzzc/article/details/46300127
@@ -31,6 +32,7 @@ zookeeper:
 	
 spring boot:
 	https://www.cnblogs.com/daiwei1981/p/10260458.html
+	https://blog.csdn.net/zknxx/article/details/79183698
 	
 	
 分布式：
@@ -58,3 +60,11 @@ spring：
 	
 others:
 	unsafe解析：https://tech.meituan.com/2019/02/14/talk-about-java-magic-class-unsafe.html
+
+
+
+
+
+
+
+ConfigurationClassPostProcessor 

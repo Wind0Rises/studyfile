@@ -1,3 +1,13 @@
+@EnableEurekaServer：该注解会向spring容器注入一个名为eurekaServerMarkerBean，值是Marker实例的Bean，这个Marker是一个空类，用于标记的，可以看到它只是一个开关标记，
+		用来激活EurekaServerAutoConfiguration类的。
+
+EurekaServerAutoConfiguration：这个类就是META-INF/spring.factories中配置的类。这个这个类上有一个注解@ConditionalOnBean(EurekaServerMarkerConfiguration.Marker.class)
+		如果没有spring容器中没有Marker类的Bean，将不会初始化这个类。
+		这个类会注入EurekaDashboardProperties、InstanceRegistryProperties这两个配置类。和EurekaServerInitializerConfiguration类。先执行@Bean方法，然后再执行EurekaServerInitializerConfiguration
+		的start()方法。
+
+
+
 1、什么是Eureka
 	* 服务注册：eureka client会向eureka server注册，注册时client会提供自己的元数据（IP地址、端口、运行状态）。
 	* 服务续约：【client】会每隔30秒发送一次心跳进行服务续约。通过服务续约告诉Server该client是可用的。如果Server在90秒内没有收到Client的心跳，Server会把对应的Client

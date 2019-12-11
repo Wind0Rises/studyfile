@@ -1,13 +1,17 @@
-package com.liu.boot.auto.boot.auto;
+package com.liu.boot.zookeeper.config;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.stereotype.Component;
 
-@ConfigurationProperties(prefix = "start.student")
-public class StudentBean {
+@Component
+@ConfigurationProperties(prefix = "custom.myself")
+public class CustomConfiguration {
 
     private String name;
 
     private int age;
+
+    private String like;
 
     public String getName() {
         return name;
@@ -23,5 +27,13 @@ public class StudentBean {
 
     public void setAge(int age) {
         this.age = age;
+    }
+
+    public String getLike() {
+        return like;
+    }
+
+    public void setLike(String like) {
+        this.like = like;
     }
 }
