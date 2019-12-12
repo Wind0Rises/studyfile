@@ -1,0 +1,183 @@
+################################################################################################################################################################
+#############################################################                 集群安装                 #########################################################
+################################################################################################################################################################
+windows安装：
+	一、创建6个redis实例。
+		1、下载解压window-redis，并配置redis.conf，分别配置六个redis。
+		2、具体配置内容：
+			port 7000
+			bind 0.0.0.0
+		  *	logfile "D:\\develpmentSofewore\\redis_ruby\\redis_7000\\logs\\7000.log"
+		  *	dir "D:\\develpmentSofewore\\redis_ruby\\redis_7000\\data"
+			slave-read-only yes
+		  *	cluster-enabled yes
+		  *	cluster-config-file nodes-7000.conf
+			cluster-node-timeout 15000
+		3、启动六个redis
+			分别进入六个redis的根目录，执行redis-server.exe redis.conf。
+			也可以写一个批处理文件。
+
+			
+	二、安装ruby
+		1、ruby安装
+			https://rubyinstaller.org/downloads/
+			直接运行安装。
+			校验：ruby -v
+				  gem -v
+			
+		2、安装gem -redis
+			如果是在有网的情况下，可以直接使用：gem install redis 命令进行安装。
+			
+			
+	三、启动集群
+		1、下一个redis-trib.rb启动文件
+		2、执行命令：
+			ruby redis-trib.rb create --replicas 1 127.0.0.1:7000 127.0.0.1:7001 127.0.0.1:7002 127.0.0.1:7003 127.0.0.1:7004 127.0.0.1:7005
+			--replicas 1：表示一个master下有几个slave节点。
+			
+			
+linux安装：
+	一：
+	
+	
+	
+################################################################################################################################################################
+#############################################################                 集群问题                 #########################################################
+################################################################################################################################################################
+一、集群中常用命令：
+	cluster nodes：
+		查看集群中的节点。
+		会展示IP、PORT、TYPE等信息。
+		
+	cluster info
+		打印集群信息
+		
+	cluster replicate node_id
+		将当前节点设置为指定的节点（node_id）的从节点。
+		
+	cluster meet add_node_ip add_node_port
+		将指定redis服务添加到集群中，注意这个添加动作添加的都是slave节点。
+		
+	cluster forget delete_node_id
+		将指定redis节点从集群中删除。
+		
+	cluster addslots
+		
+二、向集群中添加节点和删除节点。
+
+	1.1、向集群添加master节点。
+		ruby redis-trib.rb add-node new_ip:new_port cluster_one_ip:cluster_one_port [-a 密码]
+			* add-node向集群中添加一个节点。
+			* new_ip:new_port 要加入集群中的ip和端口      
+			* cluster_one_ip:cluster_one_port  集群中随便一个已经存在的节点ip和端口
+			注意：当添加节点以后，新增的节点不会有任何数据，因为它没分配任何的slot（hash槽），这是拿来存放数据的，Master必须得有才能存放数据。那么我们需要手动为
+				  新节点分配slot。
+				  新增的节点必须是一个全新的节点，不能有数据（有.aof和.rdb文件）。如果是有数据的redis节点，添加到集群会报错。Either the node already knows other 
+				  nodes (check with CLUSTER NODES) or contains some key in database 0.
+			
+			
+		ruby redis-trib.rb reshard cluster_one_master_ip:cluster_one_master_port [-a 密码]
+			* cluster_one_master_ip:cluster_one_master_port 集群中已经存在的一个主节点。
+			注意：在添加过程中，会有结果提示要做？
+				  * How many slots do you want to move (from 1 to 16384)?  你想给新master节点分多少个slot。
+				  * What is the receiving node ID? 新加入集群master节点的id。
+				  * Source node：all为从所有主节点中分别抽取响应的槽数个新节点。done：在指定的节点拿出指定数量的哈希槽分配到目标节点。
+					Source node #1: adfawe54adfa54we54awd
+					Source node #2: done
+				  * Do you want to proceed with the proposed reshard plan (yes/no)?  您是否要继续执行建议的分片计划（是/否）？
+						127.0.0.1:7000> cluster nodes
+							ad7bd89ecdb6c89638884592156e55f8b0774b91 127.0.0.1:7005 slave 2e2f0fb2f5183f5c34d0f6a42914a7acca765154 0 1576114720828 6 connected
+							74e80ad4a50de455ad73e3bac6c3a10737b8a0dc 127.0.0.1:7000 myself,master - 0 0 1 connected 99-5460
+							160ed7bcfb7900abdb4d7ccf9d9128214574b617 127.0.0.1:7003 slave 74e80ad4a50de455ad73e3bac6c3a10737b8a0dc 0 1576114722927 4 connected
+							353f32735ba59f95b7b302c468eeb4e178ad79a2 127.0.0.1:7004 slave 68a477a9585632bee09e954f8ccf1c18d5cbee78 0 1576114718827 5 connected
+							68a477a9585632bee09e954f8ccf1c18d5cbee78 127.0.0.1:7001 master - 0 1576114721827 2 connected 5562-10922
+							536d7c3be6dc501ecd42ec72278eb06ae8f49a30 127.0.0.1:7006 master - 0 1576114722827 7 connected 0-98 5461-5561 10923-11021
+							2e2f0fb2f5183f5c34d0f6a42914a7acca765154 127.0.0.1:7002 master - 0 1576114719831 3 connected 11022-16383
+						你会发现master节点的solt的变化，7006节点的solt是0-98 5461-5561 10923-11021。	
+	
+	1.1、向集群添加master节点。
+		cluster meet add_node_ip add_node_port
+		cluster addslots 
+	
+	2、向集群添加slave节点。
+		ruby redis-trib.rb add-node new_ip:new_port cluster_one_ip:cluster_one_port [-a 密码]
+			* 首先向集群中添加一个节点，这个时候添加的节点是一个没有solt的master节点。
+			
+		
+		登录到新增节点上，redis-cli -c -h new_add_ip -p new_add_port，然后执行命令cluster replicate need_add_master_id
+			* redis-cli -c -h 新增节点的IP -p 新增节点的端口
+			* cluster replicate 需要添加从节点的主节点的ID，如（536d7c3be6dc501ecd42ec72278eb06ae8f49a30）
+						127.0.0.1:7007> cluster nodes
+							536d7c3be6dc501ecd42ec72278eb06ae8f49a30 127.0.0.1:7006 master - 0 1576116136444 7 connected 0-98 5461-5561 10923-11021
+							ad7bd89ecdb6c89638884592156e55f8b0774b91 127.0.0.1:7005 slave 2e2f0fb2f5183f5c34d0f6a42914a7acca765154 0 1576116132839 3 connected
+							160ed7bcfb7900abdb4d7ccf9d9128214574b617 127.0.0.1:7003 slave 74e80ad4a50de455ad73e3bac6c3a10737b8a0dc 0 1576116130839 1 connected
+							26b35ea655106f9286e03b895abdeb9f8977bd1c 127.0.0.1:7007 myself,slave 536d7c3be6dc501ecd42ec72278eb06ae8f49a30 0 0 0 connected
+							353f32735ba59f95b7b302c468eeb4e178ad79a2 127.0.0.1:7004 slave 68a477a9585632bee09e954f8ccf1c18d5cbee78 0 1576116135839 2 connected
+							68a477a9585632bee09e954f8ccf1c18d5cbee78 127.0.0.1:7001 master - 0 1576116133845 2 connected 5562-10922
+							2e2f0fb2f5183f5c34d0f6a42914a7acca765154 127.0.0.1:7002 master - 0 1576116134839 3 connected 11022-16383
+							74e80ad4a50de455ad73e3bac6c3a10737b8a0dc 127.0.0.1:7000 master - 0 1576116133939 1 connected 99-5460
+						127.0.0.1:7007节点成为一个slave节点了。
+							myself: 当前连接的节点.
+							master
+		
+	3、从集群移除slave节点。	
+		ruby redis-trib.rb del-node delete_node_ip:delete_node_port delete_node_id
+			* 删除从节点非常简单，删除的时候指定ip+端口以及节点id即可。
+			* delete_node_ip：要删除的节点ip 
+			* delete_node_port：要删除节点的端口 
+			* delete_node_id：要删除节点的ID。
+			ruby redis-trib.rb del-node 127.0.0.1:7007 26b35ea655106f9286e03b895abdeb9f8977bd1c
+		
+	4、从集群移除master节点。
+		删除主节点可不能直接删除，一定要先将slot槽重新移动到其他主节点那里再进行删除操作，不然存放的数据就丢失了。
+		ruby redis-trib.rb reshard delete_node_ip:delete_node_port [-a 密码]
+		* delete_node_ip：要删除的节点ip 
+		* delete_node_port：要删除节点的端口 
+		注意：在添加过程中，会有结果提示要做？
+				  * How many slots do you want to move (from 1 to 16384)?  你要移除solt的个数，这个在执行reshard命令时就已经打印出来了。
+				  * What is the receiving node ID? 接收的节点的id。  现在只能让一个节点进行接收
+				  * Source node：
+						Source node #1: adfawe54adfa54we54awd        ====  需要操作的节点，就是要移除solt的节点，也就是要删除的节点。
+						Source node #2: done
+				  * Do you want to proceed with the proposed reshard plan (yes/no)?  您是否要继续执行建议的分片计划（是/否）？
+				  
+						127.0.0.1:7001> cluster nodes
+							536d7c3be6dc501ecd42ec72278eb06ae8f49a30 127.0.0.1:7006 master - 0 1576118882186 7 connected
+							74e80ad4a50de455ad73e3bac6c3a10737b8a0dc 127.0.0.1:7000 master - 0 1576118881586 8 connected 0-5561 10923-11021
+							353f32735ba59f95b7b302c468eeb4e178ad79a2 127.0.0.1:7004 slave 68a477a9585632bee09e954f8ccf1c18d5cbee78 0 1576118884586 5 connected
+							ad7bd89ecdb6c89638884592156e55f8b0774b91 127.0.0.1:7005 slave 2e2f0fb2f5183f5c34d0f6a42914a7acca765154 0 1576118882586 6 connected
+							2e2f0fb2f5183f5c34d0f6a42914a7acca765154 127.0.0.1:7002 master - 0 1576118885586 3 connected 11022-16383
+							160ed7bcfb7900abdb4d7ccf9d9128214574b617 127.0.0.1:7003 slave 74e80ad4a50de455ad73e3bac6c3a10737b8a0dc 0 1576118883586 8 connected
+							68a477a9585632bee09e954f8ccf1c18d5cbee78 127.0.0.1:7001 myself,master - 0 0 2 connected 5562-10922
+							
+		ruby redis-trib.rb del-node delete_node_ip:delete_node_port delete_node_id
+			移除solt以后，可以进行删除节点操作。
+						127.0.0.1:7001> cluster nodes
+							74e80ad4a50de455ad73e3bac6c3a10737b8a0dc 127.0.0.1:7000 master - 0 1576119705677 8 connected 0-5561 10923-11021
+							353f32735ba59f95b7b302c468eeb4e178ad79a2 127.0.0.1:7004 slave 68a477a9585632bee09e954f8ccf1c18d5cbee78 0 1576119704678 5 connected
+							ad7bd89ecdb6c89638884592156e55f8b0774b91 127.0.0.1:7005 slave 2e2f0fb2f5183f5c34d0f6a42914a7acca765154 0 1576119703681 6 connected
+							2e2f0fb2f5183f5c34d0f6a42914a7acca765154 127.0.0.1:7002 master - 0 1576119702677 3 connected 11022-16383
+							160ed7bcfb7900abdb4d7ccf9d9128214574b617 127.0.0.1:7003 slave 74e80ad4a50de455ad73e3bac6c3a10737b8a0dc 0 1576119699673 8 connected
+							68a477a9585632bee09e954f8ccf1c18d5cbee78 127.0.0.1:7001 myself,master - 0 0 2 connected 5562-10922
+	
+	
+三、集群故障问题。
+	1、集群中其中一个master下线以后，如何恢复？
+		当集群中的其中一个master节点下线以后，集群会从这个master节点的slave节点中挑选一个节点充当master节点，来顶替原来的master节点的工作。当原来的master节点
+		故障排除以后，并重新启动。这个时候集群并不会把这个几点纳入集群中，需要在集群下的任意节点上把新启动的节点纳入集群，使用命令cluster meet ip port把新启动
+		的节点纳入集群。这个时候新纳入的节点是master节点，这个时候需要把这个master挂在选举出来的master节点上，原故障的master节点将成为选举出来的master节点的从
+		节点。
+		
+	2、什么样的情况下，cluster会不提供服务
+		* 当cluster中其中一个master以及所有从节点都下线以后，这个集群将不对外提供服务。
+		
+		
+	3、集群宕机以后怎么恢复。
+		
+	
+	
+四、集群的特点
+	1、cluster的特点
+		* cluster集群支持主从切换。
+		* cluster集群是去中心化的，只需要通过连接到其中一个服务即可。
+		* redis无论是主库还是从库都可以进行set和get操作。
