@@ -1,0 +1,1315 @@
+                    △△△△△△△△△△△△△△△△△△△△          使用StdScheduler、SimpleThreadPool、RAMJobStore进行讲解           △△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△
+					△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△△
+【整个定时器的流程解析：】
+		第一步：主线程通过SchedulerFactory获取到Scheduler实例，在SchedulerFactory实例化一个Scheduler对象实例时，会初始化一个线程池，同时会实例化一个QuartzScheduler实例对象，在实例化QuartzScheduler实例对象时，会通过线程执行框架启动QuartzSchedulerThread。然调用Scheduler.start()【其内部其实调用的是QuartzScheduler.start()】时，启动一个定时器。
+		第二步：如何把Job和定时任务联系起来。
+
+
+Scheduler和QuartzScheduler的理解？？
+	QuartzScheduler：是整个定时任务的核心，是所有执行操作的具体实现。而Scheduler的实现都是通过QuartzScheduler去操作的
+
+JobDetail：
+	JobDetail中包含一个【Class<? extends Job> jobClass】。还有一些其他参数如：name，group等。
+	
+Trigger（接口）：
+	* getNextFireTime()：获取下一次执行的时间。
+	* getPreviousFireTime()：获取上一次的执行时间。
+	* getFireTimeAfter(Date afterTime)：返回指定时间后将要触发的时间。
+	* getFinalFireTime()：返回最后一次触发的时间。
+	
+	MutableTrigger（接口）：
+		* setKey(TriggerKey key)：
+		* setJobKey(JobKey key)：
+		* setStartTime(Date startTime)：
+		* setMisfireInstruction(int misfireInstruction)：
+		
+		OperableTrigger（接口）
+			* computeFirstFireTime(Calendar calendar)：（不应该由定时器的客户端调用）在首次将Trigger添加到调度程序时由调度程序调用，以便Trigger根据任何关联的日历计算其第一个触发时间。
+			* executionComplete(JobExecutionContext context, JobExecutionException result)（不应该由定时器的客户端调用）在Scheduler执行与Trigger相关联的JobDetail之后调用，以获取来自触发器的最终指令代码。
+			....
+
+		
+
+
+
+TriggerListener：各个方法执行的时间是什么时候。
+
+
+##########################################################################################################################################################
+#############################################            _QuartzSchedulerThread                ############################################################
+##########################################################################################################################################################
+问题:
+	【1】QuartzSchedulerThread这个线程是做什么的？？
+	这个线程相当于定时器的主线程，这个线程的启动以后，在run()方法中会通过一个循环（如果是正常启动以后，没有退出或者异常，这个这个循环就是一个死循环。）不断的从JobStore中获取某个时间段的可以执行的触发器，同时通过获取到的触发器，得到与之对应的
+TriggerFiredResult，然后创建对应的JobRunShell，这个类实现了Runnable接口。最后把这个获取到的JobRunShell实例对象交给线程池去执行。然后进入下一次循环，就这样一直循环下去【前提是Scheduler调用了start()启动的】。
+
+	【2】如何把JobDetail、Trigger绑定在一起的？？
+	Trigger接口的抽象类AbstractTrigger中维护着jobName和jobGroup属性，在设置Trigger的属性时需要把这个两个属性。这个时候Trigger可以通过jobName去获取到对应的JobDetail。所有的JobDetail和Trigger都要设置到JobStore上。如果单独向定时器设置Trigger的时候，这个时候
+Trigger的jobName属性一定要设置，不然会报错。而向定时器设置JobDetail时，不需要考虑这么多。Trigger的JobName属性就很好的把JobDetail、Trigger联系起来了。
+	
+	【3】如何把Trigger和job存储到JobStore中？？
+	
+
+// 循环获取某个时间段的所有Trigger。
+public void run() {
+	boolean lastAcquireFailed = false;
+
+	// AtomicBoolean halted;在实例化时，默认halted（暂停） = false。可以通过halt(boolean wait)【发信号通知主处理循环在下一个可能的点暂停】方法来改变该值
+	while (!halted.get()) {
+		try {
+			// sigLock是一个Object对象，用于加锁的。
+			synchronized (sigLock) {
+			
+				// 在实例化时设置paused = true;可以通过togglePause(boolean pause)【发信号通知主处理循环在下一个可能的点暂停】方法来改变该值
+				// paused[pɔːzd]:暂停   halted[ˈhɔːltɪd]:停止
+				
+				// (没有停止的状态下) && 是否暂停。【如果ThreadScheduler没有调用start()方法，一直在等待。】
+				while (paused && !halted.get()) {
+					try {
+						
+						sigLock.wait(1000L);
+					} catch (InterruptedException ignore) {
+					
+					}
+				}
+
+				// 如果是停止状态。
+				if (halted.get()) {
+					break;
+				}
+			}
+
+			// 获取QuartzSchedulerResources中线程池中的可用线程数量。
+			int availThreadCount = qsRsrcs.getThreadPool().blockForAvailableThreads();
+				
+			if(availThreadCount > 0) { 
+
+				List<OperableTrigger> triggers = null;
+				long now = System.currentTimeMillis();
+				
+				clearSignaledSchedulingChange();
+				【	
+					// 
+					public void clearSignaledSchedulingChange() {
+						synchronized(sigLock) {
+							// signaled执行信号？？清理执行信号。
+							signaled = false;
+							// 下一次执行信号的时间。
+							signaledNextFireTime = 0;
+						}
+					}
+				】
+				
+				try {
+					// 获取到某个时间段所有的Triggers。 idleWaitTime 默认为30L * 1000L。
+					// qsRsrcs.getMaxBatchSize()最大的批量容量，默认1；qsRsrcs.getBatchTimeWindow()默认为0；
+					triggers = qsRsrcs.getJobStore().acquireNextTriggers(now + idleWaitTime, Math.min(availThreadCount, qsRsrcs.getMaxBatchSize()), qsRsrcs.getBatchTimeWindow());
+					lastAcquireFailed = false;
+					if (log.isDebugEnabled()) {
+						log.debug("batch acquisition of " + (triggers == null ? 0 : triggers.size()) + " triggers");
+					}
+				} catch (JobPersistenceException jpe) {
+					if(!lastAcquireFailed) {
+						qs.notifySchedulerListenersError("An error occurred while scanning for the next triggers to fire.", jpe);
+					}
+					lastAcquireFailed = true;
+					continue;
+				} catch (RuntimeException e) {
+					if(!lastAcquireFailed) {
+						getLog().error("quartzSchedulerThreadLoop: RuntimeException " + e.getMessage(), e);
+					}
+					lastAcquireFailed = true;
+					continue;
+				}
+
+				// 判断是否存在对应的触发器。
+				if (triggers != null && !triggers.isEmpty()) {
+					now = System.currentTimeMillis();
+					// 触发器执行的时间。
+					long triggerTime = triggers.get(0).getNextFireTime().getTime();
+					
+					// 还有多久到触发时间。
+					long timeUntilTrigger = triggerTime - now;
+					while(timeUntilTrigger > 2) {
+						synchronized (sigLock) {
+							if (halted.get()) {
+								break;
+							}
+							if (!isCandidateNewTimeEarlierWithinReason(triggerTime, false)) {
+								try {
+									now = System.currentTimeMillis();
+									timeUntilTrigger = triggerTime - now;
+									if(timeUntilTrigger >= 1) {
+										sigLock.wait(timeUntilTrigger);
+									}
+								} catch (InterruptedException ignore) {
+								}
+							}
+						}
+						if(releaseIfScheduleChangedSignificantly(triggers, triggerTime)) {
+							break;
+						}
+						now = System.currentTimeMillis();
+						timeUntilTrigger = triggerTime - now;
+					}
+
+					if(triggers.isEmpty()) {
+						continue;
+					}
+
+					List<TriggerFiredResult> bndles = new ArrayList<TriggerFiredResult>();
+
+					boolean goAhead = true;
+					synchronized(sigLock) {
+						goAhead = !halted.get();
+					}
+					if(goAhead) {
+						try {
+
+							// 通过给定的trigger集获取到对应的TriggerFiredResult集合
+							List<TriggerFiredResult> res = qsRsrcs.getJobStore().triggersFired(triggers);
+							if(res != null) {
+								bndles = res;
+							}
+						} catch (SchedulerException se) {
+							qs.notifySchedulerListenersError("An error occurred while firing triggers '" + triggers + "'", se);
+							for (int i = 0; i < triggers.size(); i++) {
+								qsRsrcs.getJobStore().releaseAcquiredTrigger(triggers.get(i));
+							}
+							continue;
+						}
+
+					}
+
+					for (int i = 0; i < bndles.size(); i++) {
+						TriggerFiredResult result =  bndles.get(i);
+
+						// TriggerFiredBundle一个简单的类（结构），用于将执行时数据从JobStore返回到QuartzSchedulerThread.
+						// 通过TriggerFiredResult获取到对应的TriggerFiredBundle
+						TriggerFiredBundle bndle =  result.getTriggerFiredBundle();
+						Exception exception = result.getException();
+
+						if (exception instanceof RuntimeException) {
+							getLog().error("RuntimeException while firing trigger " + triggers.get(i), exception);
+							qsRsrcs.getJobStore().releaseAcquiredTrigger(triggers.get(i));
+							continue;
+						}
+						
+						if (bndle == null) {
+							qsRsrcs.getJobStore().releaseAcquiredTrigger(triggers.get(i));
+							continue;
+						}
+
+						// JobRunShell实现类Runnable接口。
+						JobRunShell shell = null;
+						try {
+							shell = qsRsrcs.getJobRunShellFactory().createJobRunShell(bndle);
+							shell.initialize(qs);
+						} catch (SchedulerException se) {
+							qsRsrcs.getJobStore().triggeredJobComplete(triggers.get(i), bndle.getJobDetail(), CompletedExecutionInstruction.SET_ALL_JOB_TRIGGERS_ERROR);
+							continue;
+						}
+
+						
+						###############################################################
+						##############       runInThread()重点     ####################
+						###############################################################
+						if (qsRsrcs.getThreadPool().runInThread(shell) == false) {
+							getLog().error("ThreadPool.runInThread() return false!");
+							qsRsrcs.getJobStore().triggeredJobComplete(triggers.get(i), bndle.getJobDetail(), CompletedExecutionInstruction.SET_ALL_JOB_TRIGGERS_ERROR);
+						}
+					}
+					continue; 
+				}
+			} else { 
+				continue; 
+			}
+
+			long now = System.currentTimeMillis();
+			long waitTime = now + getRandomizedIdleWaitTime();
+			long timeUntilContinue = waitTime - now;
+			synchronized(sigLock) {
+				try {
+				  if(!halted.get()) {
+					if (!isScheduleChanged()) {
+					  sigLock.wait(timeUntilContinue);
+					}
+				  }
+				} catch (InterruptedException ignore) {
+				}
+			}
+
+		} catch(RuntimeException re) {
+			getLog().error("Runtime error occurred in main trigger firing loop.", re);
+		}
+	} 
+	
+	qs = null;
+	qsRsrcs = null;
+}
+
+
+
+
+
+
+##########################################################################################################################################################
+#############################################            _SimpleThreadPool                ############################################################
+##########################################################################################################################################################
+workers：存放所有线程的集合。
+availWorkers：存放可用的线程，也就是空闲的线程。
+busyWorkers：存放正在执行的线程。
+
+问题:
+	【1】SimpleThreadPool这个线程是做什么的？？
+	这个类的有一个内部类WorkerThread，WorkerThread继承了Thread类。其内部也维持着一个集合用于保存创建的WorkerThread实例对象。在初始化线程池时，会创建count个WorkerThread实例对象放入对应的结合，同时也会区分这个集合是否是空闲的，如果其中有正在运行的
+WorkerThread，会把对应的实例对象放入busyWorkers集合中。其中内部类WorkerThread内部维护着
+	WorkerThread这个内部类：其内部维持着SimpleThreadPool实例和Runnable的实例。这个WorkerThread的run方法，如果线程启动以后，会构造一个死循环，判断这个WorkerThread内部实例对象Runnable是否为null，如果不为Runnable实例不为null，调用这个实例的run()方法
+最后把Runnable设置为null，进行下一次循环。
+
+	【2】什么时候把什么对象设置到WorkerThread的Runnable对象上？
+	SimpleThreadPool类提供了runInThread(Runnable runnable)方法，可以把给定的Runnable实例设置到WorkerThread实例的对象上。首相从可用的线程集合中取出一个线程对象，然后把这个给定的Runnable实例设置到这个WorkerThread对象的Runnable属性上。
+其中给定的Runnable对象，一般都是JobRunShell实例对象。
+	
+	
+	
+
+// SimpleThreadPool初始化操作。主要是创建线程池中的工作线程。
+public void initialize() throws SchedulerConfigException {
+	// 判断是否已经初始化操作，如果已经初始化过了，则直接返回。
+	if(workers != null && workers.size() > 0){
+		return;
+	}
+	
+	// 必要参数验证。
+	if (count <= 0) {
+		throw new SchedulerConfigException("Thread count must be > 0");
+	}
+	if (prio <= 0 || prio > 9) {
+		throw new SchedulerConfigException("Thread priority must be > 0 and <= 9");
+	}
+
+	// 如果没有设置inheritGroup，inheritGroup这个默认为true。
+	if(isThreadsInheritGroupOfInitializingThread()) {
+		threadGroup = Thread.currentThread().getThreadGroup();
+	} else {
+		// 线程组的设定。
+		threadGroup = Thread.currentThread().getThreadGroup();
+		ThreadGroup parent = threadGroup;
+		while ( !parent.getName().equals("main") ) {
+			threadGroup = parent;
+			parent = threadGroup.getParent();
+		}
+		threadGroup = new ThreadGroup(parent, schedulerInstanceName + "-SimpleThreadPool");
+		if (isMakeThreadsDaemons()) {
+			threadGroup.setDaemon(true);
+		}
+	}
+
+	// 线程的ClasssLoader是否继承InitializingThread。默认为false。
+	if (isThreadsInheritContextClassLoaderOfInitializingThread()) {
+		getLog().info("Job execution threads will use class loader of thread: " + Thread.currentThread().getName());
+	}
+
+	// 创建线程池中的工作线程。WorkerThread：是工作线程。
+	Iterator<WorkerThread> workerThreads = createWorkerThreads(count).iterator();
+	
+	// 遍历线程。【启动线程，并把线程加入到可用线程集合中去。】
+	while(workerThreads.hasNext()) {
+		WorkerThread wt = workerThreads.next();
+		// 在创建WorkerThread实例的时候，构造函数已经调用了start()方法了，为什么这里还会调用。
+		wt.start();
+		availWorkers.add(wt);
+	}
+}
+
+// 创建工作线程。createCount为创建的个数。
+protected List<WorkerThread> createWorkerThreads(int createCount) {
+	workers = new LinkedList<WorkerThread>();
+	for (int i = 1; i<= createCount; ++i) {
+		// 线程名称的前缀。
+		String threadPrefix = getThreadNamePrefix();
+		if (threadPrefix == null) {
+			threadPrefix = schedulerInstanceName + "_Worker";
+		}
+		
+		// 创建线程。在实例化的WorkerThread实例对象时，会自己启动实例。
+		WorkerThread wt = new WorkerThread(this, threadGroup, threadPrefix + "-" + i, getThreadPriority(), isMakeThreadsDaemons());
+		if (isThreadsInheritContextClassLoaderOfInitializingThread()) {
+			wt.setContextClassLoader(Thread.currentThread().getContextClassLoader());
+		}
+		
+		// 先线程集合中添加线程。
+		workers.add(wt);
+	}
+	return workers;
+}
+
+// 执行给定的线程。
+public boolean runInThread(Runnable runnable) {
+	if (runnable == null) {
+		return false;
+	}
+
+	synchronized (nextRunnableLock) {
+
+		handoffPending = true;
+
+		while ((availWorkers.size() < 1) && !isShutdown) {
+			try {
+				nextRunnableLock.wait(500);
+			} catch (InterruptedException ignore) {
+			}
+		}
+
+		// 如果线程正在运行，
+		if (!isShutdown) {
+			WorkerThread wt = (WorkerThread)availWorkers.removeFirst();
+			busyWorkers.add(wt);
+			wt.run(runnable);
+		} else {
+			// 如果线程正在关闭，会创建新的WorkerThread实例，然后使用新的线程实例完成工作。
+			WorkerThread wt = new WorkerThread(this, threadGroup, "WorkerThread-LastJob", prio, isMakeThreadsDaemons(), runnable);
+			busyWorkers.add(wt);
+			workers.add(wt);
+			wt.start();
+		}
+		nextRunnableLock.notifyAll();
+		handoffPending = false;
+	}
+
+	return true;
+}
+
+##########################################################################################################################################################
+#############################################                     _WorkerThread                  #########################################################
+##########################################################################################################################################################
+WorkerThread这个内部类：其内部维持着SimpleThreadPool实例和Runnable的实例。这个WorkerThread的run方法，如果线程启动以后，会构造一个死循环，判断这个WorkerThread内部实例对象Runnable是否为null，如果不为Runnable实例不为null，调用这个实例的run()方法
+最后把Runnable设置为null，进行下一次循环。
+
+WorkerThread：首先是一个线程。WorkerThread：其内部维持着SimpleThreadPool、Runnable对象。
+runnable：相当于一个载体。
+
+public void run() {
+	boolean ran = false;
+	
+	// run是一个AtomicBoolean实例对象，用于标记表示WorkerThread是否终止。默认为true（开启状态）。可以调用shutdown()改变run的值。
+	while (run.get()) {
+		try {
+			synchronized(lock) {
+				// 如果该WorkerThread线程仍然在运行，但是runnable等于null。则等待500ms。
+				while (runnable == null && run.get()) {
+					lock.wait(500);
+				}
+
+				// 如果runnable不为null。
+				if (runnable != null) {
+					ran = true;
+					// 执行runnable，（runnable相当于一个载体）的run方法。
+					runnable.run();
+				}
+			}
+		} catch (InterruptedException unblock) {
+			try {
+				getLog().error("Worker thread was interrupt()'ed.", unblock);
+			} catch(Exception e) {
+			}
+		} catch (Throwable exceptionInRunnable) {
+			try {
+				getLog().error("Error while executing the Runnable: ", exceptionInRunnable);
+			} catch(Exception e) {
+			}
+		} finally {
+			// 重新把runnable设置为null。
+			synchronized(lock) {
+				runnable = null;
+			}
+			
+			// 
+			if(getPriority() != tp.getThreadPriority()) {
+				setPriority(tp.getThreadPriority());
+			}
+
+			// 是否是只执行一次？？？
+			if (runOnce) {
+				run.set(false);
+				// 从正在执行的线程集合中移除。
+				clearFromBusyWorkersList(this);
+			} else if(ran) {
+				ran = false;
+				// 向空闲线程集合添加该线程，并从正在执行的线程集合中移除。
+				makeAvailable(this);
+			}
+
+		}
+	}
+
+	// 现在停止。
+	try {
+		getLog().debug("WorkerThread is shut down.");
+	} catch(Exception e) {
+	
+	}
+}
+
+public void run(Runnable newRunnable) {
+	synchronized(lock) {
+		if(runnable != null) {
+			throw new IllegalStateException("Already running a Runnable!");
+		}
+
+		runnable = newRunnable;
+		lock.notifyAll();
+	}
+}
+
+
+##########################################################################################################################################################
+#############################################                    _RAMJobStore                  ############################################################
+##########################################################################################################################################################
+
+重要的成员变量：TreeSet<TriggerWrapper> timeTriggers = new TreeSet<TriggerWrapper>(new TriggerWrapperComparator());自定义排序规则
+
+jobsByKey：
+triggersByKey：
+jobsByGroup：
+triggersByGroup：
+timeTriggers（时间触发器）：
+
+public List<OperableTrigger> acquireNextTriggers(long noLaterThan, int maxCount, long timeWindow) {
+	synchronized (lock) {
+		List<OperableTrigger> result = new ArrayList<OperableTrigger>();
+		Set<JobKey> acquiredJobKeysForNoConcurrentExec = new HashSet<JobKey>();
+		Set<TriggerWrapper> excludedTriggers = new HashSet<TriggerWrapper>();
+		long batchEnd = noLaterThan;
+		
+		// 判断是否有触发器。timeTriggers是用TreeSet存放的。
+		if (timeTriggers.size() == 0){
+			return result;
+		}
+			
+		while (true) {
+			TriggerWrapper tw;
+
+			try {
+				tw = timeTriggers.first();
+				
+				// 如果没有
+				if (tw == null) {
+					break;
+				}
+				
+				// 从触发器集合中移除指定的触发器。
+				timeTriggers.remove(tw);
+			} catch (java.util.NoSuchElementException nsee) {
+				break;
+			}
+
+			// 获取Trigger的下一次触发的时间。
+			if (tw.trigger.getNextFireTime() == null) {
+				continue;
+			}
+
+			// 判断定时任务是否过期。
+			if (applyMisfire(tw)) {
+				if (tw.trigger.getNextFireTime() != null) {
+					timeTriggers.add(tw);
+				}
+				continue;
+			}
+
+			// 判断下一次执行时间是否超过批量结束时间。
+			if (tw.getTrigger().getNextFireTime().getTime() > batchEnd) {
+				timeTriggers.add(tw);
+				break;
+			}
+			
+			
+			JobKey jobKey = tw.trigger.getJobKey();
+			JobDetail job = jobsByKey.get(tw.trigger.getJobKey()).jobDetail;
+			
+			// 判断对应的JobDetail是否是并发禁止的。
+			if (job.isConcurrentExectionDisallowed()) {
+				if (acquiredJobKeysForNoConcurrentExec.contains(jobKey)) {
+					excludedTriggers.add(tw);
+					continue;
+				} else {
+					acquiredJobKeysForNoConcurrentExec.add(jobKey);
+				}
+			}
+
+			tw.state = TriggerWrapper.STATE_ACQUIRED;
+			tw.trigger.setFireInstanceId(getFiredTriggerRecordId());
+			OperableTrigger trig = (OperableTrigger) tw.trigger.clone();
+			
+			if (result.isEmpty()) {
+				batchEnd = Math.max(tw.trigger.getNextFireTime().getTime(), System.currentTimeMillis()) + timeWindow;
+			}
+			
+			result.add(trig);
+			
+			if (result.size() == maxCount) {
+				break;
+			}
+		}
+
+		if (excludedTriggers.size() > 0) {
+			timeTriggers.addAll(excludedTriggers);
+		}
+		return result;
+	}
+}
+
+
+将当前时间减去misfireThreshold得到misfireTime，如果定时任务时间大于misfireTime，那么可以认为并没有错过该任务的触发时机，那么return false继续正常的思路。如果一旦小于，那么说明错过了，
+这时候会重新计算该任务的下一次触发时机，如果没有下次任务的触发时间，那么说明该任务不会被再触发，于是状态改成COMPLETED。如果错过了时机，并计算出下次任务触发时间不为空，那么可以当做一
+个新的任务加入timeTriggers中，并重新下一轮循环。
+protected boolean applyMisfire(TriggerWrapper tw) {
+	long misfireTime = System.currentTimeMillis();
+	
+	// RAMJobStore默认的misfireThreshold为5000L
+	if (getMisfireThreshold() > 0) {
+		misfireTime -= getMisfireThreshold();
+	}
+
+	// 获取Trigger下一个执行执行时间。
+	Date tnft = tw.trigger.getNextFireTime();
+	if (tnft == null || tnft.getTime() > misfireTime  || tw.trigger.getMisfireInstruction() == Trigger.MISFIRE_INSTRUCTION_IGNORE_MISFIRE_POLICY) { 
+		return false; 
+	}
+
+	Calendar cal = null;
+	if (tw.trigger.getCalendarName() != null) {
+		cal = retrieveCalendar(tw.trigger.getCalendarName());
+	}
+
+	signaler.notifyTriggerListenersMisfired((OperableTrigger)tw.trigger.clone());
+
+	tw.trigger.updateAfterMisfire(cal);
+
+	if (tw.trigger.getNextFireTime() == null) {
+		tw.state = TriggerWrapper.STATE_COMPLETE;
+		signaler.notifySchedulerListenersFinalized(tw.trigger);
+		synchronized (lock) {
+			timeTriggers.remove(tw);
+		}
+	} else if (tnft.equals(tw.trigger.getNextFireTime())) {
+		return false;
+	}
+
+	return true;
+}
+
+
+// 通知JobStore调度程序现在正在触发给定的触发（执行其关联的作业），它先前已获取（保留）。
+public TriggerFiredBundle triggerFired(SchedulingContext ctxt, Trigger trigger) {
+
+	synchronized (triggerLock) {
+		TriggerWrapper tw = (TriggerWrapper) triggersByFQN.get(TriggerWrapper.getTriggerNameKey(trigger));
+		
+		// 通过trigger获取对应的TriggerWrapper（触发器的包装），并判断状态是否正常。
+		if (tw == null || tw.trigger == null) { 
+			return null;
+		}
+		
+		if (tw.state == TriggerWrapper.STATE_COMPLETE) { 
+			return null;
+		}
+		
+		if (tw.state == TriggerWrapper.STATE_PAUSED) { 
+			return null;
+		}
+		
+		if (tw.state == TriggerWrapper.STATE_BLOCKED) { 
+			return null;
+		}
+		
+		if (tw.state == TriggerWrapper.STATE_PAUSED_BLOCKED) { 
+			return null;
+		}
+		
+		Calendar cal = null;
+
+		if (tw.trigger.getCalendarName() != null) {
+			cal = retrieveCalendar(ctxt, tw.trigger.getCalendarName());
+		}
+
+		// 获取下一次执行时间。
+		Date prevFireTime = trigger.getPreviousFireTime();
+		
+		tw.trigger.triggered(cal);
+		trigger.triggered(cal);
+		
+		tw.state = TriggerWrapper.STATE_WAITING;
+
+		// 创建TriggerFiredBundle实例对象。
+		// 一个简单的类，用于将执行时数据从JobStore返回到QuartzSchedulerThread。
+		TriggerFiredBundle bndle = new TriggerFiredBundle(retrieveJob(ctxt, trigger.getJobName(), trigger.getJobGroup()), trigger, cal, false, new Date(), trigger.getPreviousFireTime(), prevFireTime, trigger.getNextFireTime());
+
+		JobDetail job = bndle.getJobDetail();
+
+		if (job.isStateful()) {
+				ArrayList trigs = getTriggerWrappersForJob(job.getName(), job.getGroup());
+				Iterator itr = trigs.iterator();
+
+				while (itr.hasNext()) {
+					TriggerWrapper ttw = (TriggerWrapper) itr.next();
+					if(ttw.state == TriggerWrapper.STATE_WAITING) {
+						ttw.state = TriggerWrapper.STATE_BLOCKED;
+					}
+
+					if(ttw.state == TriggerWrapper.STATE_PAUSED) {
+						ttw.state = TriggerWrapper.STATE_PAUSED_BLOCKED;
+					}
+
+					timeTriggers.remove(ttw);
+				}
+
+				blockedJobs.add(JobWrapper.getJobNameKey(job));
+		} else if (tw.trigger.getNextFireTime() != null) {
+			synchronized (triggerLock) {
+				timeTriggers.add(tw);
+			}
+		}
+
+		return bndle;
+	}
+}
+
+
+##########################################################################################################################################################
+#############################################                 _QuartzScheduler                ############################################################
+##########################################################################################################################################################
+QuartzScheduler：提供了控制定时器的接口，如开始、结束、添加定时器、添加。这个是定时器的核心，Scheduler提供可用给用户使用的接口，真正实现Scheduler接口是通过QuartScheduler对象完成的。
+
+
+问题:
+	【1】如何向定时器中添加定时任务？？
+
+
+内部比较重要的成员变量：
+	QuartzSchedulerThread schedThread;
+	ListenerManager listenerManager = new ListenerManagerImpl();  监听器管理。
+	ExecutingJobsManager jobMgr; 已经执行的job管理。
+
+	
+// ☆ 启动定时器。	
+public void start() throws SchedulerException {
+
+	if (shuttingDown|| closed) {
+		throw new SchedulerException("The Scheduler cannot be restarted after shutdown() has been called.");
+	}
+
+	notifySchedulerListenersStarting();
+
+	if (initialStart == null) {
+		initialStart = new Date();
+		// JobStore开始时需要做的操作。
+		this.resources.getJobStore().schedulerStarted();   
+		// 启动插件。
+		startPlugins();
+	} else {
+		resources.getJobStore().schedulerResumed();
+	}
+
+	// 设置暂停为false
+	schedThread.togglePause(false);
+
+	getLog().info("Scheduler " + resources.getUniqueIdentifier() + " started.");
+	
+	notifySchedulerListenersStarted();
+}
+
+// ☆ 延迟启动定时器。
+public void startDelayed(final int seconds) throws SchedulerException {
+	if (shuttingDown || closed) {
+		throw new SchedulerException("The Scheduler cannot be restarted after shutdown() has been called.");
+	}
+
+	// 为啥异步呢？打到非堵塞效果？？
+	Thread t = new Thread(new Runnable() {
+		public void run() {
+			try { 
+				Thread.sleep(seconds * 1000L); 
+			} catch(InterruptedException ignore) {
+			
+			}
+			try { 
+				start(); 
+			} catch(SchedulerException se) {
+				getLog().error("Unable to start secheduler after startup delay.", se);
+			}
+		}
+	});
+	t.start();
+}
+
+// ☆ 判断是否是停止状态。
+public boolean isInStandbyMode() {
+	return schedThread.isPaused();
+}
+
+// ☆ 停止定时器。
+// waitForJobsToComplete：是否等待正在执行的job执行完成以后在停止定时器。
+public void shutdown(boolean waitForJobsToComplete) {
+        
+	if(shuttingDown || closed) {
+		return;
+	}
+	
+	shuttingDown = true;
+
+	getLog().info("Scheduler " + resources.getUniqueIdentifier() + " shutting down.");
+   
+	standby();
+
+	schedThread.halt(waitForJobsToComplete);
+	
+	notifySchedulerListenersShuttingdown();
+	
+	if( (resources.isInterruptJobsOnShutdown() && !waitForJobsToComplete) ||  (resources.isInterruptJobsOnShutdownWithWait() && waitForJobsToComplete)) {
+	
+		// 获取当前执行的job
+		List<JobExecutionContext> jobs = getCurrentlyExecutingJobs();
+		
+		for(JobExecutionContext job: jobs) {
+			if(job.getJobInstance() instanceof InterruptableJob)
+				try {
+					((InterruptableJob)job.getJobInstance()).interrupt();
+				} catch (Throwable e) {
+					getLog().warn("Encountered error when interrupting job {} during shutdown: {}", job.getJobDetail().getKey(), e);
+				}
+		}
+	}
+	
+	resources.getThreadPool().shutdown(waitForJobsToComplete);
+	
+	closed = true;
+
+	if (resources.getJMXExport()) {
+		try {
+			unregisterJMX();
+		} catch (Exception e) {
+		
+		}
+	}
+
+	if(boundRemotely) {
+		try {
+			unBind();
+		} catch (RemoteException re) {
+		}
+	}
+	
+	
+	// 停止插件
+	shutdownPlugins();
+
+	// 停止JobStore
+	resources.getJobStore().shutdown();
+
+	// 通知。
+	notifySchedulerListenersShutdown();
+
+	SchedulerRepository.getInstance().remove(resources.getName());
+
+	holdToPreventGC.clear();
+
+	if(updateTimer != null)
+		updateTimer.cancel();
+	
+	getLog().info("Scheduler " + resources.getUniqueIdentifier()  + " shutdown complete.");
+}
+
+// ☆☆ 向定时器中添加JobDetail和Trigger。
+public Date scheduleJob(JobDetail jobDetail, Trigger trigger) throws SchedulerException {
+	// 校验状态。
+	validateState();
+
+	if (jobDetail == null) {
+		throw new SchedulerException("JobDetail cannot be null");
+	}
+	
+	if (trigger == null) {
+		throw new SchedulerException("Trigger cannot be null");
+	}
+	
+	if (jobDetail.getKey() == null) {
+		throw new SchedulerException("Job's key cannot be null");
+	}
+
+	if (jobDetail.getJobClass() == null) {
+		throw new SchedulerException("Job's class cannot be null");
+	}
+	
+	OperableTrigger trig = (OperableTrigger)trigger;
+
+	// 为定时器设置对应的JobKey
+	if (trigger.getJobKey() == null) {
+		trig.setJobKey(jobDetail.getKey());
+	} else if (!trigger.getJobKey().equals(jobDetail.getKey())) {
+		throw new SchedulerException("Trigger does not reference given job!");
+	}
+
+	trig.validate();
+
+	Calendar cal = null;
+	
+	if (trigger.getCalendarName() != null) {
+		cal = resources.getJobStore().retrieveCalendar(trigger.getCalendarName());
+	}
+	
+	// 获取Trigger第一次触发的时间。
+	Date ft = trig.computeFirstFireTime(cal);
+
+	if (ft == null) {
+		throw new SchedulerException("Based on configured schedule, the given trigger '" + trigger.getKey() + "' will never fire.");
+	}
+
+	resources.getJobStore().storeJobAndTrigger(jobDetail, trig);
+	notifySchedulerListenersJobAdded(jobDetail);
+	notifySchedulerThread(trigger.getNextFireTime().getTime());
+	notifySchedulerListenersSchduled(trigger);
+
+	return ft;
+}
+
+
+// ☆☆ 向定时器中添加JobDetail和Trigger。
+public Date scheduleJob(Trigger trigger) throws SchedulerException {
+	validateState();
+
+	if (trigger == null) {
+		throw new SchedulerException("Trigger cannot be null");
+	}
+
+	// 强制类型转换。
+	OperableTrigger trig = (OperableTrigger)trigger;
+	
+	// Trigger的简单校验，jobName、group等参数校验。
+	trig.validate();
+
+	Calendar cal = null;
+	
+	if (trigger.getCalendarName() != null) {
+		cal = resources.getJobStore().retrieveCalendar(trigger.getCalendarName());
+		if(cal == null) {
+			throw new SchedulerException("Calendar not found: " + trigger.getCalendarName());
+		}
+	}
+	
+	Date ft = trig.computeFirstFireTime(cal);
+
+	if (ft == null) {
+		throw new SchedulerException("Based on configured schedule, the given trigger '" + trigger.getKey() + "' will never fire.");
+	}
+
+	resources.getJobStore().storeTrigger(trig, false);
+	notifySchedulerThread(trigger.getNextFireTime().getTime());
+	notifySchedulerListenersSchduled(trigger);
+
+	return ft;
+}
+
+replace：更换。
+public void addJob(JobDetail jobDetail, boolean replace) throws SchedulerException {
+	addJob(jobDetail, replace, false);
+}
+
+public void addJob(JobDetail jobDetail, boolean replace, boolean storeNonDurableWhileAwaitingScheduling) throws SchedulerException {
+	validateState();
+
+	if (!storeNonDurableWhileAwaitingScheduling && !jobDetail.isDurable()) {
+		throw new SchedulerException("Jobs added with no trigger must be durable.");
+	}
+
+	resources.getJobStore().storeJob(jobDetail, replace);
+	notifySchedulerThread(0L);
+	notifySchedulerListenersJobAdded(jobDetail);
+}
+
+
+
+
+runningSince()：获取开始时间。这个开始时间是在start()方法设置的。
+isClustered()：是否是集群模式。
+
+
+// 通知所有绑定到定时器上的监听器，告诉监听器定时器启动了。
+public void notifySchedulerListenersStarting() {
+	// 获取绑定的监听器。
+	List<SchedulerListener> schedListeners = buildSchedulerListenerList();
+
+	// 遍历通知。
+	for (SchedulerListener sl : schedListeners) {
+		try {
+			sl.schedulerStarting();
+		} catch (Exception e) {
+			getLog().error("Error while notifying SchedulerListener of startup.", e);
+		}
+	}
+}
+
+
+
+
+// 获取监听器。
+private List<SchedulerListener> buildSchedulerListenerList() {
+	List<SchedulerListener> allListeners = new LinkedList<SchedulerListener>();
+	allListeners.addAll(getListenerManager().getSchedulerListeners());
+	allListeners.addAll(getInternalSchedulerListeners());
+	return allListeners;
+}
+
+
+##########################################################################################################################################################
+#############################################                 _RAMJobStore                ############################################################
+##########################################################################################################################################################
+
+
+
+
+public void storeJobAndTrigger(JobDetail newJob, OperableTrigger newTrigger) throws JobPersistenceException {
+	storeJob(newJob, false);
+	storeTrigger(newTrigger, false);
+}
+
+
+public void storeJob(JobDetail newJob, boolean replaceExisting) throws ObjectAlreadyExistsException {
+	// 拷贝一个JobDetail副本并包装成JobWrapper
+	JobWrapper jw = new JobWrapper((JobDetail)newJob.clone());
+
+	boolean repl = false;
+
+	synchronized (lock) {
+		if (jobsByKey.get(jw.key) != null) {
+			if (!replaceExisting) {
+				throw new ObjectAlreadyExistsException(newJob);
+			}
+			repl = true;
+		}
+
+		if (!repl) {
+			// 获取的JobWrapper所有分组。
+			HashMap<JobKey, JobWrapper> grpMap = jobsByGroup.get(newJob.getKey().getGroup());
+			
+			// 分组是否存在
+			if (grpMap == null) {
+				grpMap = new HashMap<JobKey, JobWrapper>(100);
+				jobsByGroup.put(newJob.getKey().getGroup(), grpMap);
+			}
+			
+			// 添加JobWrapper添加到分组中
+			grpMap.put(newJob.getKey(), jw);
+			
+			// 添加到JobWrapper集合中，key:为JobWrapper的key，value为：JobWrapper。
+			jobsByKey.put(jw.key, jw);
+		} else {
+			// 更新操作。
+			JobWrapper orig = jobsByKey.get(jw.key);
+			orig.jobDetail = jw.jobDetail; 
+		}
+	}
+}
+
+
+TriggerWrapper的八种状态
+	STATE_WAITING：等待
+	STATE_ACQUIRED：添加、获取。
+	STATE_EXECUTING：执行中
+	STATE_COMPLETE：完成
+	STATE_PAUSED：暂停
+	STATE_BLOCKED：堵塞
+	STATE_PAUSED_BLOCKED：暂停堵塞
+
+public void storeTrigger(OperableTrigger newTrigger, boolean replaceExisting) throws JobPersistenceException {
+	TriggerWrapper tw = new TriggerWrapper((OperableTrigger)newTrigger.clone());
+
+	synchronized (lock) {
+		// 判断是否已经存在TriggerWrapperKey对应的TriggerWrapper。
+		if (triggersByKey.get(tw.key) != null) {
+			if (!replaceExisting) {
+				throw new ObjectAlreadyExistsException(newTrigger);
+			}
+
+			// 移除。
+			removeTrigger(newTrigger.getKey(), false);
+		}
+
+		if (retrieveJob(newTrigger.getJobKey()) == null) {
+			throw new JobPersistenceException("The job (" + newTrigger.getJobKey() + ") referenced by the trigger does not exist.");
+		}
+
+		// 向TriggerWrapper集合中添加TriggerWrapper。
+		triggers.add(tw);
+		
+		// 添加分组
+		HashMap<TriggerKey, TriggerWrapper> grpMap = triggersByGroup.get(newTrigger.getKey().getGroup());
+		if (grpMap == null) {
+			grpMap = new HashMap<TriggerKey, TriggerWrapper>(100);
+			triggersByGroup.put(newTrigger.getKey().getGroup(), grpMap);
+		}
+		grpMap.put(newTrigger.getKey(), tw);
+		
+		// 
+		triggersByKey.put(tw.key, tw);
+
+		// 判读Trigger是否在暂停的组中
+		if (pausedTriggerGroups.contains(newTrigger.getKey().getGroup()) || pausedJobGroups.contains(newTrigger.getJobKey().getGroup())) {
+			tw.state = TriggerWrapper.STATE_PAUSED;
+			if (blockedJobs.contains(tw.jobKey)) {
+				tw.state = TriggerWrapper.STATE_PAUSED_BLOCKED;
+			}
+		
+		// 是否是阻塞的。
+		} else if (blockedJobs.contains(tw.jobKey)) {
+			tw.state = TriggerWrapper.STATE_BLOCKED;
+			
+		// 添加到要执行的Trigger集合中。
+		} else {
+			timeTriggers.add(tw);
+		}
+	}
+}
+
+##########################################################################################################################################################
+#############################################                 _JobRunShell                ############################################################
+##########################################################################################################################################################
+JobRunShell类实现了Runnable接口，继承了SchedulerListenerSupport。WorkerThread内部维持这个一个Runnable属性，传入WorkerThread的Runnable实例就是JobRunShell实例。
+
+问题：
+	【1】为什么JobRunShell可以当做执行任务。
+	JobRunShell在实例化时，必须传输Scheduler对象和TriggerFiredBundle对象。在初始化的时候，实例化一个Job实例对象和JobExecutionContextImpl实例对象，并把JobExecutionContextImpl实例对应赋值给成员属性。其中JobRunShell类中的run()方法
+就是执行了Job的execute()方法。
+
+内部维持着QuartzScheduler qs对象。
+
+内部比较重要的成员变量：
+	protected JobExecutionContextImpl jec = null;JobExecutionContextImpl。中包含scheduler、Trigger、JobDetail、Calendar等数据。
+    protected QuartzScheduler qs = null;
+	
+
+// 主要是实例化一个Job实例对象和JobExecutionContextImpl实例对象。
+public void initialize(QuartzScheduler sched) throws SchedulerException {
+	this.qs = sched;
+
+	Job job = null;
+	// TriggerFiredBundle实例firedTriggerBundle，其初始化是传入的参数。TriggerFiredBundle这个对象保存着JobDetail、OperableTrigger等，所以可以通过TriggerFiredBundle获取
+	// 到批
+	JobDetail jobDetail = firedTriggerBundle.getJobDetail();
+
+	try {
+		job = sched.getJobFactory().newJob(firedTriggerBundle, scheduler);
+	} catch (SchedulerException se) {
+		sched.notifySchedulerListenersError("An error occured instantiating job to be executed. job= '" + jobDetail.getKey() + "'", se);
+		throw se;
+	} catch (Throwable ncdfe) { 
+		SchedulerException se = new SchedulerException("Problem instantiating class '" + jobDetail.getJobClass().getName() + "' - ", ncdfe);
+		sched.notifySchedulerListenersError("An error occured instantiating job to be executed. job= '" + jobDetail.getKey() + "'", se);
+		throw se;
+	}
+
+	this.jec = new JobExecutionContextImpl(scheduler, firedTriggerBundle, job);
+}
+
+// 执行具体的job的execute()方法。
+public void run() {
+	// 向定时器添加监听器，JobRunShell自身就是一个监听器。
+	qs.addInternalSchedulerListener(this);
+
+	try {
+		// 获取
+		OperableTrigger trigger = (OperableTrigger) jec.getTrigger();
+		JobDetail jobDetail = jec.getJobDetail();
+
+		do {
+
+			JobExecutionException jobExEx = null;
+			Job job = jec.getJobInstance();
+
+			try {
+				begin();
+			} catch (SchedulerException se) {
+				qs.notifySchedulerListenersError("Error executing Job ("+ jec.getJobDetail().getKey() + ": couldn't begin execution.", se);
+				break;
+			}
+
+			try {
+				// 通知监听器开始执行。
+				if (!notifyListenersBeginning(jec)) {
+					break;
+				}
+			} catch(VetoedException ve) {
+				try {
+					CompletedExecutionInstruction instCode = trigger.executionComplete(jec, null);
+					qs.notifyJobStoreJobVetoed(trigger, jobDetail, instCode);
+					
+					if (jec.getTrigger().getNextFireTime() == null) {
+						qs.notifySchedulerListenersFinalized(jec.getTrigger());
+					}
+
+					complete(true);
+				} catch (SchedulerException se) {
+					qs.notifySchedulerListenersError("Error during veto of Job (" + jec.getJobDetail().getKey() + ": couldn't finalize execution.", se);
+				}
+				break;
+			}
+
+			long startTime = System.currentTimeMillis();
+			long endTime = startTime;
+
+			
+			// ################################################
+			// #############   执行Job   ######################
+			// ################################################
+			try {
+				log.debug("Calling execute on job " + jobDetail.getKey());
+				job.execute(jec);
+				endTime = System.currentTimeMillis();
+			} catch (JobExecutionException jee) {
+				endTime = System.currentTimeMillis();
+				jobExEx = jee;
+				getLog().info("Job " + jobDetail.getKey() + " threw a JobExecutionException: ", jobExEx);
+			} catch (Throwable e) {
+				endTime = System.currentTimeMillis();
+				getLog().error("Job " + jobDetail.getKey() + " threw an unhandled Exception: ", e);
+				SchedulerException se = new SchedulerException("Job threw an unhandled exception.", e);
+				qs.notifySchedulerListenersError("Job (" + jec.getJobDetail().getKey() + " threw an exception.", se);
+				jobExEx = new JobExecutionException(se, false);
+			}
+
+			// 设置信息
+			jec.setJobRunTime(endTime - startTime);
+
+			// 通知所有的job listenter，成功通知返回true。
+			if (!notifyJobListenersComplete(jec, jobExEx)) {
+				break;
+			}
+
+			CompletedExecutionInstruction instCode = CompletedExecutionInstruction.NOOP;
+
+			try {
+				instCode = trigger.executionComplete(jec, jobExEx);
+			} catch (Exception e) {
+				SchedulerException se = new SchedulerException( "Trigger threw an unhandled exception.", e);
+				qs.notifySchedulerListenersError("Please report this error to the Quartz developers.", se);
+			}
+
+			// 通知所有的trigger listenter，成功通知返回true。
+			if (!notifyTriggerListenersComplete(jec, instCode)) {
+				break;
+			}
+			
+			if (instCode == CompletedExecutionInstruction.RE_EXECUTE_JOB) {
+				jec.incrementRefireCount();
+				try {
+					complete(false);
+				} catch (SchedulerException se) {
+					qs.notifySchedulerListenersError("Error executing Job ("+ jec.getJobDetail().getKey() + ": couldn't finalize execution.", se);
+				}
+				continue;
+			}
+
+			try {
+				complete(true);
+			} catch (SchedulerException se) {
+				qs.notifySchedulerListenersError("Error executing Job ("+ jec.getJobDetail().getKey() + ": couldn't finalize execution.", se);
+				continue;
+			}
+
+			// 通知JobStore Job执行完成。
+			qs.notifyJobStoreJobComplete(trigger, jobDetail, instCode);
+			break;
+			
+		} while (true);
+
+	} finally {
+		qs.removeInternalSchedulerListener(this);
+	}
+}
+
+
+StdJDBCDelegate
+
+
+
+public List<OperableTrigger> acquireNextTriggers(final long noLaterThan, final int maxCount, final long timeWindow) throws JobPersistenceException {
+	
+	String lockName;
+	if(isAcquireTriggersWithinLock() || maxCount > 1) { 
+		lockName = LOCK_TRIGGER_ACCESS;
+	} else {
+		lockName = null;
+	}
+	
+	
+	return executeInNonManagedTXLock(lockName, 
+			new TransactionCallback<List<OperableTrigger>>() {
+				public List<OperableTrigger> execute(Connection conn) throws JobPersistenceException {
+					return acquireNextTrigger(conn, noLaterThan, maxCount, timeWindow);
+				}
+			},
+			new TransactionValidator<List<OperableTrigger>>() {
+				public Boolean validate(Connection conn, List<OperableTrigger> result) throws JobPersistenceException {
+					try {
+						List<FiredTriggerRecord> acquired = getDelegate().selectInstancesFiredTriggerRecords(conn, getInstanceId());
+						Set<String> fireInstanceIds = new HashSet<String>();
+						for (FiredTriggerRecord ft : acquired) {
+							fireInstanceIds.add(ft.getFireInstanceId());
+						}
+						for (OperableTrigger tr : result) {
+							if (fireInstanceIds.contains(tr.getFireInstanceId())) {
+								return true;
+							}
+						}
+						return false;
+					} catch (SQLException e) {
+						throw new JobPersistenceException("error validating trigger acquisition", e);
+					}
+				}
+			});
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

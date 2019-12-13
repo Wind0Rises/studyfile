@@ -1,0 +1,71 @@
+Scheduler：只是一个接口。
+
+/**
+ *
+ */
+ 
+/**
+ * 向Scheduler中插入JobDetail和Trigger。
+ */
+location：StdScheduler
+public Date scheduleJob(JobDetail jobDetail, Trigger trigger) throws SchedulerException {
+	return sched.scheduleJob(jobDetail, trigger);
+}
+
+/**
+ *
+ */
+location：QuartzScheduler
+public Date scheduleJob(JobDetail jobDetail, Trigger trigger) throws SchedulerException {
+	// 校验QuartzScheduler是否是关闭状态。
+	validateState();
+
+	// 参数校验
+	if (jobDetail == null) {
+		throw new SchedulerException("JobDetail cannot be null");
+	}
+	
+	if (trigger == null) {
+		throw new SchedulerException("Trigger cannot be null");
+	}
+	
+	// 如果Job没有设置，key = new JobKey(getName(), getGroup())。getGroup()如果为null，默认使用DEFAULT。
+	if (jobDetail.getKey() == null) {
+		throw new SchedulerException("Job's key cannot be null");
+	}
+
+	if (jobDetail.getJobClass() == null) {
+		throw new SchedulerException("Job's class cannot be null");
+	}
+	
+	// 强转。
+	OperableTrigger trig = (OperableTrigger)trigger;
+
+	// 查看Trigger中的JobKey是否存在，如果存在，时候和设置的JobDetail对应的Jobkey是否一致；如果不存在，把这个JobDetail的Jobkey设置进去。
+	// 这样Trigger就和JobDetail之间关联起来了。
+	if (trigger.getJobKey() == null) {
+		trig.setJobKey(jobDetail.getKey());
+	} else if (!trigger.getJobKey().equals(jobDetail.getKey())) {
+		throw new SchedulerException("Trigger does not reference given job!");
+	}
+
+	trig.validate();
+
+	Calendar cal = null;
+	if (trigger.getCalendarName() != null) {
+		cal = resources.getJobStore().retrieveCalendar(trigger.getCalendarName());
+	}
+	Date ft = trig.computeFirstFireTime(cal);
+
+	if (ft == null) {
+		throw new SchedulerException(
+				"Based on configured schedule, the given trigger '" + trigger.getKey() + "' will never fire.");
+	}
+
+	resources.getJobStore().storeJobAndTrigger(jobDetail, trig);
+	notifySchedulerListenersJobAdded(jobDetail);
+	notifySchedulerThread(trigger.getNextFireTime().getTime());
+	notifySchedulerListenersSchduled(trigger);
+
+	return ft;
+}

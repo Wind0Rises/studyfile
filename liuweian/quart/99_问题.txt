@@ -1,0 +1,12 @@
+JobStore、TriggerFiredResult、TriggerFiredBundle三者之间的关系。
+
+JobStore、JobDetail之间的关系
+
+QuartzScheduler、Scheduler（StdScheduler）之间的关系？
+	Scheduler中维护着一个QuartzScheduler实例，几乎所有Scheduler的操作都是通过QuartzScheduler去进行操作的。【就像Controller和Service，Scheduler就是对应的接口，这个
+接口的具体的实现就是通过QuartzScheduler去完成的】
+
+
+Trigger和JobDetail之间的怎么关联的。
+	AbstractTrigger可以通过setJobKey(JobKey key)方法关联Trigger。一个Trigger中只能对应一个JobDetail，但是一个JobDetail可以对应多个Trigger。
+	

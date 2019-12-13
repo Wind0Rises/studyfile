@@ -1,0 +1,430 @@
+/**
+ * 真正的工作线程，如果该线程启动并且未暂停。
+ * 判断Scheduler中是否有可用的工作线程。
+ *  	有可用的工作线程，从Scheduler中获取当前时间 + 30s的触发器。
+ *
+ */
+location：QuartzSchedulerThread
+public void run() {
+	boolean lastAcquireFailed = false;
+
+	// halted：用于判断quartz是否是暂停状态，默认不是暂停状态，初始化为false。
+	// paused：用于判断是否启动，默认为未启动，初始化默认为ture。
+	
+	// 如果不是暂停状态，进入循环。
+	while (!halted.get()) {
+		try {
+			// 初始化的时候Quartz不是暂停状态，但是是未启动状态。
+			// 如果未启动，每1秒检查一次，Quartz是否启动并且不是暂停状态。如果QuartzScheduler的start()方法被调用以后paused会被置为ture.
+			synchronized (sigLock) {
+				while (paused && !halted.get()) {
+					try {
+						sigLock.wait(1000L);
+					} catch (InterruptedException ignore) {
+					
+					}
+				}
+
+				if (halted.get()) {
+					break;
+				}
+			}
+			
+			// 获取线程池中可用线程数。
+			int availThreadCount = qsRsrcs.getThreadPool().blockForAvailableThreads();
+			
+			// 如果线程池中有可用的工作线程，这进入循环。
+			if(availThreadCount > 0) { 
+			
+				List<OperableTrigger> triggers = null;
+				
+				
+				long now = System.currentTimeMillis();
+				
+				// 清除信号记录，把signaled设为ture
+				// 清空调度插队的信息，调度处理过程中，可以被集群管理线程或误点管理线程或job管理接口通知调度任务插队。
+				clearSignaledSchedulingChange();
+				
+				try {
+					// acquireNextTriggers()方法获取到OperableTrigger的集合，并按执行时间的先后顺序放入list中。这个方法可以看一下【具体类阅读.txt】
+					//(当前时间 + 30s, [availThreadCount,maxBatchSize初始化为1]中小的一个, batchTimeWindow默认为0)
+					triggers = qsRsrcs.getJobStore().acquireNextTriggers(now + idleWaitTime, Math.min(availThreadCount, qsRsrcs.getMaxBatchSize()), qsRsrcs.getBatchTimeWindow()); 
+					
+					lastAcquireFailed = false;
+					if (log.isDebugEnabled()) {
+						log.debug("batch acquisition of " + (triggers == null ? 0 : triggers.size()) + " triggers");
+					}
+				} catch (JobPersistenceException jpe) {
+					if(!lastAcquireFailed) {
+						qs.notifySchedulerListenersError("An error occurred while scanning for the next triggers to fire.", jpe);
+					}
+					lastAcquireFailed = true;
+					continue;
+				} catch (RuntimeException e) {
+					if(!lastAcquireFailed) {
+						getLog().error("quartzSchedulerThreadLoop: RuntimeException " + e.getMessage(), e);
+					}
+					lastAcquireFailed = true;
+					continue;
+				}
+
+				// 如果triggers是否为空
+				if (triggers != null && !triggers.isEmpty()) {
+				
+					now = System.currentTimeMillis();
+					
+					// 触发器下次执行的时间。
+					long triggerTime = triggers.get(0).getNextFireTime().getTime();
+					
+					// 当前时间距离下次执行时间的间隔。
+					long timeUntilTrigger = triggerTime - now;
+					
+					//【不明白】为什么要大于2？
+					while(timeUntilTrigger > 2) {
+					
+						synchronized (sigLock) {
+						
+							// quartz是否是在暂停状态
+							if (halted.get()) {
+								break;
+							}
+							
+							//QuartzSchedule是否被改变了，没有改变isCandidateNewTimeEarlierWithinReason返回false，
+							if (!isCandidateNewTimeEarlierWithinReason(triggerTime, false)) {
+								try {
+									// 重新计算时间
+									now = System.currentTimeMillis();
+									timeUntilTrigger = triggerTime - now;
+									
+									// 如果没有到达触发时间，等到触发时间。  【【谁来唤醒他】】
+									if(timeUntilTrigger >= 1) {
+										sigLock.wait(timeUntilTrigger);
+									}
+								} catch (InterruptedException ignore) {
+								
+								}
+							}
+						}
+						
+						if(releaseIfScheduleChangedSignificantly(triggers, triggerTime)) {
+							break;
+						}
+						
+						now = System.currentTimeMillis();
+						timeUntilTrigger = triggerTime - now;
+					}
+
+					// 再次检查triggers是否为空。
+					if(triggers.isEmpty()) {
+						continue;
+					}						
+
+					List<TriggerFiredResult> bndles = new ArrayList<TriggerFiredResult>();
+					
+					boolean goAhead = true;
+					
+					// 判断是否暂停。
+					synchronized(sigLock) {
+						goAhead = !halted.get(); // 没有出现暂停情况goAhead都为ture
+					}
+					
+					if(goAhead) {
+						// 从QuartzSchedulerResources中获取对应的TriggerFiredResult集合，并赋给bndles；
+						try {
+						
+							List<TriggerFiredResult> res = qsRsrcs.getJobStore().triggersFired(triggers);
+							if(res != null) {
+								bndles = res;
+							}
+							
+						} catch (SchedulerException se) {
+							qs.notifySchedulerListenersError("An error occurred while firing triggers '" + triggers + "'", se);
+							for (int i = 0; i < triggers.size(); i++) {
+								qsRsrcs.getJobStore().releaseAcquiredTrigger(triggers.get(i));
+							}
+							continue;
+						}
+					}
+
+					for (int i = 0; i < bndles.size(); i++) {
+						TriggerFiredResult result =  bndles.get(i);
+						// 获取TriggerFiredBundle从TriggerFiredResult中，
+						TriggerFiredBundle bndle =  result.getTriggerFiredBundle();
+						Exception exception = result.getException();
+
+						if (exception instanceof RuntimeException) {
+							getLog().error("RuntimeException while firing trigger " + triggers.get(i), exception);
+							qsRsrcs.getJobStore().releaseAcquiredTrigger(triggers.get(i));
+							continue;
+						}
+
+						if (bndle == null) {
+							qsRsrcs.getJobStore().releaseAcquiredTrigger(triggers.get(i));
+							continue;
+						}
+
+						###################################################
+						#         创建对应的JobRunShell，并初始化         #
+						###################################################
+						JobRunShell shell = null;
+						try {
+							shell = qsRsrcs.getJobRunShellFactory().createJobRunShell(bndle);
+							shell.initialize(qs);
+						} catch (SchedulerException se) {
+							qsRsrcs.getJobStore().triggeredJobComplete(triggers.get(i), bndle.getJobDetail(), CompletedExecutionInstruction.SET_ALL_JOB_TRIGGERS_ERROR);
+							continue;
+						}
+
+						###################################################
+						#             获取对应的JobRunShell               #
+						###################################################
+						if (qsRsrcs.getThreadPool().runInThread(shell) == false) {
+							getLog().error("ThreadPool.runInThread() return false!");
+							qsRsrcs.getJobStore().triggeredJobComplete(triggers.get(i), bndle.getJobDetail(), CompletedExecutionInstruction.SET_ALL_JOB_TRIGGERS_ERROR);
+						}
+
+					}
+					
+					continue; 
+				}
+			} else { 
+				continue; 
+			}
+
+			long now = System.currentTimeMillis();
+			long waitTime = now + getRandomizedIdleWaitTime();
+			long timeUntilContinue = waitTime - now;
+			
+			synchronized(sigLock) {
+				try {
+				  if(!halted.get()) {
+					if (!isScheduleChanged()) {
+					  sigLock.wait(timeUntilContinue);
+					}
+				  }
+				} catch (InterruptedException ignore) {
+				}
+			}
+		} catch(RuntimeException re) {
+			getLog().error("Runtime error occurred in main trigger firing loop.", re);
+		}
+	}
+
+	qs = null;
+	qsRsrcs = null;
+}
+
+
+/**
+ * JobRunShell实现了Runnable接口。
+ */
+location：SimpleThreadPool
+public boolean runInThread(Runnable runnable) {
+	if (runnable == null) {
+		return false;
+	}
+
+	synchronized (nextRunnableLock) {
+		handoffPending = true;
+
+		// 等待工作线程可用。
+		while ((availWorkers.size() < 1) && !isShutdown) {
+			try {
+				nextRunnableLock.wait(500);
+			} catch (InterruptedException ignore) {
+			
+			}
+		}
+
+		if (!isShutdown) {
+			WorkerThread wt = (WorkerThread)availWorkers.removeFirst();
+			busyWorkers.add(wt);
+			wt.run(runnable);
+		} else {
+			// 如果线程池正在关闭，在新的其他工作线程执行Runnable
+			WorkerThread wt = new WorkerThread(this, threadGroup, "WorkerThread-LastJob", prio, isMakeThreadsDaemons(), runnable);
+			busyWorkers.add(wt);
+			workers.add(wt);
+			wt.start();
+		}
+		nextRunnableLock.notifyAll();
+		handoffPending = false;
+	}
+
+	return true;
+}
+
+
+WorkerThread的Run方法。
+@Override
+public void run() {
+	boolean ran = false;
+	
+	while (run.get()) {
+		try {
+			synchronized(lock) {
+				while (runnable == null && run.get()) {
+					lock.wait(500);
+				}
+
+				if (runnable != null) {
+					ran = true;
+					runnable.run();
+				}
+			}
+		} catch (InterruptedException unblock) {
+			// do nothing (loop will terminate if shutdown() was called
+			try {
+				getLog().error("Worker thread was interrupt()'ed.", unblock);
+			} catch(Exception e) {
+				// ignore to help with a tomcat glitch
+			}
+		} catch (Throwable exceptionInRunnable) {
+			try {
+				getLog().error("Error while executing the Runnable: ",
+					exceptionInRunnable);
+			} catch(Exception e) {
+				// ignore to help with a tomcat glitch
+			}
+		} finally {
+			synchronized(lock) {
+				runnable = null;
+			}
+			// repair the thread in case the runnable mucked it up...
+			if(getPriority() != tp.getThreadPriority()) {
+				setPriority(tp.getThreadPriority());
+			}
+
+			if (runOnce) {
+				   run.set(false);
+				clearFromBusyWorkersList(this);
+			} else if(ran) {
+				ran = false;
+				makeAvailable(this);
+			}
+
+		}
+	}
+
+	//if (log.isDebugEnabled())
+	try {
+		getLog().debug("WorkerThread is shut down.");
+	} catch(Exception e) {
+		// ignore to help with a tomcat glitch
+	}
+}
+
+
+JobRunShell方法
+public void run() {
+
+	qs.addInternalSchedulerListener(this);
+	
+	try {
+		OperableTrigger trigger = (OperableTrigger) jec.getTrigger();
+		JobDetail jobDetail = jec.getJobDetail();
+
+		do {
+			JobExecutionException jobExEx = null;
+			Job job = jec.getJobInstance();
+
+			try {
+				begin();
+			} catch (SchedulerException se) {
+				qs.notifySchedulerListenersError("Error executing Job (" + jec.getJobDetail().getKey() + ": couldn't begin execution.", se);
+				break;
+			}
+
+			// notify job & trigger listeners...
+			
+			try {
+				if (!notifyListenersBeginning(jec)) {
+					break;
+				}
+			} catch(VetoedException ve) {
+				try {
+					CompletedExecutionInstruction instCode = trigger.executionComplete(jec, null);
+					qs.notifyJobStoreJobVetoed(trigger, jobDetail, instCode);
+					
+					// 即使Trigger被否决，仍然需要检查它是否是Trigger的最终运行。
+					if (jec.getTrigger().getNextFireTime() == null) {
+						qs.notifySchedulerListenersFinalized(jec.getTrigger());
+					}
+					
+					complete(true);
+					
+				} catch (SchedulerException se) {
+					qs.notifySchedulerListenersError("Error during veto of Job (" + jec.getJobDetail().getKey() + ": couldn't finalize execution.", se);
+				}
+				break;
+			}
+
+			long startTime = System.currentTimeMillis();
+			long endTime = startTime;
+			
+			//##############################################
+			// 执行Job
+			//##############################################
+			try {
+				log.debug("Calling execute on job " + jobDetail.getKey());
+				job.execute(jec);
+				endTime = System.currentTimeMillis();
+			} catch (JobExecutionException jee) {
+				endTime = System.currentTimeMillis();
+				jobExEx = jee;
+				getLog().info("Job " + jobDetail.getKey() + " threw a JobExecutionException: ", jobExEx);
+			} catch (Throwable e) {
+				endTime = System.currentTimeMillis();
+				getLog().error("Job " + jobDetail.getKey() + " threw an unhandled Exception: ", e);
+				SchedulerException se = new SchedulerException("Job threw an unhandled exception.", e);
+				qs.notifySchedulerListenersError("Job (" + jec.getJobDetail().getKey() + " threw an exception.", se);
+				jobExEx = new JobExecutionException(se, false);
+			}
+
+			jec.setJobRunTime(endTime - startTime);
+
+			// 通知所有的Job监听器,Job处理完成。  notify all job listeners
+			if (!notifyJobListenersComplete(jec, jobExEx)) {
+				break;
+			}
+
+			CompletedExecutionInstruction instCode = CompletedExecutionInstruction.NOOP;
+
+			//  更新trigger, update the trigger
+			try {
+				instCode = trigger.executionComplete(jec, jobExEx);
+			} catch (Exception e) {
+				SchedulerException se = new SchedulerException("Trigger threw an unhandled exception.", e);
+				qs.notifySchedulerListenersError("Please report this error to the Quartz developers.", se);
+			}
+
+			// 通知所有的trigger监听器,
+			if (!notifyTriggerListenersComplete(jec, instCode)) {
+				break;
+			}
+
+			// 更新job和trigger，或者重新执行job
+			if (instCode == CompletedExecutionInstruction.RE_EXECUTE_JOB) { 	
+				jec.incrementRefireCount();
+				try {
+					complete(false);
+				} catch (SchedulerException se) {
+					qs.notifySchedulerListenersError("Error executing Job (" + jec.getJobDetail().getKey() + ": couldn't finalize execution.", se);
+				}
+				continue;
+			}
+
+			try {
+				complete(true);
+			} catch (SchedulerException se) {
+				qs.notifySchedulerListenersError("Error executing Job ("+ jec.getJobDetail().getKey() + ": couldn't finalize execution.", se);
+				continue;
+			}
+
+			qs.notifyJobStoreJobComplete(trigger, jobDetail, instCode);
+			break;
+		} while (true);
+	} finally {
+		qs.removeInternalSchedulerListener(this);
+	}
+}

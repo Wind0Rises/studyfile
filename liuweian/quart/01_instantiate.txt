@@ -1,0 +1,1498 @@
+StdSchedulerFactory：用于创建的Scheduler
+
+Scheduler：一个Scheduler维护着一个JobDetail和Trigger的注册表。一旦注册，Scheduler将在其关联的触发器触发时负责执行Job。
+
+
+
+/** 
+ * getScheduler()：该方法可以获取到具体的Scheduler实例。
+ */
+location：StdSchedulerFactory
+public Scheduler getScheduler() throws SchedulerException {
+	if (cfg == null) {
+		// 加载quartz.properties配置文件，并初始化cfg属性。
+		initialize();
+	}
+
+	// SchedulerRepository：是单例模式的，其内部维护着HashMap<String, Scheduler> schedulers；
+	// 用于存储Scheduler的对象。
+	SchedulerRepository schedRep = SchedulerRepository.getInstance();
+
+	// getSchedulerName()：从配置文件中读取org.quartz.scheduler.instanceName，如果配置了使用配置名称，如果没有配置默认使用QuartzScheduler。
+	// 判断SchedulerRepository中是否已经保存有Scheduler对象了？如果已经存在，判断这个Scheduler是否停止，如果停止就移除Scheduler，否则把已经存在的Scheduler返回。
+	Scheduler sched = schedRep.lookup(getSchedulerName());
+	if (sched != null) {
+		if (sched.isShutdown()) {
+			schedRep.remove(getSchedulerName());
+		} else {
+			return sched;
+		}
+	}
+
+	// 
+	sched = instantiate();
+	return sched;
+}
+
+/** 
+ * 初始化操作，主要是加载对应quartz.properties文件。
+ */
+location：StdSchedulerFactory
+public void initialize() throws SchedulerException {
+	// 
+	if (cfg != null) {
+		return;
+	}
+	if (initException != null) {
+		throw initException;
+	}
+
+	// 获取quartz.properties文件。首先获取PROPERTIES_FILE = "org.quartz.properties"配置，如果上面不存在就加载quartz.properties。
+	// org.quartz.properties  -->  quartz.properties  -->  quartz.properties  --> /quartz.properties   -->  org/quartz/quartz.properties
+	String requestedFile = System.getProperty(PROPERTIES_FILE);
+	String propFileName = requestedFile != null ? requestedFile : "quartz.properties";
+	File propFile = new File(propFileName);
+
+	Properties props = new Properties();
+
+	InputStream in = null;
+
+	try {
+		// 判断文件是否存在，
+		if (propFile.exists()) {
+			try {
+				if (requestedFile != null) {
+					propSrc = "specified file: '" + requestedFile + "'";
+				} else {
+					propSrc = "default file in current working dir: 'quartz.properties'";
+				}
+
+				in = new BufferedInputStream(new FileInputStream(propFileName));
+				props.load(in);
+
+			} catch (IOException ioe) {
+				initException = new SchedulerException("Properties file: '" + propFileName + "' could not be read.", ioe);
+				throw initException;
+			}
+		} else if (requestedFile != null) {
+			in = Thread.currentThread().getContextClassLoader().getResourceAsStream(requestedFile);
+
+			if(in == null) {
+				initException = new SchedulerException("Properties file: '" + requestedFile + "' could not be found.");
+				throw initException;
+			}
+
+			propSrc = "specified file: '" + requestedFile + "' in the class resource path.";
+
+			in = new BufferedInputStream(in);
+			try {
+				props.load(in);
+			} catch (IOException ioe) {
+				initException = new SchedulerException("Properties file: '" + requestedFile + "' could not be read.", ioe);
+				throw initException;
+			}
+
+		// 注意加载文件的顺序。
+		} else {
+			propSrc = "default resource file in Quartz package: 'quartz.properties'";
+
+			ClassLoader cl = getClass().getClassLoader();
+			if(cl == null) {
+				cl = findClassloader();
+			}
+			
+			if(cl == null) {
+				throw new SchedulerConfigException("Unable to find a class loader on the current thread or class.");
+			}
+			
+			in = cl.getResourceAsStream("quartz.properties");
+
+			if (in == null) {
+				in = cl.getResourceAsStream("/quartz.properties");
+			}
+			
+			if (in == null) {
+				in = cl.getResourceAsStream("org/quartz/quartz.properties");
+			}
+			
+			if (in == null) {
+				initException = new SchedulerException("Default quartz.properties not found in class path");
+				throw initException;
+			}
+			
+			try {
+				props.load(in);
+			} catch (IOException ioe) {
+				initException = new SchedulerException("Resource properties file: 'org/quartz/quartz.properties' " + "could not be read from the classpath.", ioe);
+				throw initException;
+			}
+		}
+	} finally {
+		if(in != null) {
+			try { in.close(); } catch(IOException ignore) { /* ignore */ }
+		}
+	}
+
+	// overrideWithSysProps(..)：添加所有的系统参数到给定的Properties中。
+	initialize(overrideWithSysProps(props));
+	
+}
+
+/**
+ * 把StdSchedulerFactory的中的cfg属性赋值。
+ */
+location：StdSchedulerFactory
+public void initialize(Properties props) throws SchedulerException {
+	if (propSrc == null) {
+		propSrc = "an externally provided properties instance.";
+	}
+	this.cfg = new PropertiesParser(props);
+}
+
+############################################################  quartz.properties  #######################################################################
+									org.quartz.scheduler.instanceName: DefaultQuartzScheduler
+									org.quartz.scheduler.rmi.export: false
+									org.quartz.scheduler.rmi.proxy: false
+									org.quartz.scheduler.wrapJobExecutionInUserTransaction: false
+									org.quartz.threadPool.class: org.quartz.simpl.SimpleThreadPool
+									org.quartz.threadPool.threadCount: 10
+									org.quartz.threadPool.threadPriority: 5
+									org.quartz.threadPool.threadsInheritContextClassLoaderOfInitializingThread: true
+									org.quartz.jobStore.misfireThreshold: 60000
+									org.quartz.jobStore.class: org.quartz.simpl.RAMJobStore
+########################################################################################################################################################
+
+
+
+
+/** 
+ *instantiate()实例化一个具体的Scheduler对象。
+ */
+location：StdSchedulerFactory
+private Scheduler instantiate() throws SchedulerException {	
+	// 如果cfg为空，重新初始换quartz.properties文件
+	if (cfg == null) {
+		initialize();
+	}
+
+	if (initException != null) {
+		throw initException;
+	}
+
+	// 存储Job的方式，可以使用RAMJobStore存储，可以使用JDBCJobStore
+	JobStore js = null;		
+
+	// 线程池。这个线程池是Quartz自己的，和jdk的类似。
+	ThreadPool tp = null;							
+	
+#############################################################################################################################################################
+#	QuartzScheduler：这是Quartz的核心，间接地的实现了Scheduler接口，包含Scheduler的Job实现和JobListener的注册实例。QuartzScheduler中						#
+#	的属性有很多核心属性；QuartzSchedulerResources用于存储一些QuartzScheduler的信息；QuartzSchedulerThread：QuartzScheduler线程，这个线程的run方法很重要;	#
+#	ListenerManager:监听器管理器，用于管理监听器的。internalJobListeners、internalTriggerListeners和internalSchedulerListeners存放着内部JobListener、		#
+#	TriggerListener和SchedulerListener的
+#	JobFactory：Job工厂；
+#		
+############################################################################################################################################################				
+	QuartzScheduler qs = null;
+	
+	// 数据库连接管理
+	DBConnectionManager dbMgr = null;	
+
+	// 生成实例ID的类。
+	String instanceIdGeneratorClass = null;
+	
+	// 配置类。
+	Properties tProps = null;
+	String userTXLocation = null;
+	boolean wrapJobInTx = false;
+	boolean autoId = false;
+	long idleWaitTime = -1;
+	long dbFailureRetry = 15000L;
+	String classLoadHelperClass;
+	
+	// Job工厂类的类名。
+	String jobFactoryClass;
+	
+	// 用于执行线程的类。  ThreadExecutor与ThreadPool的区别。
+	ThreadExecutor threadExecutor;
+
+	// 初始化一个SchedulerRepository。SchedulerRepository是单例模式。
+	SchedulerRepository schedRep = SchedulerRepository.getInstance();	
+	
+	// 从配置文件中读取scheduler的名字，默认使用：QuartzScheduler
+	String schedName = cfg.getStringProperty(PROP_SCHED_INSTANCE_NAME, "QuartzScheduler");
+	
+	// 从配置文件中读取threadName，默认使用：_QuartzSchedulerThread	
+	String threadName = cfg.getStringProperty(PROP_SCHED_THREAD_NAME, schedName + "_QuartzSchedulerThread"); 	
+	
+	// PROP_SCHED_INSTANCE_ID = "org.quartz.scheduler.instanceId";    DEFAULT_INSTANCE_ID = "NON_CLUSTERED"
+	// 读取或者设置instanceId，默认使用：NON_CLUSTERED
+	String schedInstId = cfg.getStringProperty(PROP_SCHED_INSTANCE_ID, DEFAULT_INSTANCE_ID);					
+
+	// AUTO_GENERATE_INSTANCE_ID = "AUTO"
+	// 如果是自动生产，从配置文件读取org.quartz.scheduler.instanceIdGenerator.class，如果没有使用org.quartz.simpl.SimpleInstanceIdGenerator
+	if (schedInstId.equals(AUTO_GENERATE_INSTANCE_ID)) {
+		autoId = true;
+		instanceIdGeneratorClass = cfg.getStringProperty(PROP_SCHED_INSTANCE_ID_GENERATOR_CLASS, "org.quartz.simpl.SimpleInstanceIdGenerator");
+	// 如果不是默认使用org.quartz.simpl.SystemPropertyInstanceIdGenerator生产实例ID	
+	} else if (schedInstId.equals(SYSTEM_PROPERTY_AS_INSTANCE_ID)) {
+		autoId = true;
+		instanceIdGeneratorClass = "org.quartz.simpl.SystemPropertyInstanceIdGenerator";
+	}
+
+	// 从配置文件获取org.quartz.scheduler.userTransactionURL
+	userTXLocation = cfg.getStringProperty(PROP_SCHED_USER_TX_URL, userTXLocation); 
+	if (userTXLocation != null && userTXLocation.trim().length() == 0) {
+		userTXLocation = null;
+	}
+
+	// 从配置文件获取。提供类在调度程序中加载类和资源的服务的类的接口，这个类可以用于初始类。
+	classLoadHelperClass = cfg.getStringProperty(PROP_SCHED_CLASS_LOAD_HELPER_CLASS, "org.quartz.simpl.CascadingClassLoadHelper");
+	
+	// 从配置文件读取。如果你想Quartz在执行你的Job的execute方法之前启动一个UserTransaction的话，这里设置问ture，这个事务将会在Job的execute方法执行完成以后或者是JobDataMap更新以后把事务提交，JTA事务的设置默认为false。
+	wrapJobInTx = cfg.getBooleanProperty(PROP_SCHED_WRAP_JOB_IN_USER_TX, wrapJobInTx);	
+	
+	// 从配置文件读取。获取JobFactory的类名。
+	jobFactoryClass = cfg.getStringProperty(PROP_SCHED_JOB_FACTORY_CLASS, null);
+	
+	// 从配置文件读取。idleWaitTime = -1。空闲等待时间，等待时间至少要大于1秒钟。
+	idleWaitTime = cfg.getLongProperty(PROP_SCHED_IDLE_WAIT_TIME, idleWaitTime);
+	if(idleWaitTime > -1 && idleWaitTime < 1000) {
+		throw new SchedulerException("org.quartz.scheduler.idleWaitTime of less than 1000ms is not legal.");
+	}
+	
+	//  从配置文件读取。数据库失败重试时间，默认为long dbFailureRetry = 15000L; 
+	dbFailureRetry = cfg.getLongProperty(PROP_SCHED_DB_FAILURE_RETRY_INTERVAL, dbFailureRetry);  
+	if (dbFailureRetry < 0) {
+		throw new SchedulerException(PROP_SCHED_DB_FAILURE_RETRY_INTERVAL + " of less than 0 ms is not legal.");
+	}
+
+
+	####################################################################################################################################################
+	#  Quartz的顶级配置。																																 #
+	####################################################################################################################################################
+	
+	// 调度器是否是后台线程，默认为false。
+	boolean makeSchedulerThreadDaemon = cfg.getBooleanProperty(PROP_SCHED_MAKE_SCHEDULER_THREAD_DAEMON);
+	// 线程是否继承初始化类加载器，默认false。
+	boolean threadsInheritInitalizersClassLoader = cfg.getBooleanProperty(PROP_SCHED_SCHEDULER_THREADS_INHERIT_CONTEXT_CLASS_LOADER_OF_INITIALIZING_THREAD);
+	// Quartz是否可更新版本，默认为ture。
+	boolean skipUpdateCheck = cfg.getBooleanProperty(PROP_SCHED_SKIP_UPDATE_CHECK, true);
+	// 是否是在时间窗口前批量触发。
+	long batchTimeWindow = cfg.getLongProperty(PROP_SCHED_BATCH_TIME_WINDOW, 0L);
+	// 最大批量执行的作业数。
+	int maxBatchSize = cfg.getIntProperty(PROP_SCHED_MAX_BATCH_SIZE, 1);
+	// 当关闭Job时，是否中断Job的线程，默认为false。
+	boolean interruptJobsOnShutdown = cfg.getBooleanProperty(PROP_SCHED_INTERRUPT_JOBS_ON_SHUTDOWN, false);
+	// 当关闭Job时，是否等待中断Job的线程，默认为false
+	boolean interruptJobsOnShutdownWithWait = cfg.getBooleanProperty(PROP_SCHED_INTERRUPT_JOBS_ON_SHUTDOWN_WITH_WAIT, false);
+	boolean jmxExport = cfg.getBooleanProperty(PROP_SCHED_JMX_EXPORT);
+	String jmxObjectName = cfg.getStringProperty(PROP_SCHED_JMX_OBJECT_NAME);
+	boolean jmxProxy = cfg.getBooleanProperty(PROP_SCHED_JMX_PROXY);
+	String jmxProxyClass = cfg.getStringProperty(PROP_SCHED_JMX_PROXY_CLASS);
+	boolean rmiExport = cfg.getBooleanProperty(PROP_SCHED_RMI_EXPORT, false);
+	boolean rmiProxy = cfg.getBooleanProperty(PROP_SCHED_RMI_PROXY, false);
+	String rmiHost = cfg.getStringProperty(PROP_SCHED_RMI_HOST, "localhost");
+	int rmiPort = cfg.getIntProperty(PROP_SCHED_RMI_PORT, 1099);
+	int rmiServerPort = cfg.getIntProperty(PROP_SCHED_RMI_SERVER_PORT, -1);
+	String rmiCreateRegistry = cfg.getStringProperty(PROP_SCHED_RMI_CREATE_REGISTRY, QuartzSchedulerResources.CREATE_REGISTRY_NEVER);
+	String rmiBindName = cfg.getStringProperty(PROP_SCHED_RMI_BIND_NAME);
+
+	if (jmxProxy && rmiProxy) {
+		throw new SchedulerConfigException("Cannot proxy both RMI and JMX.");
+	}
+	
+	boolean managementRESTServiceEnabled = cfg.getBooleanProperty(MANAGEMENT_REST_SERVICE_ENABLED, false);
+	String managementRESTServiceHostAndPort = cfg.getStringProperty(MANAGEMENT_REST_SERVICE_HOST_PORT, "0.0.0.0:9889");
+
+	// PROP_SCHED_CONTEXT_PREFIX = "org.quartz.context.key"
+	// 获取前缀为org.quartz.context.key的配置。
+	Properties schedCtxtProps = cfg.getPropertyGroup(PROP_SCHED_CONTEXT_PREFIX, true);
+
+	// 判断是否是远程调用，如果是远程的，从远程获取RemoteScheduler并返回
+	if (rmiProxy) {
+		if (autoId) {
+			schedInstId = DEFAULT_INSTANCE_ID;
+		}
+		String uid = (rmiBindName == null) ? QuartzSchedulerResources.getUniqueIdentifier(schedName, schedInstId) : rmiBindName;
+		RemoteScheduler remoteScheduler = new RemoteScheduler(uid, rmiHost, rmiPort);
+		schedRep.bind(remoteScheduler);
+		return remoteScheduler;
+	}
+
+
+	// 创建ClassLoadHelper，并初始化ClassLoadHelper，默认使用CascadingClassLoadHelper。
+	ClassLoadHelper loadHelper = null;
+	try {
+		loadHelper = (ClassLoadHelper) loadClass(classLoadHelperClass).newInstance();
+	} catch (Exception e) {
+		throw new SchedulerConfigException("Unable to instantiate class load helper class: " + e.getMessage(), e);
+	}
+	loadHelper.initialize();
+
+	
+	// 判断是否是远程JMX Scheduler
+	if (jmxProxy) {
+		if (autoId) {
+			schedInstId = DEFAULT_INSTANCE_ID;
+		}
+		if (jmxProxyClass == null) {
+			throw new SchedulerConfigException("No JMX Proxy Scheduler class provided");
+		}
+		RemoteMBeanScheduler jmxScheduler = null;
+		try {
+			jmxScheduler = (RemoteMBeanScheduler)loadHelper.loadClass(jmxProxyClass)
+					.newInstance();
+		} catch (Exception e) {
+			throw new SchedulerConfigException(
+					"Unable to instantiate RemoteMBeanScheduler class.", e);
+		}
+		if (jmxObjectName == null) {
+			jmxObjectName = QuartzSchedulerResources.generateJMXObjectName(schedName, schedInstId);
+		}
+		jmxScheduler.setSchedulerObjectName(jmxObjectName);
+		tProps = cfg.getPropertyGroup(PROP_SCHED_JMX_PROXY, true);	
+		try {
+			setBeanProps(jmxScheduler, tProps);
+		} catch (Exception e) {
+			initException = new SchedulerException("RemoteMBeanScheduler class '" + jmxProxyClass + "' props could not be configured.", e);
+			throw initException;
+		}
+		jmxScheduler.initialize();
+		schedRep.bind(jmxScheduler);
+		return jmxScheduler;
+	}
+
+	// 通过ClassLoadHelper创建JobFactory。如果配置文件没有配置jobFactoryClass为null。
+	JobFactory jobFactory = null;
+	if(jobFactoryClass != null) {
+		try {
+			jobFactory = (JobFactory) loadHelper.loadClass(jobFactoryClass).newInstance();
+		} catch (Exception e) {
+			throw new SchedulerConfigException("Unable to instantiate JobFactory class: " + e.getMessage(), e);
+		}
+		
+		// PROP_SCHED_JOB_FACTORY_PREFIX = "org.quartz.scheduler.jobFactory"
+		// 从配置文件中获取前缀为org.quartz.scheduler.jobFactory的配置信息。
+		tProps = cfg.getPropertyGroup(PROP_SCHED_JOB_FACTORY_PREFIX, true);
+		
+		try {
+			// 把配置信息设置到对应的JobFactory
+			setBeanProps(jobFactory, tProps);
+		} catch (Exception e) {
+			initException = new SchedulerException("JobFactory class '" + jobFactoryClass + "' props could not be configured.", e);
+			throw initException;
+		}
+	}
+
+	// 获取实例ID生成类的实例。如果配置文件没有配置instanceIdGeneratorClass为null。
+	InstanceIdGenerator instanceIdGenerator = null;
+	if(instanceIdGeneratorClass != null) {
+		try {
+			instanceIdGenerator = (InstanceIdGenerator) loadHelper.loadClass(instanceIdGeneratorClass).newInstance();
+		} catch (Exception e) {
+			throw new SchedulerConfigException("Unable to instantiate InstanceIdGenerator class: " + e.getMessage(), e);
+		}
+		tProps = cfg.getPropertyGroup(PROP_SCHED_INSTANCE_ID_GENERATOR_PREFIX, true);
+		try {
+			setBeanProps(instanceIdGenerator, tProps);
+		} catch (Exception e) {
+			initException = new SchedulerException("InstanceIdGenerator class '" + instanceIdGeneratorClass + "' props could not be configured.", e);
+			throw initException;
+		}
+	}
+
+	####################################################################################################################################################
+	#  获取线程池配置。																																 #
+	####################################################################################################################################################
+
+	// PROP_THREAD_POOL_CLASS = org.quartz.threadPool.class = org.quartz.simpl.SimpleThreadPool
+	// 默认使用SimpleThreadPool。
+	String tpClass = cfg.getStringProperty(PROP_THREAD_POOL_CLASS, SimpleThreadPool.class.getName());
+	if (tpClass == null) {
+		initException = new SchedulerException("ThreadPool class not specified. ");
+		throw initException;
+	}
+	
+	// 创建ThreadPool线程池对象。
+	try {
+		tp = (ThreadPool) loadHelper.loadClass(tpClass).newInstance();
+	} catch (Exception e) {
+		initException = new SchedulerException("ThreadPool class '" + tpClass + "' could not be instantiated.", e);
+		throw initException;
+	}
+	// 从配置文件中获取前缀为org.quartz.threadPool的配置。PROP_THREAD_POOL_PREFIX = "org.quartz.threadPool"
+	tProps = cfg.getPropertyGroup(PROP_THREAD_POOL_PREFIX, true);  
+	
+	// 把线程池的配置设置这个给线程池
+	try {	
+		setBeanProps(tp, tProps); 		
+	} catch (Exception e) {
+		initException = new SchedulerException("ThreadPool class '" + tpClass + "' props could not be configured.", e);
+		throw initException;
+	}
+
+
+	####################################################################################################################################################
+	#  获取Job_Store配置，存储方式，有两种存储方式：RAMJobStore和JDBCJobStore  							       		           						 #
+	####################################################################################################################################################
+
+	// PROP_JOB_STORE_CLASS = "org.quartz.jobStore.class";
+	// 获取JobStore对象，默认使用RAMJobStore类。
+	String jsClass = cfg.getStringProperty(PROP_JOB_STORE_CLASS, RAMJobStore.class.getName());
+	if (jsClass == null) {
+		initException = new SchedulerException("JobStore class not specified. ");
+		throw initException;
+	}
+	
+	// 创建JobStore实例。
+	try {
+		js = (JobStore) loadHelper.loadClass(jsClass).newInstance();
+	} catch (Exception e) {
+		initException = new SchedulerException("JobStore class '" + jsClass + "' could not be instantiated.", e);
+		throw initException;
+	}
+	// 为JobStore设置对应的instanceName和instanceId
+	SchedulerDetailsSetter.setDetails(js, schedName, schedInstId);
+	
+	// 获取属性信息。并把配置信息设置到JobStore实例中
+	tProps = cfg.getPropertyGroup(PROP_JOB_STORE_PREFIX, true, new String[] {PROP_JOB_STORE_LOCK_HANDLER_PREFIX});
+	try {
+		setBeanProps(js, tProps);
+	} catch (Exception e) {
+		initException = new SchedulerException("JobStore class '" + jsClass + "' props could not be configured.", e);
+		throw initException;
+	}
+	
+	// 如果JobStore是JobStoreCMT、LocalDataSourceJobStore或者JobStoreTX，进入if。JobStoreCMT、LocalDataSourceJobStore或者JobStoreTX这三个企业级应用
+	// 比较多，使用数据库存储对应的Quartz信息。
+	if (js instanceof JobStoreSupport) {
+		// 进入自定义锁处理程序。
+		String lockHandlerClass = cfg.getStringProperty(PROP_JOB_STORE_LOCK_HANDLER_CLASS);
+		if (lockHandlerClass != null) {
+			try {
+				// 实例一个Semaphore对象。
+				Semaphore lockHandler = (Semaphore)loadHelper.loadClass(lockHandlerClass).newInstance();
+				// 获取属性信息。
+				tProps = cfg.getPropertyGroup(PROP_JOB_STORE_LOCK_HANDLER_PREFIX, true);
+				// 如果此锁定处理程序需要表前缀，需要将其添加到其属性中。
+				if (lockHandler instanceof TablePrefixAware) {
+					tProps.setProperty(PROP_TABLE_PREFIX, ((JobStoreSupport)js).getTablePrefix());
+					tProps.setProperty(PROP_SCHED_NAME, schedName);
+				}
+				try {
+					setBeanProps(lockHandler, tProps);
+				} catch (Exception e) {
+					initException = new SchedulerException("JobStore LockHandler class '" + lockHandlerClass + "' props could not be configured.", e);
+					throw initException;
+				}
+				// 把对应Semaphore信息设置到JobStore中。
+				((JobStoreSupport)js).setLockHandler(lockHandler);
+				getLog().info("Using custom data access locking (synchronization): " + lockHandlerClass);
+			} catch (Exception e) {
+				initException = new SchedulerException("JobStore LockHandler class '" + lockHandlerClass + "' could not be instantiated.", e);
+				throw initException;
+			}
+		}
+	}
+	
+	####################################################################################################################################################
+	#  设置数据源            											       							       		           						   #
+	####################################################################################################################################################
+
+	// 数据数据源对应的信息。org.quartz.dataSource这个前缀对应的信息。
+	String[] dsNames = cfg.getPropertyGroups(PROP_DATASOURCE_PREFIX);
+	
+	for (int i = 0; i < dsNames.length; i++) {
+		// 初始化一个PropertiesParser,通过org.quartz.dataSource.*初始化一个Properties。
+		PropertiesParser pp = new PropertiesParser(cfg.getPropertyGroup(PROP_DATASOURCE_PREFIX + "." + dsNames[i], true));
+		
+		// 从PropertiesParser中获取ConnectionProvider
+		String cpClass = pp.getStringProperty(PROP_CONNECTION_PROVIDER_CLASS, null);
+		
+		// 自定义ConnectionProvider
+		if(cpClass != null) {
+			ConnectionProvider cp = null;
+			try {
+				cp = (ConnectionProvider) loadHelper.loadClass(cpClass).newInstance();
+			} catch (Exception e) {
+				initException = new SchedulerException("ConnectionProvider class '" + cpClass + "' could not be instantiated.", e);
+				throw initException;
+			}
+
+			try {
+				// 删除类名，不会使用其的设置
+				pp.getUnderlyingProperties().remove(PROP_CONNECTION_PROVIDER_CLASS);
+				if (cp instanceof PoolingConnectionProvider) {
+					populateProviderWithExtraProps((PoolingConnectionProvider)cp, pp.getUnderlyingProperties());
+				} else {
+					setBeanProps(cp, pp.getUnderlyingProperties());
+				}
+				cp.initialize();
+			} catch (Exception e) {
+				initException = new SchedulerException("ConnectionProvider class '" + cpClass + "' props could not be configured.", e);
+				throw initException;
+			}
+			// DBConnectionManager进行初始化。
+			dbMgr = DBConnectionManager.getInstance();
+			dbMgr.addConnectionProvider(dsNames[i], cp);
+		} else {
+			String dsJndi = pp.getStringProperty(PROP_DATASOURCE_JNDI_URL, null);
+			if (dsJndi != null) {
+				boolean dsAlwaysLookup = pp.getBooleanProperty(PROP_DATASOURCE_JNDI_ALWAYS_LOOKUP);
+				String dsJndiInitial = pp.getStringProperty(PROP_DATASOURCE_JNDI_INITIAL);
+				String dsJndiProvider = pp.getStringProperty(PROP_DATASOURCE_JNDI_PROVDER);
+				String dsJndiPrincipal = pp.getStringProperty(PROP_DATASOURCE_JNDI_PRINCIPAL);
+				String dsJndiCredentials = pp.getStringProperty(PROP_DATASOURCE_JNDI_CREDENTIALS);
+				Properties props = null;
+				if (null != dsJndiInitial || null != dsJndiProvider || null != dsJndiPrincipal || null != dsJndiCredentials) {
+					props = new Properties();
+					if (dsJndiInitial != null) {
+						props.put(PROP_DATASOURCE_JNDI_INITIAL, dsJndiInitial);
+					}
+					if (dsJndiProvider != null) {
+						props.put(PROP_DATASOURCE_JNDI_PROVDER, dsJndiProvider);
+					}
+					if (dsJndiPrincipal != null) {
+						props.put(PROP_DATASOURCE_JNDI_PRINCIPAL, dsJndiPrincipal);
+					}
+					if (dsJndiCredentials != null) {
+						props.put(PROP_DATASOURCE_JNDI_CREDENTIALS, dsJndiCredentials);
+					}
+				}
+				JNDIConnectionProvider cp = new JNDIConnectionProvider(dsJndi, props, dsAlwaysLookup);
+				dbMgr = DBConnectionManager.getInstance();
+				dbMgr.addConnectionProvider(dsNames[i], cp);
+			} else {
+				String dsDriver = pp.getStringProperty(PoolingConnectionProvider.DB_DRIVER);
+				String dsURL = pp.getStringProperty(PoolingConnectionProvider.DB_URL);
+
+				if (dsDriver == null) {
+					initException = new SchedulerException("Driver not specified for DataSource: " + dsNames[i]);
+					throw initException;
+				}
+				if (dsURL == null) {
+					initException = new SchedulerException("DB URL not specified for DataSource: " + dsNames[i]);
+					throw initException;
+				}
+				try {
+					PoolingConnectionProvider cp = new PoolingConnectionProvider(pp.getUnderlyingProperties());
+					dbMgr = DBConnectionManager.getInstance();
+					dbMgr.addConnectionProvider(dsNames[i], cp);
+					// Populate the underlying C3P0 data source pool properties
+					populateProviderWithExtraProps(cp, pp.getUnderlyingProperties());
+				} catch (Exception sqle) {
+					initException = new SchedulerException("Could not initialize DataSource: " + dsNames[i], sqle);
+					throw initException;
+				}
+			}
+		}
+	}
+	
+	####################################################################################################################################################
+	#  设置其他Scheduler参数            											       							           						   #
+	####################################################################################################################################################
+	
+	// 获取org.quartz.plugin前缀的配置文件。
+	String[] pluginNames = cfg.getPropertyGroups(PROP_PLUGIN_PREFIX);
+	SchedulerPlugin[] plugins = new SchedulerPlugin[pluginNames.length];
+	for (int i = 0; i < pluginNames.length; i++) {
+		Properties pp = cfg.getPropertyGroup(PROP_PLUGIN_PREFIX + "." + pluginNames[i], true);
+		String plugInClass = pp.getProperty(PROP_PLUGIN_CLASS, null);
+
+		if (plugInClass == null) {
+			initException = new SchedulerException("SchedulerPlugin class not specified for plugin '" + pluginNames[i] + "'");
+			throw initException;
+		}
+		SchedulerPlugin plugin = null;
+		
+		try {
+			plugin = (SchedulerPlugin) loadHelper.loadClass(plugInClass).newInstance();
+		} catch (Exception e) {
+			initException = new SchedulerException("SchedulerPlugin class '" + plugInClass + "' could not be instantiated.", e);
+			throw initException;
+		}
+		
+		try {
+			setBeanProps(plugin, pp);
+		} catch (Exception e) {
+			initException = new SchedulerException("JobStore SchedulerPlugin '" + plugInClass + "' props could not be configured.", e);
+			throw initException;
+		}
+		plugins[i] = plugin;
+	}
+
+	
+	
+	####################################################################################################################################################
+	#  设置JOB监听           											       							           						               #
+	####################################################################################################################################################
+	Class<?>[] strArg = new Class[] { String.class };
+	
+	// 获取对应的Job监听器的名称。从配置文件中获取前缀为org.quartz.jobListener的配置。
+	String[] jobListenerNames = cfg.getPropertyGroups(PROP_JOB_LISTENER_PREFIX);
+	JobListener[] jobListeners = new JobListener[jobListenerNames.length];
+	
+	for (int i = 0; i < jobListenerNames.length; i++) {
+		// 获取具体监听器的配置。如果是true要剥离前缀。
+		Properties lp = cfg.getPropertyGroup(PROP_JOB_LISTENER_PREFIX + "." + jobListenerNames[i], true);
+		
+		// 从配置文件中获取配置配置的JobListener。PROP_LISTENER_CLASS = "class"
+		String listenerClass = lp.getProperty(PROP_LISTENER_CLASS, null);
+		
+		if (listenerClass == null) {
+			initException = new SchedulerException("JobListener class not specified for listener '" + jobListenerNames[i] + "'");
+			throw initException;
+		}
+		
+		// 初始化监听器
+		JobListener listener = null;
+		try {
+			listener = (JobListener) loadHelper.loadClass(listenerClass).newInstance();
+		} catch (Exception e) {
+			initException = new SchedulerException("JobListener class '" + listenerClass + "' could not be instantiated.", e);
+			throw initException;
+		}
+		try {
+			Method nameSetter = null;
+			try { 
+				nameSetter = listener.getClass().getMethod("setName", strArg);
+			} catch(NoSuchMethodException ignore) { 
+				/* do nothing */ 
+			}
+			if(nameSetter != null) {
+				// 设置监听器名字
+				nameSetter.invoke(listener, new Object[] {jobListenerNames[i] } );
+			}
+			setBeanProps(listener, lp);
+		} catch (Exception e) {
+			initException = new SchedulerException( "JobListener '" + listenerClass + "' props could not be configured.", e);
+			throw initException;
+		}
+		jobListeners[i] = listener;
+	}
+
+	
+	
+	####################################################################################################################################################
+	#                                        设置Trigger监听         						   					  						               #
+	####################################################################################################################################################
+	// PROP_TRIGGER_LISTENER_PREFIX = "org.quartz.triggerListener"
+	// 从配置文件中读取前缀为org.quartz.triggerListener的配置。
+	String[] triggerListenerNames = cfg.getPropertyGroups(PROP_TRIGGER_LISTENER_PREFIX);
+	TriggerListener[] triggerListeners = new TriggerListener[triggerListenerNames.length];
+	
+	for (int i = 0; i < triggerListenerNames.length; i++) {
+		// 获取具体监听器的配置。如果是true要剥离前缀。
+		Properties lp = cfg.getPropertyGroup(PROP_TRIGGER_LISTENER_PREFIX + "." + triggerListenerNames[i], true);
+		String listenerClass = lp.getProperty(PROP_LISTENER_CLASS, null);
+		if (listenerClass == null) {
+			initException = new SchedulerException("TriggerListener class not specified for listener '" + triggerListenerNames[i] + "'");
+			throw initException;
+		}
+		
+		// 实例化Trigger监听器。
+		TriggerListener listener = null;
+		try {
+			listener = (TriggerListener)loadHelper.loadClass(listenerClass).newInstance();
+		} catch (Exception e) {
+			initException = new SchedulerException("TriggerListener class '" + listenerClass + "' could not be instantiated.", e);
+			throw initException;
+		}
+		try {
+			Method nameSetter = null;
+			try { 
+				nameSetter = listener.getClass().getMethod("setName", strArg);
+			}
+			catch(NoSuchMethodException ignore) {
+				/* do nothing */ 
+			}
+			if(nameSetter != null) {
+				nameSetter.invoke(listener, new Object[] {triggerListenerNames[i] } );
+			}
+			setBeanProps(listener, lp);
+		} catch (Exception e) {
+			initException = new SchedulerException("TriggerListener '" + listenerClass + "' props could not be configured.", e);
+			throw initException;
+		}
+		triggerListeners[i] = listener;
+	}
+	boolean tpInited = false;
+	boolean qsInited = false;
+
+
+
+	####################################################################################################################################################
+	# 						       					 设置线程池      						           							                       #
+	####################################################################################################################################################
+	
+	// 从配置文件中获取org.quartz.threadExecutor.class参数。
+	String threadExecutorClass = cfg.getStringProperty(PROP_THREAD_EXECUTOR_CLASS);
+	
+	// 判断是否配置了ThreadExecutor，如果有使用配置的ThreadExecute，如果没有DefaultThreadExecutor。
+	if (threadExecutorClass != null) {
+		// 获取线程池配置。PROP_THREAD_EXECUTOR = "org.quartz.threadExecutor"
+		tProps = cfg.getPropertyGroup(PROP_THREAD_EXECUTOR, true);
+		try {
+			threadExecutor = (ThreadExecutor) loadHelper.loadClass(threadExecutorClass).newInstance();
+			log.info("Using custom implementation for ThreadExecutor: " + threadExecutorClass);
+			setBeanProps(threadExecutor, tProps);
+		} catch (Exception e) {
+			initException = new SchedulerException("ThreadExecutor class '" + threadExecutorClass + "' could not be instantiated.", e);
+			throw initException;
+		}
+	} else {
+		log.info("Using default implementation for ThreadExecutor");
+		threadExecutor = new DefaultThreadExecutor();
+	}
+
+	
+	####################################################################################################################################################
+	#       											       							           						                       #
+	####################################################################################################################################################
+	try {
+		// JobRunShellFactory接口中有两个方法，
+		//		* 一个initialize(Scheduler scheduler)方法，用于初始化；
+		//		* 一个createJobRunShell(TriggerFiredBundlebundle)方法用于创建JobRunShell【TriggerFiredBundle用于将执行是数据返回到QuartzSchedulerThread中】
+		// JobRunShell: JobRunShell实例负责为Job提供安全环境的，以及执行Job的所有工作，JobRunShell通过JobRunShellFactory被创建，
+		JobRunShellFactory jrsf = null; 
+		if (userTXLocation != null) {
+			UserTransactionHelper.setUserTxLocation(userTXLocation);
+		}
+		
+		// 创建JobRunShellFactory实例对象。wrapJobInTx默认为false。
+		if (wrapJobInTx) {
+			jrsf = new JTAJobRunShellFactory();
+		} else {
+			jrsf = new JTAAnnotationAwareJobRunShellFactory();
+		}
+		
+		// autoId：默认为false。
+		if (autoId) {
+			try {
+				schedInstId = DEFAULT_INSTANCE_ID;
+				if (js.isClustered()) {
+					schedInstId = instanceIdGenerator.generateInstanceId();
+				}
+			} catch (Exception e) {
+				getLog().error("Couldn't generate instance Id!", e);
+				throw new IllegalStateException("Cannot run without an instance id.");
+			}
+		}
+		
+		// 
+		if (js.getClass().getName().startsWith("org.terracotta.quartz")) {
+			try {
+				String uuid = (String) js.getClass().getMethod("getUUID").invoke(js);
+				if(schedInstId.equals(DEFAULT_INSTANCE_ID)) {
+					schedInstId = "TERRACOTTA_CLUSTERED,node=" + uuid;
+					if (jmxObjectName == null) {
+						jmxObjectName = QuartzSchedulerResources.generateJMXObjectName(schedName, schedInstId);
+					}
+				} else if(jmxObjectName == null) {
+					jmxObjectName = QuartzSchedulerResources.generateJMXObjectName(schedName, schedInstId + ",node=" + uuid);
+				}
+			} catch(Exception e) {
+				throw new RuntimeException("Problem obtaining node id from TerracottaJobStore.", e);
+			}
+			if(null == cfg.getStringProperty(PROP_SCHED_JMX_EXPORT)) {
+				jmxExport = true;
+			}
+		}
+		
+		// 
+		if (js instanceof JobStoreSupport) {
+			JobStoreSupport jjs = (JobStoreSupport) js;
+			jjs.setDbRetryInterval(dbFailureRetry);
+			if(threadsInheritInitalizersClassLoader) {
+				jjs.setThreadsInheritInitializersClassLoadContext(threadsInheritInitalizersClassLoader);
+			}
+			jjs.setThreadExecutor(threadExecutor);
+		}
+
+		####################################################################################################################################################
+		#    把获取到的各个信息设置在QuartzSchedulerResources中 											       							           						                       #
+		####################################################################################################################################################
+		QuartzSchedulerResources rsrcs = new QuartzSchedulerResources();
+		rsrcs.setName(schedName);
+		rsrcs.setThreadName(threadName);
+		rsrcs.setInstanceId(schedInstId);
+		rsrcs.setJobRunShellFactory(jrsf);
+		rsrcs.setMakeSchedulerThreadDaemon(makeSchedulerThreadDaemon);
+		rsrcs.setThreadsInheritInitializersClassLoadContext(threadsInheritInitalizersClassLoader);
+		rsrcs.setRunUpdateCheck(!skipUpdateCheck);
+		rsrcs.setBatchTimeWindow(batchTimeWindow);
+		rsrcs.setMaxBatchSize(maxBatchSize);
+		rsrcs.setInterruptJobsOnShutdown(interruptJobsOnShutdown);
+		rsrcs.setInterruptJobsOnShutdownWithWait(interruptJobsOnShutdownWithWait);
+		rsrcs.setJMXExport(jmxExport);
+		rsrcs.setJMXObjectName(jmxObjectName);
+
+		if (managementRESTServiceEnabled) {
+			ManagementRESTServiceConfiguration managementRESTServiceConfiguration = new ManagementRESTServiceConfiguration();
+			managementRESTServiceConfiguration.setBind(managementRESTServiceHostAndPort);
+			managementRESTServiceConfiguration.setEnabled(managementRESTServiceEnabled);
+			rsrcs.setManagementRESTServiceConfiguration(managementRESTServiceConfiguration);
+		}
+
+		if (rmiExport) {
+			rsrcs.setRMIRegistryHost(rmiHost);
+			rsrcs.setRMIRegistryPort(rmiPort);
+			rsrcs.setRMIServerPort(rmiServerPort);
+			rsrcs.setRMICreateRegistryStrategy(rmiCreateRegistry);
+			rsrcs.setRMIBindName(rmiBindName);
+		}
+
+		SchedulerDetailsSetter.setDetails(tp, schedName, schedInstId);
+
+		rsrcs.setThreadExecutor(threadExecutor);
+		
+		// ThreadExecutor的初始化过程。
+		threadExecutor.initialize();
+
+		rsrcs.setThreadPool(tp);
+		
+		if(tp instanceof SimpleThreadPool) {
+			if(threadsInheritInitalizersClassLoader) {
+				((SimpleThreadPool)tp).setThreadsInheritContextClassLoaderOfInitializingThread(threadsInheritInitalizersClassLoader);
+			}
+		}
+		
+		//############################################################################################################
+		// ThreadPool的初始化。非常非常重要，请仔细查看SimpleThreadPool类。请参考【具体类阅读  SimpleThreadPool】
+		//############################################################################################################
+		
+		// 初始化线程池。为线程池创建工作线程，并启动工作线程。
+		tp.initialize();
+		tpInited = true;
+
+		rsrcs.setJobStore(js);
+
+		// 添加插件
+		for (int i = 0; i < plugins.length; i++) {
+			rsrcs.addSchedulerPlugin(plugins[i]);
+		}
+		 
+		//####################################################################################################################
+		// 创建QuartzScheduler实例通过给定的rsrcs，idleWaitTime，dbFailureRetry。
+		// 在初始化QuartzScheduler有一个比较重要的操作，初始化过程中有一个ThreadExecutor.execute(Thread thread)方法执行，在
+		// 初始化过程，会创建一个QuartzSchedulerThread线程，并交由Executor框架启动。
+		// 本文档的搜索：【【_QuartzScheduler创建过程】】
+		// ###################################################################################################################
+		qs = new QuartzScheduler(rsrcs, idleWaitTime, dbFailureRetry);
+		qsInited = true;
+
+		// 创建任务调度器
+		Scheduler scheduler = instantiate(rsrcs, qs);
+		【
+			protected Scheduler instantiate(QuartzSchedulerResources rsrcs, QuartzScheduler qs) {
+				Scheduler scheduler = new StdScheduler(qs);
+				return scheduler;
+			}
+		】
+		
+		// 设置指定JobFactory（如果有的话）
+		if(jobFactory != null) {
+			qs.setJobFactory(jobFactory);
+		}
+
+		// Initialize plugins now that we have a Scheduler instance.
+		for (int i = 0; i < plugins.length; i++) {
+			plugins[i].initialize(pluginNames[i], scheduler, loadHelper);
+		}
+
+		// 给QuartzScheduler设置监听器（前面获取的Job监听器,Trigger监听器）
+		for (int i = 0; i < jobListeners.length; i++) {
+			qs.getListenerManager().addJobListener(jobListeners[i], EverythingMatcher.allJobs());
+		}
+		for (int i = 0; i < triggerListeners.length; i++) {
+			qs.getListenerManager().addTriggerListener(triggerListeners[i], EverythingMatcher.allTriggers());
+		}
+
+		// 设置scheduler数据
+		for(Object key: schedCtxtProps.keySet()) {
+			String val = schedCtxtProps.getProperty((String) key);    
+			scheduler.getContext().put((String)key, val);
+		}
+
+		// 启动Job Store和runshell factory------fire up job store, and runshell factory
+		js.setInstanceId(schedInstId);
+		js.setInstanceName(schedName);
+		js.setThreadPoolSize(tp.getPoolSize());
+		js.initialize(loadHelper, qs.getSchedulerSignaler());
+
+		jrsf.initialize(scheduler);		// JobRunShellFactory初始化配置		
+		qs.initialize();				// QuartzScheduler初始化
+
+		getLog().info("Quartz scheduler '" + scheduler.getSchedulerName() + "' initialized from " + propSrc);
+		getLog().info("Quartz scheduler version: " + qs.getVersion());
+
+		// 防止存储库被垃圾收集
+		qs.addNoGCObject(schedRep);
+		
+		// 防止数据库管理器被垃圾回收
+		if (dbMgr != null) {
+			qs.addNoGCObject(dbMgr);
+		}
+
+		// 把Scheduler方法SchedulerRepository中
+		schedRep.bind(scheduler);			
+		return scheduler;
+		
+	} catch(SchedulerException e) {
+		shutdownFromInstantiateException(tp, qs, tpInited, qsInited);
+		throw e;
+	} catch(RuntimeException re) {
+		shutdownFromInstantiateException(tp, qs, tpInited, qsInited);
+		throw re;
+	} catch(Error re) {
+		shutdownFromInstantiateException(tp, qs, tpInited, qsInited);
+		throw re;
+	}
+}
+
+
+1、如何理解QuartzScheduler、ThreadExecutor、ThreadPool的作用。
+
+2、如何理解QuartzSchedulerThread、QuartzScheduler
+
+3、QuartzScheduler中有：QuartzSchedulerResources、QuartzSchedulerThread（这个的作用）、SchedulerContext、JobFactory
+
+4、QuartzSchedulerResources：ThreadPool、JobStore、JobRunShellFactory、ThreadExecutor
+
+5、QuartzSchedulerThread是一个线程继承与Thread：其中有QuartzScheduler、QuartzSchedulerResources。QuartzSchedulerThread的作用是干什么？
+
+6、QuartzScheduler 中有QuartzShedulerThread,而且QuartzScheduleThread中有QuartzSchudler，为什么要这样设计，其他设计方案？
+
+7、QuartzScheduler初始化的时候会创建一个QuartzSchedulerThread实例，然后通过ThreadExecutor.execute(Thread QuartzSchedulerThread)方法，让Thread.start()
+
+
+Quartz.start()启动操作，把QuartzScheduler.start(); 
+QuartzScheduler的start()方法，注意QuartzScheduler不是线程，所以没有run方法。
+QuartzSchedulerThread的run()方法。
+
+
+
+
+
+/**
+
+location：QuartzScheduler
+public void start() throws SchedulerException {
+	// 判读%Quart%是否已经结束,或者是已经关闭
+	if (shuttingDown|| closed) {
+		throw new SchedulerException("The Scheduler cannot be restarted after shutdown() has been called.");
+	}
+
+	// QTZ-212 : calling new schedulerStarting() method on the listeners
+	// right after entering start()
+	notifySchedulerListenersStarting();
+
+	if (initialStart == null) {
+		initialStart = new Date();
+		this.resources.getJobStore().schedulerStarted();            
+		startPlugins();
+	} else {
+		resources.getJobStore().schedulerResumed();
+	}
+
+	schedThread.togglePause(false);
+
+	getLog().info("Scheduler " + resources.getUniqueIdentifier() + " started.");
+	
+	notifySchedulerListenersStarted();
+}
+
+
+
+/**
+ * 初始化QuartzScheduler
+ */
+location：QuartzScheduler
+public QuartzScheduler(QuartzSchedulerResources resources, long idleWaitTime, @Deprecated long dbRetryInterval) throws SchedulerException {
+	
+	this.resources = resources;
+	
+	// 从resources获取JobStore。
+	if (resources.getJobStore() instanceof JobListener) {
+		addInternalJobListener((JobListener)resources.getJobStore());
+	}
+
+	// 实例一个QuartzSchedulerThread对象通过QuartzScheduler和QuartzSchedulerResources。【具体类阅读QuartzSchedulerThread】
+	// QuartzSchedulerThread是负责执行注册在QuartzScheduler上的Triggers的线程。【【其是一个线程，run方法的操作很多。】】
+	this.schedThread = new QuartzSchedulerThread(this, resources);
+	
+	// 获取QuartzSchedulerResources中的ThreadExecutor。
+	schedThreadExecutor = resources.getThreadExecutor();
+	
+	// 启动QuartzSchedulerThread线程。
+	// execute() { 
+	//		thread.start(); 
+	// }
+	schedThreadExecutor.execute(this.schedThread);
+	
+	// 设置QuartzSchedulerThread线程的空闲等待时间。
+	if (idleWaitTime > 0) {
+		this.schedThread.setIdleWaitTime(idleWaitTime);
+	}
+
+	// QuartzScheduler中设置内部监听器ExecutingJobsManager
+	jobMgr = new ExecutingJobsManager();
+	addInternalJobListener(jobMgr);
+	
+	// QuartzScheduler中设置内部监听器ErrorLogger
+	errLogger = new ErrorLogger();
+	addInternalSchedulerListener(errLogger);
+
+	// JobStore实例使用的接口，用于将信号传递回QuartzScheduler。
+	signaler = new SchedulerSignalerImpl(this, this.schedThread);
+	
+	if(shouldRunUpdateCheck()) {
+		updateTimer = scheduleUpdateCheck();
+	} else {
+		updateTimer = null;
+	}
+	
+	getLog().info("Quartz Scheduler v." + getVersion() + " created.");
+}
+
+/**
+ * QuartzSchedulerThread继承Thread。
+ */
+location：QuartzSchedulerThread
+QuartzSchedulerThread(QuartzScheduler qs, QuartzSchedulerResources qsRsrcs) {
+	this(qs, qsRsrcs, qsRsrcs.getMakeSchedulerThreadDaemon(), Thread.NORM_PRIORITY);
+}
+
+/**
+ * 初始化QuartzSchedulerThread过程。
+ */
+QuartzSchedulerThread(QuartzScheduler qs, QuartzSchedulerResources qsRsrcs, boolean setDaemon, int threadPrio) {
+	super(qs.getSchedulerThreadGroup(), qsRsrcs.getThreadName());
+	this.qs = qs;
+	this.qsRsrcs = qsRsrcs;
+	this.setDaemon(setDaemon);
+	
+	if(qsRsrcs.isThreadsInheritInitializersClassLoadContext()) {
+		log.info("QuartzSchedulerThread Inheriting ContextClassLoader of thread: " + Thread.currentThread().getName());
+		this.setContextClassLoader(Thread.currentThread().getContextClassLoader());
+	}
+
+	this.setPriority(threadPrio);
+	paused = true;
+	halted = new AtomicBoolean(false);
+}
+
+
+/**
+ *
+ *
+ */
+location：QuartzSchedulerThread
+public void run() {
+
+	【【【 请看文件02_instantiate_QuartzSchedulerThread的run方法.txt 】】】
+}
+
+
+/**
+ * 初始化线程池，创建工作线程，并启动工作线程。
+ */
+location：SimpleThreadPool
+public void initialize() throws SchedulerConfigException {
+	// List<WorkerThread> workers；是否已经初始化，如果已经初始化了，就直接返回。
+	if(workers != null && workers.size() > 0) {
+		return;
+	}
+	
+	// 线程的数量。
+	if (count <= 0) {
+		throw new SchedulerConfigException("Thread count must be > 0");
+	}
+	
+	// 线程的权重。
+	if (prio <= 0 || prio > 9) {
+		throw new SchedulerConfigException("Thread priority must be > 0 and <= 9");
+	}
+
+	// 设置线程的线程组。
+	if(isThreadsInheritGroupOfInitializingThread()) {
+		threadGroup = Thread.currentThread().getThreadGroup();
+	} else {
+		threadGroup = Thread.currentThread().getThreadGroup();
+		ThreadGroup parent = threadGroup;
+		
+		while (!parent.getName().equals("main") ) {
+			threadGroup = parent;
+			parent = threadGroup.getParent();
+		}
+		
+		threadGroup = new ThreadGroup(parent, schedulerInstanceName + "-SimpleThreadPool");
+		if (isMakeThreadsDaemons()) {
+			threadGroup.setDaemon(true);
+		}
+	}
+
+	// 线程是否继承初始化线程的ClassLoader。默认为true。
+	if (isThreadsInheritContextClassLoaderOfInitializingThread()) {
+		getLog().info("Job execution threads will use class loader of thread: " + Thread.currentThread().getName());
+	}
+
+	// 创建工作线程，并把工程线程放入线程池维护的工程线程集合中。
+	Iterator<WorkerThread> workerThreads = createWorkerThreads(count).iterator();
+	
+	// 遍历工作线程集合，并逐一启动工作线程，把启动成功的工作线程放入可用的工作线程集合中。
+	// 看下面的WorkerThread.run()方法。
+	while(workerThreads.hasNext()) {
+		WorkerThread wt = workerThreads.next();
+		
+		// 启动工作线程，并把线程放入可用线程集合中。
+		wt.start();
+		availWorkers.add(wt);
+	}
+}
+
+/**
+ * 创建工作线程，并把工程线程放入线程池维护的工程线程集合中。
+ */
+location：SimpleThreadPool
+protected List<WorkerThread> createWorkerThreads(int createCount) {
+	workers = new LinkedList<WorkerThread>();
+	for (int i = 1; i<= createCount; ++i) {
+		// 获取或者创建线程名称的前缀。
+		String threadPrefix = getThreadNamePrefix();
+		if (threadPrefix == null) {
+			threadPrefix = schedulerInstanceName + "_Worker";
+		}
+		
+		// 创建工作线程。WorkerThread继承Thread。这个WorkerThread构造是没有传入Runnable的。
+		WorkerThread wt = new WorkerThread(this, threadGroup, threadPrefix + "-" + i, getThreadPriority(), isMakeThreadsDaemons());
+		
+		// 设置工作线程的ClassLoader。
+		if (isThreadsInheritContextClassLoaderOfInitializingThread()) {
+			wt.setContextClassLoader(Thread.currentThread().getContextClassLoader());
+		}
+		
+		把创建的工程线程放到工作线程集合中。
+		workers.add(wt);
+	}
+	
+	return workers;
+}
+
+/**
+ * 这个WorkerThread本身就是一个线程类，如果被调用的start()方法，就会进入run()方法。但是执行具体的任务是，是不需要再起一个新的线程，直接调用runnable的run()方法。
+ * 
+ * 如果这个工作线程是运行状态，将不停的做循环。
+ * 如果任务为空，就循环等待500ms
+ * 如果来任务了，就执行任务。
+ */
+location：SimpleThreadPool.WorkerThread
+public void run() {
+	boolean ran = false;
+	
+	// AtomicBoolean run = new AtomicBoolean(true);
+	// 用于表示这个WorkThread的状态。true为正常，false为终止状态。如果是运行状态，将一直循环。
+	while (run.get()) {
+		try {
+			// 同一个时间只有一个线程能够执行下面操作。
+			synchronized(lock) {
+			
+				// 如果WorkerThread的任务是null，并且WorkerThread是运行状态。就等待500ms。
+				while (runnable == null && run.get()) {
+					lock.wait(500);
+				}
+				
+				// 如果任务不为空，执行任务的run()方法。  【【任务可以通过调用WorkerThread.run(Runnable newRunnable)设置】】
+				// 不需要再起一个新的线程，直接调用runnable的run()方法
+				if (runnable != null) {
+					ran = true;
+					runnable.run();
+				}
+			}
+		} catch (InterruptedException unblock) {
+			try {
+				getLog().error("Worker thread was interrupt()'ed.", unblock);
+			} catch(Exception e) {
+			
+			}
+		} catch (Throwable exceptionInRunnable) {
+			try {
+				getLog().error("Error while executing the Runnable: ", exceptionInRunnable);
+			} catch(Exception e) {
+				// ignore to help with a tomcat glitch
+			}
+		
+		// 执行runnable完成以后的操作。
+		// 		* 把工作线程的任务设置为null。
+		//      * 判断权重是否改变，设置工作线程的权重。
+		} finally {
+		
+			synchronized(lock) {
+				runnable = null;
+			}
+			
+			if(getPriority() != tp.getThreadPriority()) {
+				setPriority(tp.getThreadPriority());
+			}
+
+			// runOnce：如果初始化工作线程时runnable == null，默认为false；如果runnable != nul，默认为true。
+			if (runOnce) {
+				// 停止线程，
+				run.set(false);
+				
+				// 从busyWorkers集合中移除。
+				clearFromBusyWorkersList(this);
+				
+			} else if(ran) {
+				ran = false;
+				makeAvailable(this);
+			}
+
+		}
+	}
+
+	try {
+		getLog().debug("WorkerThread is shut down.");
+	} catch(Exception e) {
+		// ignore to help with a tomcat glitch
+	}
+}
+
+/**
+ * 以同步的方式，把要执行的任务，赋值给WorkThread的runnable属性上。
+ * 一个实例，在同一时间上，只能有一个线程能够进行下面的操作。
+ */
+location：SimpleThreadPool.WorkerThread
+public void run(Runnable newRunnable) {
+	synchronized(lock) {
+		if(runnable != null) {
+			throw new IllegalStateException("Already running a Runnable!");
+		}
+
+		runnable = newRunnable;
+		lock.notifyAll();
+	}
+}
+
+
+
+// ########################  QuartzScheduler  ############################
+
+// QuartzScheduler的构造函数。
+public QuartzScheduler(QuartzSchedulerResources resources, long idleWaitTime, @Deprecated long dbRetryInterval) throws SchedulerException {
+
+	// 把SchedulerFactory初始化的QuartzSchedulerResources赋给QuartzScheduler的QuartzSchedulerResources
+	this.resources = resources;
+	
+	// 判断JobStore是否是JobListener的子类
+	if (resources.getJobStore() instanceof JobListener) {
+		addInternalJobListener((JobListener)resources.getJobStore());
+	}
+
+	// 实例一个QuartzSchedulerThread对象通过QuartzScheduler和QuartzSchedulerResources
+	this.schedThread = new QuartzSchedulerThread(this, resources);
+	
+	// 获取QuartzSchedulerResources中的ThreadExecutor
+	ThreadExecutor schedThreadExecutor = resources.getThreadExecutor();
+	
+	// 把QuartzSchedulerThread启动起来，下面是QuartzSchedulerThread的run方法。
+	schedThreadExecutor.execute(this.schedThread);
+	
+	if (idleWaitTime > 0) {
+		this.schedThread.setIdleWaitTime(idleWaitTime);
+	}
+
+	// 添加JobListener监听
+	jobMgr = new ExecutingJobsManager();
+	addInternalJobListener(jobMgr);
+	
+	// 添加schedulerListener监听
+	errLogger = new ErrorLogger();
+	addInternalSchedulerListener(errLogger);
+
+	signaler = new SchedulerSignalerImpl(this, this.schedThread);
+	
+	if(shouldRunUpdateCheck()) 
+		updateTimer = scheduleUpdateCheck();
+	else
+		updateTimer = null;
+	
+	getLog().info("Quartz Scheduler v." + getVersion() + " created.");
+}
+
+
+QuartzScheduler的
+public void start() throws SchedulerException {
+
+	if (shuttingDown|| closed) {
+		throw new SchedulerException("The Scheduler cannot be restarted after shutdown() has been called.");
+	}
+
+	// QTZ-212 : calling new schedulerStarting() method on the listeners
+	// right after entering start()
+	notifySchedulerListenersStarting();
+
+	if (initialStart == null) {
+		initialStart = new Date();
+		this.resources.getJobStore().schedulerStarted();            
+		startPlugins();
+	} else {
+		resources.getJobStore().schedulerResumed();
+	}
+
+	schedThread.togglePause(false);
+
+	getLog().info("Scheduler " + resources.getUniqueIdentifier() + " started.");
+	
+	notifySchedulerListenersStarted();
+}
+
+
+
+public void start() throws SchedulerException {
+	
+	// 判断Quartz是否停止或者关闭，如果停止或者关闭抛出异常，Quartz是没有重启操作的。
+	if (shuttingDown|| closed) {
+		throw new SchedulerException("The Scheduler cannot be restarted after shutdown() has been called.");
+	}
+
+	// QTZ-212 : calling new schedulerStarting() method on the listeners
+	// right after entering start()
+	notifySchedulerListenersStarting();
+
+	if (initialStart == null) {
+		initialStart = new Date();
+		this.resources.getJobStore().schedulerStarted();            
+		startPlugins();
+	} else {
+		resources.getJobStore().schedulerResumed();
+	}
+
+	schedThread.togglePause(false);
+
+	getLog().info(
+			"Scheduler " + resources.getUniqueIdentifier() + " started.");
+	
+	notifySchedulerListenersStarted();
+}
+
+void togglePause(boolean pause) {
+	synchronized (sigLock) {
+		paused = pause;
+
+		if (paused) {
+			signalSchedulingChange(0);
+		} else {
+			sigLock.notifyAll();
+		}
+	}
+}
+
+
+
+public void run(Runnable newRunnable) {
+	synchronized(lock) {
+		if(runnable != null) {
+			throw new IllegalStateException("Already running a Runnable!");
+		}
+
+		runnable = newRunnable;
+		lock.notifyAll();
+	}
+}
+
+
+
+
+Scheduler的实现类中有一个QuartzScheduler实例,Scheduler的操作实际上都是通过QuartzScheduler实例完成的，所以说QuartzScheduler间接的实现了Scheduler
+
+QuartzScheduler
+
+
+
+
+
+
+
+
+@Override
+public void run() {
+	boolean ran = false;
+	
+	// run默认为ture,调用shutdown()方法后会修改为false，
+	// run.get():用于判断Quartz是否暂停了。如果线程启动
+	while (run.get()) {
+		try {
+			// 上锁操作,
+			synchronized(lock) {
+				// 判断是否有工作，或者工作是否暂停，如果是就没0.5检查一次
+				while (runnable == null && run.get()) {
+					lock.wait(500);
+				}
+
+				if (runnable != null) {
+					ran = true;
+					// 执行runnable的run方法
+					runnable.run();
+				}
+			}
+		} catch (InterruptedException unblock) {
+			try {
+				getLog().error("Worker thread was interrupt()'ed.", unblock);
+			} catch(Exception e) {
+				
+			}
+		} catch (Throwable exceptionInRunnable) {
+			try {
+				getLog().error("Error while executing the Runnable: ", exceptionInRunnable);
+			} catch(Exception e) {
+				
+			}
+		} finally {
+			synchronized(lock) {
+				runnable = null;
+			}
+			// 修复线程，【没看明白】
+			if(getPriority() != tp.getThreadPriority()) {
+				setPriority(tp.getThreadPriority());
+			}
+
+			// 是否跑一次，默认为false，当指定Runnable的初始化的WorkThread的时候，会修改为ture
+			if (runOnce) {
+				run.set(false);
+				clearFromBusyWorkersList(this);
+			} else if(ran) {
+				ran = false;
+				makeAvailable(this);
+			}
+
+		}
+	}
+
+	try {
+		getLog().debug("WorkerThread is shut down.");
+	} catch(Exception e) {
+		
+	}
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ A <code>Scheduler</code> maintains a registry of <code>{@link org.quartz.JobDetail}</code>s  and <code>{@link Trigger}</code>s. Once registered, the <code>Scheduler</code> is responsible for executing <code>Job</code> s when their associated <code>Trigger</code> s fire (when their scheduled time arrives).
+ 
+Scheduler：与调度程序交互的主要API，提供很多操作调度任务的方法，比如：start()方法；shutdown()方法；scheduleJob方法....。Scheduler中维护一个QuartzScheduler实例，Scheduler中几乎所有的操作都是通过QuartzScheduler完成的，所以QuartzScheduler注释说其间接的实现了Scheduler。   
+
+
+维护一个JobDetail和Trigger的注册表，一旦注册以后，Scheduler负责执行相关的Job当他们预定时间到达时。
