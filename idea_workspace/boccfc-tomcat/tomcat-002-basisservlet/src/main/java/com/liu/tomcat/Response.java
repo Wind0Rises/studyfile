@@ -1,20 +1,28 @@
 package com.liu.tomcat;
 
+import javax.servlet.ServletOutputStream;
+import javax.servlet.http.Cookie;
+import javax.servlet.http.HttpServletResponse;
 import java.io.*;
 import java.net.Socket;
+import java.util.Collection;
+import java.util.Locale;
 
 /**
  * 把一个socket的OutputStream封装成一个Response对应。
+ * @author Liuweian
  */
-public class Response {
+public class Response implements HttpServletResponse {
 
-    private Socket socket;
+    private OutputStream outputStream;
 
     private Request request;
 
+    private PrintWriter writer;
 
-    Response(Socket socket) {
-        this.socket = socket;
+
+    Response(OutputStream outputStream) {
+        this.outputStream = outputStream;
     }
 
     public Request getRequest() {
@@ -28,7 +36,7 @@ public class Response {
     /**
      * 向OutputStream对象中写入数据，
      */
-    public void sendStaticResource() {
+    public void sendStaticResource() throws IOException {
         byte[] buffer = new byte[1024];
         FileInputStream fis = null;
         PrintWriter writer = null;
@@ -36,7 +44,7 @@ public class Response {
         try {
             if (request.getUri() != null) {
                 File file = new File(HttpServer.WEB_ROOT, request.getUri());
-                writer = new PrintWriter(this.socket.getOutputStream(), true);
+                writer = new PrintWriter(outputStream, true);
                 if (file.exists()) {
                     fis = new FileInputStream(file);
                     int ch = fis.read(buffer, 0, 1024);
@@ -76,5 +84,197 @@ public class Response {
         }
 
 
+    }
+
+    @Override
+    public void addCookie(Cookie cookie) {
+
+    }
+
+    @Override
+    public boolean containsHeader(String name) {
+        return false;
+    }
+
+    @Override
+    public String encodeURL(String url) {
+        return null;
+    }
+
+    @Override
+    public String encodeRedirectURL(String url) {
+        return null;
+    }
+
+    @Override
+    public String encodeUrl(String url) {
+        return null;
+    }
+
+    @Override
+    public String encodeRedirectUrl(String url) {
+        return null;
+    }
+
+    @Override
+    public void sendError(int sc, String msg) throws IOException {
+
+    }
+
+    @Override
+    public void sendError(int sc) throws IOException {
+
+    }
+
+    @Override
+    public void sendRedirect(String location) throws IOException {
+
+    }
+
+    @Override
+    public void setDateHeader(String name, long date) {
+
+    }
+
+    @Override
+    public void addDateHeader(String name, long date) {
+
+    }
+
+    @Override
+    public void setHeader(String name, String value) {
+
+    }
+
+    @Override
+    public void addHeader(String name, String value) {
+
+    }
+
+    @Override
+    public void setIntHeader(String name, int value) {
+
+    }
+
+    @Override
+    public void addIntHeader(String name, int value) {
+
+    }
+
+    @Override
+    public void setStatus(int sc) {
+
+    }
+
+    @Override
+    public void setStatus(int sc, String sm) {
+
+    }
+
+    @Override
+    public int getStatus() {
+        return 0;
+    }
+
+    @Override
+    public String getHeader(String name) {
+        return null;
+    }
+
+    @Override
+    public Collection<String> getHeaders(String name) {
+        return null;
+    }
+
+    @Override
+    public Collection<String> getHeaderNames() {
+        return null;
+    }
+
+    @Override
+    public String getCharacterEncoding() {
+        return null;
+    }
+
+    @Override
+    public String getContentType() {
+        return null;
+    }
+
+    @Override
+    public ServletOutputStream getOutputStream() throws IOException {
+        return null;
+    }
+
+    /**
+     *
+     *
+     */
+    @Override
+    public PrintWriter getWriter() throws IOException {
+        // boolean是否开始autoFlush。
+        //      如果为true，表示对println()方法的任何调用都会刷新输出，但是调用print()方法不会输出。
+        writer = new PrintWriter(outputStream, true);
+        return writer;
+    }
+
+    @Override
+    public void setCharacterEncoding(String charset) {
+
+    }
+
+    @Override
+    public void setContentLength(int len) {
+
+    }
+
+    @Override
+    public void setContentLengthLong(long len) {
+
+    }
+
+    @Override
+    public void setContentType(String type) {
+
+    }
+
+    @Override
+    public void setBufferSize(int size) {
+
+    }
+
+    @Override
+    public int getBufferSize() {
+        return 0;
+    }
+
+    @Override
+    public void flushBuffer() throws IOException {
+
+    }
+
+    @Override
+    public void resetBuffer() {
+
+    }
+
+    @Override
+    public boolean isCommitted() {
+        return false;
+    }
+
+    @Override
+    public void reset() {
+
+    }
+
+    @Override
+    public void setLocale(Locale loc) {
+
+    }
+
+    @Override
+    public Locale getLocale() {
+        return null;
     }
 }

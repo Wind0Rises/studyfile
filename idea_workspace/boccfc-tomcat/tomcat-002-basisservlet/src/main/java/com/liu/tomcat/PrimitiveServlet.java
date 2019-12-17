@@ -4,6 +4,7 @@ import javax.servlet.*;
 import java.io.IOException;
 
 public class PrimitiveServlet implements Servlet {
+
     @Override
     public void init(ServletConfig config) throws ServletException {
 

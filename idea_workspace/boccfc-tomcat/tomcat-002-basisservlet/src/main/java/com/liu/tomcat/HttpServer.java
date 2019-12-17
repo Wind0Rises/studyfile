@@ -1,5 +1,7 @@
 package com.liu.tomcat;
 
+import com.liu.tomcat.processor.ServletProcessor;
+
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
@@ -18,6 +20,11 @@ public class HttpServer {
     public static final String WEB_ROOT = System.getProperty("user.dir") + PATH + File.separator + "webroot";
 
     public static final String SHUTDOWN_COMMAND = "/SHUTDOWN";
+
+    /**
+     * 拦截servlet请求
+     */
+    public static final String SERVLET_URI = "/servlet/";
 
     public static final int SERVER_PORT = 8878;
 
@@ -48,14 +55,25 @@ public class HttpServer {
                 // 获取一个socket（获取一个请求）
                 socket = serverSocket.accept();
 
+                // 获取输入输出流
+                inputStream = socket.getInputStream();
+                outputStream = socket.getOutputStream();
+
                 // 实例化一个请求，并解析socket的内容
-                Request request = new Request(socket);
+                Request request = new Request(inputStream);
                 request.parse();
 
                 // 实例化一个响应，并发送一个响应。
-                Response response = new Response(socket);
+                Response response = new Response(outputStream);
                 response.setRequest(request);
-                response.sendStaticResource();
+
+                // 根据不同的请求，去不同的处理方式。
+                if (request.getUri().startsWith(SERVLET_URI)) {
+                    ServletProcessor servletProcessor = new ServletProcessor();
+                    servletProcessor.process(request, response);
+                } else {
+
+                }
 
                 socket.close();
 
