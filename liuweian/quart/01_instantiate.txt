@@ -1236,7 +1236,7 @@ public void run() {
 				setPriority(tp.getThreadPriority());
 			}
 
-			// runOnce：如果初始化工作线程时runnable == null，默认为false；如果runnable != nul，默认为true。
+			// runOnce：如果初始化工作线程时runnable == null，默认为false；如果runnable != null，默认为true。
 			if (runOnce) {
 				// 停止线程，
 				run.set(false);
@@ -1255,7 +1255,7 @@ public void run() {
 	try {
 		getLog().debug("WorkerThread is shut down.");
 	} catch(Exception e) {
-		// ignore to help with a tomcat glitch
+		// 
 	}
 }
 
@@ -1274,6 +1274,28 @@ public void run(Runnable newRunnable) {
 		lock.notifyAll();
 	}
 }
+
+/**
+ * 各种操作。
+ */
+location：SimpleThreadPool.WorkerThread
+protected void makeAvailable(WorkerThread wt) {
+	synchronized(nextRunnableLock) {
+		if(!isShutdown) {
+			availWorkers.add(wt);
+		}
+		busyWorkers.remove(wt);
+		nextRunnableLock.notifyAll();
+	}
+}
+
+
+
+
+
+
+
+
 
 
 
@@ -1401,82 +1423,6 @@ public void run(Runnable newRunnable) {
 		lock.notifyAll();
 	}
 }
-
-
-
-
-Scheduler的实现类中有一个QuartzScheduler实例,Scheduler的操作实际上都是通过QuartzScheduler实例完成的，所以说QuartzScheduler间接的实现了Scheduler
-
-QuartzScheduler
-
-
-
-
-
-
-
-
-@Override
-public void run() {
-	boolean ran = false;
-	
-	// run默认为ture,调用shutdown()方法后会修改为false，
-	// run.get():用于判断Quartz是否暂停了。如果线程启动
-	while (run.get()) {
-		try {
-			// 上锁操作,
-			synchronized(lock) {
-				// 判断是否有工作，或者工作是否暂停，如果是就没0.5检查一次
-				while (runnable == null && run.get()) {
-					lock.wait(500);
-				}
-
-				if (runnable != null) {
-					ran = true;
-					// 执行runnable的run方法
-					runnable.run();
-				}
-			}
-		} catch (InterruptedException unblock) {
-			try {
-				getLog().error("Worker thread was interrupt()'ed.", unblock);
-			} catch(Exception e) {
-				
-			}
-		} catch (Throwable exceptionInRunnable) {
-			try {
-				getLog().error("Error while executing the Runnable: ", exceptionInRunnable);
-			} catch(Exception e) {
-				
-			}
-		} finally {
-			synchronized(lock) {
-				runnable = null;
-			}
-			// 修复线程，【没看明白】
-			if(getPriority() != tp.getThreadPriority()) {
-				setPriority(tp.getThreadPriority());
-			}
-
-			// 是否跑一次，默认为false，当指定Runnable的初始化的WorkThread的时候，会修改为ture
-			if (runOnce) {
-				run.set(false);
-				clearFromBusyWorkersList(this);
-			} else if(ran) {
-				ran = false;
-				makeAvailable(this);
-			}
-
-		}
-	}
-
-	try {
-		getLog().debug("WorkerThread is shut down.");
-	} catch(Exception e) {
-		
-	}
-}
-
 
 
 

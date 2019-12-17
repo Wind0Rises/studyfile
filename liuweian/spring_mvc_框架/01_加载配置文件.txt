@@ -1,0 +1,211 @@
+
+// GenericServlet的init方法会被调用很多次，比如JspServlet、DefaultServlet这是都是Tomcat所实现的Servlet。
+location：GenericServlet
+public void init(ServletConfig config) throws ServletException {
+	this.config = config;
+	this.init();
+}
+
+
+location：HttpServletBean extends HttpServlet（HttpServlet extends GenericServlet）
+public final void init() throws ServletException {
+	if (logger.isDebugEnabled()) {
+		logger.debug("Initializing servlet '" + getServletName() + "'");
+	}
+
+	// 实例化PropertyValues对象，parameters设置Bean属性。
+	PropertyValues pvs = new ServletConfigPropertyValues(getServletConfig(), this.requiredProperties);
+	
+	if (!pvs.isEmpty()) {
+		try {
+			//############   搜索 _BeanWrapper #############
+			BeanWrapper bw = PropertyAccessorFactory.forBeanPropertyAccess(this);
+			
+			// 实例化一个资源加载器。
+			ResourceLoader resourceLoader = new ServletContextResourceLoader(getServletContext());
+			
+			// 向HttpServletBean这个BeanWrapper设置Resource属性。
+			bw.registerCustomEditor(Resource.class, new ResourceEditor(resourceLoader, getEnvironment()));
+			
+			// 没有做任何事情。
+			initBeanWrapper(bw);
+			
+			// 设置属性。
+			bw.setPropertyValues(pvs, true);
+		}
+		catch (BeansException ex) {
+			if (logger.isErrorEnabled()) {
+				logger.error("Failed to set bean properties on servlet '" + getServletName() + "'", ex);
+			}
+			throw ex;
+		}
+	}
+
+	// #####################################################
+	// ######################  很重要  #####################
+	// #####################################################
+	initServletBean();
+
+	if (logger.isDebugEnabled()) {
+		logger.debug("Servlet '" + getServletName() + "' configured successfully");
+	}
+}
+
+// 这个类实现了ApplicationContextAware接口，所有可以获取到ApplicationContext
+location；FrameworkServlet
+protected final void initServletBean() throws ServletException {
+
+	getServletContext().log("Initializing Spring FrameworkServlet '" + getServletName() + "'");
+	if (this.logger.isInfoEnabled()) {
+		this.logger.info("FrameworkServlet '" + getServletName() + "': initialization started");
+	}
+	
+	long startTime = System.currentTimeMillis();
+
+	try {
+		// FrameworkServlet类中包好有一个WebApplicationContext属性。
+		this.webApplicationContext = initWebApplicationContext();
+		
+		initFrameworkServlet();
+	}
+	catch (ServletException ex) {
+		this.logger.error("Context initialization failed", ex);
+		throw ex;
+	}
+	catch (RuntimeException ex) {
+		this.logger.error("Context initialization failed", ex);
+		throw ex;
+	}
+
+	if (this.logger.isInfoEnabled()) {
+		long elapsedTime = System.currentTimeMillis() - startTime;
+		this.logger.info("FrameworkServlet '" + getServletName() + "': initialization completed in " +
+				elapsedTime + " ms");
+	}
+}
+
+
+// 初始化一个WebApplicationContext实例对象。
+location；FrameworkServlet
+protected WebApplicationContext initWebApplicationContext() {
+
+	// 获取一个WebApplicationContext属性。【一般情况这个值为null】
+	WebApplicationContext rootContext = WebApplicationContextUtils.getWebApplicationContext(getServletContext());
+	
+	WebApplicationContext wac = null;
+
+	if (this.webApplicationContext != null) {
+		// 把获取到的WebApplicationContext赋给FrameworkServlet类的wac属性。
+		wac = this.webApplicationContext;
+		
+		if (wac instanceof ConfigurableWebApplicationContext) {
+			ConfigurableWebApplicationContext cwac = (ConfigurableWebApplicationContext) wac;
+			
+			if (!cwac.isActive()) {
+				if (cwac.getParent() == null) {
+					cwac.setParent(rootContext);
+				}
+				configureAndRefreshWebApplicationContext(cwac);
+			}
+		}
+	}
+	if (wac == null) {
+		wac = findWebApplicationContext();
+	}
+	
+	if (wac == null) {
+		// #######################################################################
+		// #################        看下一章    ##################################
+		// #######################################################################
+		wac = createWebApplicationContext(rootContext);
+	}
+
+	if (!this.refreshEventReceived) {
+		onRefresh(wac);
+	}
+
+	if (this.publishContext) {
+		String attrName = getServletContextAttributeName();
+		getServletContext().setAttribute(attrName, wac);
+		if (this.logger.isDebugEnabled()) {
+			this.logger.debug("Published WebApplicationContext of servlet '" + getServletName() + "' as ServletContext attribute with name [" + attrName + "]");
+		}
+	}
+
+	return wac;
+}
+
+
+location：WebApplicationContext（继承ApplicationContext）
+public static WebApplicationContext getWebApplicationContext(ServletContext sc) {
+	// String ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE = WebApplicationContext.class.getName() + ".ROOT";
+	return getWebApplicationContext(sc, WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE);
+}
+
+
+location：WebApplicationContext（继承ApplicationContext）
+public static WebApplicationContext getWebApplicationContext(ServletContext sc, String attrName) {
+	Assert.notNull(sc, "ServletContext must not be null");
+	
+	// 从ServletContext获取给定的属性名称的属性值。
+	Object attr = sc.getAttribute(attrName);
+	
+	if (attr == null) {
+		return null;
+	}
+	if (attr instanceof RuntimeException) {
+		throw (RuntimeException) attr;
+	}
+	if (attr instanceof Error) {
+		throw (Error) attr;
+	}
+	if (attr instanceof Exception) {
+		throw new IllegalStateException((Exception) attr);
+	}
+	if (!(attr instanceof WebApplicationContext)) {
+		throw new IllegalStateException("Context attribute is not of type WebApplicationContext: " + attr);
+	}
+	return (WebApplicationContext) attr;
+}
+
+#####################################################################################
+######################    _BeanWrapper介绍      #####################################
+#####################################################################################
+
+BeanWrapper（接口）：extends ConfigurablePropertyAccessor
+	介绍：Spring的底层的JavaBeans基础结构的中央接口。
+	方法：
+		PropertyDescriptor getPropertyDescriptor(String propertyName)：
+		Class<?> getWrappedClass()：
+		Object getWrappedInstance()：
+	
+ConfigurablePropertyAccessor（接口）：extends PropertyAccessor, PropertyEditorRegistry, TypeConverter
+	介绍：
+	方法：
+		void setConversionService(ConversionService conversionService)：
+		boolean isAutoGrowNestedPaths()：
+		boolean isExtractOldValueForEditor():
+		void setAutoGrowNestedPaths(boolean autoGrowNestedPaths):
+	
+PropertyAccessor（接口）：【属性访问器】
+	介绍：作用是存取Bean对象的属性，所有Spring创建的Bean对象，都使用该接口存取Bean属性值
+	方法：
+		Class<?> getPropertyType(String propertyName)：确定指定属性的属性类型，检查属性描述符或在索引元素或映射元素的情况下检查值。
+		TypeDescriptor getPropertyTypeDescriptor(String propertyName)：返回指定属性的类型描述符：最好从read方法返回write方法。
+		boolean isReadableProperty(String propertyName)/boolean isWritableProperty(String propertyName)：确定指定的属性是否可读/可写。如果属性不存在返回false。
+		void setPropertyValue(String propertyName, Object value)【很多方法重载】：设置属性值。
+
+TypeConverter（接口）：【类型转换器】
+	介绍：用于类型转换的。
+	方法；
+		<T> T convertIfNecessary(Object value, Class<T> requiredType)【很多重载方法】:将值(value)转换为所需类型{requiredType}。
+
+PropertyEditorRegistry（接口）：
+	介绍：
+	方法：
+		void registerCustomEditor(Class<?> requiredType, PropertyEditor propertyEditor)：为给定类型的所有属性注册给定的自定义PropertyEditor。
+		PropertyEditor findCustomEditor(Class<?> requiredType, String propertyPath)：通过给定的类型和属性，获取对应的PropertyEditor。
+		
+		
+PropertyEditor：（接口）：
+	介绍：可获取属性值等

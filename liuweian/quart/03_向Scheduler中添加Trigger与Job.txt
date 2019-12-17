@@ -1,8 +1,5 @@
 Scheduler：只是一个接口。
-
-/**
- *
- */
+	
  
 /**
  * 向Scheduler中插入JobDetail和Trigger。
@@ -12,8 +9,12 @@ public Date scheduleJob(JobDetail jobDetail, Trigger trigger) throws SchedulerEx
 	return sched.scheduleJob(jobDetail, trigger);
 }
 
+#######################################################################################
+#######################       向QuartzScheduler中添加job和Trigger     #################
+#######################################################################################
 /**
- *
+ * QuartzSchedulerResources resources;
+ * 向Scheduler中插入JobDetail和Trigger。
  */
 location：QuartzScheduler
 public Date scheduleJob(JobDetail jobDetail, Trigger trigger) throws SchedulerException {
@@ -49,23 +50,898 @@ public Date scheduleJob(JobDetail jobDetail, Trigger trigger) throws SchedulerEx
 		throw new SchedulerException("Trigger does not reference given job!");
 	}
 
+	// trigger校验，trigger的name、group、jobName、jobGroup都是必须的。
 	trig.validate();
 
 	Calendar cal = null;
+	
+	// trigger是否设置了CalendarName了。
 	if (trigger.getCalendarName() != null) {
 		cal = resources.getJobStore().retrieveCalendar(trigger.getCalendarName());
 	}
+	
+	// 计算出Quartz开始时间后的第一次执行时间。
 	Date ft = trig.computeFirstFireTime(cal);
 
 	if (ft == null) {
-		throw new SchedulerException(
-				"Based on configured schedule, the given trigger '" + trigger.getKey() + "' will never fire.");
+		throw new SchedulerException("Based on configured schedule, the given trigger '" + trigger.getKey() + "' will never fire.");
 	}
-
+	
+	// 把JobDetail和Trigger保存到JobStore中。
 	resources.getJobStore().storeJobAndTrigger(jobDetail, trig);
+	
+	// 通知Scheduler监听器，Job已经添加。
 	notifySchedulerListenersJobAdded(jobDetail);
+	 
+	// 通知QuartzSchedulerThread
 	notifySchedulerThread(trigger.getNextFireTime().getTime());
+	
+	// 当JobDetail被放入Scheduler中时，jobScheduled(..)被调用。
 	notifySchedulerListenersSchduled(trigger);
 
 	return ft;
+}
+
+
+
+/**
+ * Trigger校验。
+ */
+location：AbstractTrigger
+public void validate() throws SchedulerException {
+	if (name == null) {
+		throw new SchedulerException("Trigger's name cannot be null");
+	}
+
+	if (group == null) {
+		throw new SchedulerException("Trigger's group cannot be null");
+	}
+
+	if (jobName == null) {
+		throw new SchedulerException("Trigger's related Job's name cannot be null");
+	}
+
+	if (jobGroup == null) {
+		throw new SchedulerException("Trigger's related Job's group cannot be null");
+	}
+}
+
+/**
+ * 计算出Quartz开始时间后的第一次执行时间。
+ * Scheduler在第一次将Trigger添加到Scheduler时调用，以便Trigger根据任何关联的日历计算其第一次启动时间。
+ */
+location：CronTriggerImpl
+public Date computeFirstFireTime(org.quartz.Calendar calendar) {
+
+	// 获取开始时间（开始时间往以前推一秒）后的下一次执行时间。
+	nextFireTime = getFireTimeAfter(new Date(getStartTime().getTime() - 1000l));
+
+	// 判断Calendar是否包含给定的时间。
+	while (nextFireTime != null && calendar != null && !calendar.isTimeIncluded(nextFireTime.getTime())) {
+		nextFireTime = getFireTimeAfter(nextFireTime);
+	}
+
+	return nextFireTime;
+}
+
+/**
+ * 获取给定时间的下一次执行时间。
+ * afterTime = 开始时间 - 1s
+ */
+location：CronTriggerImpl
+public Date getFireTimeAfter(Date afterTime) {
+	if (afterTime == null) {
+		afterTime = new Date();
+	}
+
+	// date.after(specifiedDate)：测试date是否在给定的时间的未来。
+	if (getStartTime().after(afterTime)) {
+		afterTime = new Date(getStartTime().getTime() - 1000l);
+	}
+
+	// date1.compareTo(date2)：比较两个时间的顺序。如果大于0：date1小于date2（date1时间更早）；大于0：date1大于date2（date2时间更早）
+	if (getEndTime() != null && (afterTime.compareTo(getEndTime()) >= 0)) {
+		return null;
+	}
+	
+	// 获取cron时间表中，在给定时间的下一次执行时间。
+	Date pot = getTimeAfter(afterTime);
+	
+	// 判断下一次执行时间是否在Quartz结束时间之后。
+	if (getEndTime() != null && pot != null && pot.after(getEndTime())) {
+		return null;
+	}
+
+	// 返回下一次执行时间
+	return pot;
+}
+
+/**
+ * 获取给定时间下一个要执行的时间。
+ */
+location：CronTriggerImpl
+protected Date getTimeAfter(Date afterTime) {
+	return (cronEx == null) ? null : cronEx.getTimeAfter(afterTime);
+}
+
+
+/**
+ * 获取给定时间下一个要执行的时间。这里是Cron的具体计算过程。
+ */
+location：CronExpression
+public Date getTimeAfter(Date afterTime) {
+
+	// 实例化一个Calendar。
+	Calendar cl = new java.util.GregorianCalendar(getTimeZone()); 
+
+	// 时间向未来加1s。
+	afterTime = new Date(afterTime.getTime() + 1000);
+	
+	// 设置Calendar。
+	cl.setTime(afterTime);
+	cl.set(Calendar.MILLISECOND, 0);
+
+	// 是否获取到了下一个执行的时间。
+	boolean gotOne = false;
+	
+	while (!gotOne) {
+
+		if(cl.get(Calendar.YEAR) > 2999) {
+			return null;
+		}
+
+		SortedSet<Integer> st = null;
+		int t = 0;
+
+		// 获取给定时间（注意这个时间 + 1s）秒数和分钟数。
+		int sec = cl.get(Calendar.SECOND);
+		int min = cl.get(Calendar.MINUTE);
+
+		#############################################################
+		##########                获取秒数。            #############
+		#############################################################
+		// 获取表达式中的执行的秒数集合中的在给定秒数后的秒数集合，是排序过后的。
+		st = seconds.tailSet(sec);
+		
+		// 如果有在给定秒数之后秒数，获取下一个要执行的秒数。
+		if (st != null && st.size() != 0) {
+			sec = st.first();
+			
+		// 如果没有直接获取表达式中第一要执行的秒数，但是分钟数要加1，并把分钟数设置到Calendar。
+		} else {
+			sec = seconds.first();
+			min++;
+			cl.set(Calendar.MINUTE, min);
+		}
+		
+		// 把下一个要执行的秒数设置到Calendar中。
+		cl.set(Calendar.SECOND, sec);
+
+		// 获取Calendar中的分钟数和小时数。
+		min = cl.get(Calendar.MINUTE);
+		int hr = cl.get(Calendar.HOUR_OF_DAY);
+		t = -1;
+
+
+		#############################################################
+		##########                获取分钟数。          #############
+		#############################################################
+		// 获取分钟和获取秒数类似。
+		st = minutes.tailSet(min);
+		if (st != null && st.size() != 0) {
+			t = min;
+			min = st.first();
+		} else {
+			min = minutes.first();
+			hr++;
+		}
+		if (min != t) {
+			cl.set(Calendar.SECOND, 0);
+			cl.set(Calendar.MINUTE, min);
+			setCalendarHour(cl, hr);
+			continue;
+		}
+		cl.set(Calendar.MINUTE, min);
+
+		hr = cl.get(Calendar.HOUR_OF_DAY);
+		int day = cl.get(Calendar.DAY_OF_MONTH);
+		t = -1;
+
+		#############################################################
+		##########                获取分钟数。          #############
+		#############################################################
+		// 获取小时和获取秒数类似。
+		st = hours.tailSet(hr);
+		if (st != null && st.size() != 0) {
+			t = hr;
+			hr = st.first();
+		} else {
+			hr = hours.first();
+			day++;
+		}
+		if (hr != t) {
+			cl.set(Calendar.SECOND, 0);
+			cl.set(Calendar.MINUTE, 0);
+			cl.set(Calendar.DAY_OF_MONTH, day);
+			setCalendarHour(cl, hr);
+			continue;
+		}
+		cl.set(Calendar.HOUR_OF_DAY, hr);
+
+		day = cl.get(Calendar.DAY_OF_MONTH);
+		int mon = cl.get(Calendar.MONTH) + 1;
+		t = -1;
+		int tmon = mon;
+		
+		// 获取天数。
+		#############################################################
+		##########                获取天数。            #############
+		#############################################################
+		boolean dayOfMSpec = !daysOfMonth.contains(NO_SPEC);
+		boolean dayOfWSpec = !daysOfWeek.contains(NO_SPEC);
+		
+		// 使用日。
+		if (dayOfMSpec && !dayOfWSpec) {
+			st = daysOfMonth.tailSet(day);
+			
+			// 是否是月的最后一天。
+			if (lastdayOfMonth) {
+				if(!nearestWeekday) {
+					t = day;
+					day = getLastDayOfMonth(mon, cl.get(Calendar.YEAR));
+					day -= lastdayOffset;
+					if(t > day) {
+						mon++;
+						if(mon > 12) { 
+							mon = 1;
+							tmon = 3333;
+							cl.add(Calendar.YEAR, 1);
+						}
+						day = 1;
+					}
+				} else {
+					t = day;
+					
+					// 获取年、月的之后一天。
+					day = getLastDayOfMonth(mon, cl.get(Calendar.YEAR));
+					
+					// day与最后一天相差的时间。
+					day -= lastdayOffset;
+					
+					java.util.Calendar tcal = java.util.Calendar.getInstance(getTimeZone());
+					tcal.set(Calendar.SECOND, 0);
+					tcal.set(Calendar.MINUTE, 0);
+					tcal.set(Calendar.HOUR_OF_DAY, 0);
+					tcal.set(Calendar.DAY_OF_MONTH, day);
+					tcal.set(Calendar.MONTH, mon - 1);
+					tcal.set(Calendar.YEAR, cl.get(Calendar.YEAR));
+					
+					int ldom = getLastDayOfMonth(mon, cl.get(Calendar.YEAR));
+					int dow = tcal.get(Calendar.DAY_OF_WEEK);
+
+					if(dow == Calendar.SATURDAY && day == 1) {
+						day += 2;
+					} else if(dow == Calendar.SATURDAY) {
+						day -= 1;
+					} else if(dow == Calendar.SUNDAY && day == ldom) { 
+						day -= 2;
+					} else if(dow == Calendar.SUNDAY) { 
+						day += 1;
+					}
+				
+					tcal.set(Calendar.SECOND, sec);
+					tcal.set(Calendar.MINUTE, min);
+					tcal.set(Calendar.HOUR_OF_DAY, hr);
+					tcal.set(Calendar.DAY_OF_MONTH, day);
+					tcal.set(Calendar.MONTH, mon - 1);
+					Date nTime = tcal.getTime();
+					if(nTime.before(afterTime)) {
+						day = 1;
+						mon++;
+					}
+				}
+			} else if(nearestWeekday) {
+				t = day;
+				day = daysOfMonth.first();
+
+				java.util.Calendar tcal = java.util.Calendar.getInstance(getTimeZone());
+				tcal.set(Calendar.SECOND, 0);
+				tcal.set(Calendar.MINUTE, 0);
+				tcal.set(Calendar.HOUR_OF_DAY, 0);
+				tcal.set(Calendar.DAY_OF_MONTH, day);
+				tcal.set(Calendar.MONTH, mon - 1);
+				tcal.set(Calendar.YEAR, cl.get(Calendar.YEAR));
+				
+				int ldom = getLastDayOfMonth(mon, cl.get(Calendar.YEAR));
+				int dow = tcal.get(Calendar.DAY_OF_WEEK);
+
+				if(dow == Calendar.SATURDAY && day == 1) {
+					day += 2;
+				} else if(dow == Calendar.SATURDAY) {
+					day -= 1;
+				} else if(dow == Calendar.SUNDAY && day == ldom) { 
+					day -= 2;
+				} else if(dow == Calendar.SUNDAY) { 
+					day += 1;
+				}
+					
+			
+				tcal.set(Calendar.SECOND, sec);
+				tcal.set(Calendar.MINUTE, min);
+				tcal.set(Calendar.HOUR_OF_DAY, hr);
+				tcal.set(Calendar.DAY_OF_MONTH, day);
+				tcal.set(Calendar.MONTH, mon - 1);
+				Date nTime = tcal.getTime();
+				if(nTime.before(afterTime)) {
+					day = daysOfMonth.first();
+					mon++;
+				}
+			} else if (st != null && st.size() != 0) {
+				t = day;
+				day = st.first();
+				int lastDay = getLastDayOfMonth(mon, cl.get(Calendar.YEAR));
+				if (day > lastDay) {
+					day = daysOfMonth.first();
+					mon++;
+				}
+			} else {
+				day = daysOfMonth.first();
+				mon++;
+			}
+			
+			if (day != t || mon != tmon) {
+				cl.set(Calendar.SECOND, 0);
+				cl.set(Calendar.MINUTE, 0);
+				cl.set(Calendar.HOUR_OF_DAY, 0);
+				cl.set(Calendar.DAY_OF_MONTH, day);
+				cl.set(Calendar.MONTH, mon - 1);
+				continue;
+			}
+			
+		// 使用星期。
+		} else if (dayOfWSpec && !dayOfMSpec) {
+			if (lastdayOfWeek) { 
+				int dow = daysOfWeek.first(); 
+				int cDow = cl.get(Calendar.DAY_OF_WEEK);
+				int daysToAdd = 0;
+				if (cDow < dow) {
+					daysToAdd = dow - cDow;
+				}
+				if (cDow > dow) {
+					daysToAdd = dow + (7 - cDow);
+				}
+
+				int lDay = getLastDayOfMonth(mon, cl.get(Calendar.YEAR));
+
+				if (day + daysToAdd > lDay) { 
+					cl.set(Calendar.SECOND, 0);
+					cl.set(Calendar.MINUTE, 0);
+					cl.set(Calendar.HOUR_OF_DAY, 0);
+					cl.set(Calendar.DAY_OF_MONTH, 1);
+					cl.set(Calendar.MONTH, mon);
+					continue;
+				}
+
+				while ((day + daysToAdd + 7) <= lDay) {
+					daysToAdd += 7;
+				}
+
+				day += daysToAdd;
+
+				if (daysToAdd > 0) {
+					cl.set(Calendar.SECOND, 0);
+					cl.set(Calendar.MINUTE, 0);
+					cl.set(Calendar.HOUR_OF_DAY, 0);
+					cl.set(Calendar.DAY_OF_MONTH, day);
+					cl.set(Calendar.MONTH, mon - 1);
+					continue;
+				}
+
+			} else if (nthdayOfWeek != 0) {
+				int dow = daysOfWeek.first();
+				int cDow = cl.get(Calendar.DAY_OF_WEEK); // current d-o-w
+				int daysToAdd = 0;
+				if (cDow < dow) {
+					daysToAdd = dow - cDow;
+				} else if (cDow > dow) {
+					daysToAdd = dow + (7 - cDow);
+				}
+
+				boolean dayShifted = false;
+				if (daysToAdd > 0) {
+					dayShifted = true;
+				}
+
+				day += daysToAdd;
+				int weekOfMonth = day / 7;
+				if (day % 7 > 0) {
+					weekOfMonth++;
+				}
+
+				daysToAdd = (nthdayOfWeek - weekOfMonth) * 7;
+				day += daysToAdd;
+				if (daysToAdd < 0 || day > getLastDayOfMonth(mon, cl.get(Calendar.YEAR))) {
+					cl.set(Calendar.SECOND, 0);
+					cl.set(Calendar.MINUTE, 0);
+					cl.set(Calendar.HOUR_OF_DAY, 0);
+					cl.set(Calendar.DAY_OF_MONTH, 1);
+					cl.set(Calendar.MONTH, mon);
+					continue;
+				} else if (daysToAdd > 0 || dayShifted) {
+					cl.set(Calendar.SECOND, 0);
+					cl.set(Calendar.MINUTE, 0);
+					cl.set(Calendar.HOUR_OF_DAY, 0);
+					cl.set(Calendar.DAY_OF_MONTH, day);
+					cl.set(Calendar.MONTH, mon - 1);
+					continue;
+				}
+			} else {
+				int cDow = cl.get(Calendar.DAY_OF_WEEK);
+				int dow = daysOfWeek.first();
+				st = daysOfWeek.tailSet(cDow);
+				if (st != null && st.size() > 0) {
+					dow = st.first();
+				}
+
+				int daysToAdd = 0;
+				if (cDow < dow) {
+					daysToAdd = dow - cDow;
+				}
+				if (cDow > dow) {
+					daysToAdd = dow + (7 - cDow);
+				}
+
+				int lDay = getLastDayOfMonth(mon, cl.get(Calendar.YEAR));
+
+				if (day + daysToAdd > lDay) { 
+					cl.set(Calendar.SECOND, 0);
+					cl.set(Calendar.MINUTE, 0);
+					cl.set(Calendar.HOUR_OF_DAY, 0);
+					cl.set(Calendar.DAY_OF_MONTH, 1);
+					cl.set(Calendar.MONTH, mon);
+					continue;
+				} else if (daysToAdd > 0) {
+					cl.set(Calendar.SECOND, 0);
+					cl.set(Calendar.MINUTE, 0);
+					cl.set(Calendar.HOUR_OF_DAY, 0);
+					cl.set(Calendar.DAY_OF_MONTH, day + daysToAdd);
+					cl.set(Calendar.MONTH, mon - 1);
+					continue;
+				}
+			}
+		} else {
+			throw new UnsupportedOperationException("Support for specifying both a day-of-week AND a day-of-month parameter is not implemented.");
+		}
+		
+		cl.set(Calendar.DAY_OF_MONTH, day);
+
+		mon = cl.get(Calendar.MONTH) + 1;
+		int year = cl.get(Calendar.YEAR);
+		t = -1;
+
+		if (year > MAX_YEAR) {
+			return null;
+		}
+
+		// 获取月。
+		st = months.tailSet(mon);
+		if (st != null && st.size() != 0) {
+			t = mon;
+			mon = st.first();
+		} else {
+			mon = months.first();
+			year++;
+		}
+		if (mon != t) {
+			cl.set(Calendar.SECOND, 0);
+			cl.set(Calendar.MINUTE, 0);
+			cl.set(Calendar.HOUR_OF_DAY, 0);
+			cl.set(Calendar.DAY_OF_MONTH, 1);
+			cl.set(Calendar.MONTH, mon - 1);
+			cl.set(Calendar.YEAR, year);
+			continue;
+		}
+		cl.set(Calendar.MONTH, mon - 1);
+
+		year = cl.get(Calendar.YEAR);
+		t = -1;
+
+		// 获取年
+		st = years.tailSet(year);
+		if (st != null && st.size() != 0) {
+			t = year;
+			year = st.first();
+		} else {
+			return null;
+		}
+
+		if (year != t) {
+			cl.set(Calendar.SECOND, 0);
+			cl.set(Calendar.MINUTE, 0);
+			cl.set(Calendar.HOUR_OF_DAY, 0);
+			cl.set(Calendar.DAY_OF_MONTH, 1);
+			cl.set(Calendar.MONTH, 0);
+			cl.set(Calendar.YEAR, year);
+			continue;
+		}
+		cl.set(Calendar.YEAR, year);
+
+		gotOne = true;
+	}
+
+	return cl.getTime();
+}
+
+
+/**
+ * 保存Job和Trigger。
+ */
+location：RAMJobStore
+public void storeJobAndTrigger(JobDetail newJob, OperableTrigger newTrigger) throws JobPersistenceException {
+	storeJob(newJob, false);
+	storeTrigger(newTrigger, false);
+}
+
+
+/**
+ * 保存Job。如果JobStore已经存在并且，根据是否可以覆盖Job，进行不同的处理。
+ *          如果JobStore中不存在，则向Job集合中和分组集合中添加JobDetail。
+ * 注意：添加过程都是加锁的。
+ */
+location：RAMJobStore
+public void storeJob(JobDetail newJob, boolean replaceExisting) throws ObjectAlreadyExistsException {
+	// 通过Job实例化一个JobWrapper。
+	JobWrapper jw = new JobWrapper((JobDetail)newJob.clone());
+
+	boolean repl = false;
+
+	synchronized (lock) {
+		// HashMap<JobKey, JobWrapper> jobsByKey：判断jobsByKey是否已经存在。
+		if (jobsByKey.get(jw.key) != null) {
+		
+			// 如果JobStore已经存在并且，不允许替换则保存。
+			if (!replaceExisting) {
+				throw new ObjectAlreadyExistsException(newJob);
+			}
+			repl = true;
+		}
+
+		if (!repl) {
+			// HashMap<String, HashMap<JobKey, JobWrapper>> jobsByGroup：获取Job的组。
+			HashMap<JobKey, JobWrapper> grpMap = jobsByGroup.get(newJob.getKey().getGroup());
+			
+			// 如果没有对应的分组，者新建一个分组。
+			if (grpMap == null) {
+				grpMap = new HashMap<JobKey, JobWrapper>(100);
+				jobsByGroup.put(newJob.getKey().getGroup(), grpMap);
+			}
+			
+			向分组中保存数据。
+			grpMap.put(newJob.getKey(), jw);
+			
+			// 向Job集合中保存数据。
+			jobsByKey.put(jw.key, jw);
+		} else {
+			// 替换原有的Job。
+			JobWrapper orig = jobsByKey.get(jw.key);
+			orig.jobDetail = jw.jobDetail; 
+		}
+	}
+}
+
+/**
+ * 保存trigger，判断trigger是否存在，如果Trigger存在，是否允许覆盖，如果可以覆盖，删除原有的Trigger。
+ * 					向JobStore添加对应Trigger。
+ *      	判断暂停的Job集合和Trigger集合是否存在trigger和Trigger对应的Job，如果存在注意修改Trigger的状态。如果都不是暂停状态，则把Trigger添加到timeTrigger集合中。
+ */
+location：RAMJobStore
+public void storeTrigger(OperableTrigger newTrigger, boolean replaceExisting) throws JobPersistenceException {
+	
+	// 通过Trigger实例化一个TriggerWrapper。
+	TriggerWrapper tw = new TriggerWrapper((OperableTrigger)newTrigger.clone());
+
+	synchronized (lock) {
+	
+		// HashMap<TriggerKey, TriggerWrapper> triggersByKey：判断JobStore的Trigger集合中是否已经存在给定的Trigger。
+		// 如果存在，并且不允许覆盖直接报错。如果存在可以覆盖，先删除已经存在的Trigger。
+		if (triggersByKey.get(tw.key) != null) {
+			if (!replaceExisting) {
+				throw new ObjectAlreadyExistsException(newTrigger);
+			}
+
+			// 删除JobStore中的已经存在的Trigger。删除是一个同步操作。
+			removeTrigger(newTrigger.getKey(), false);
+		}
+
+		// 从JobStore中获取Trigger对用的Job，如果不存报错。获取是一个同步操作。
+		if (retrieveJob(newTrigger.getJobKey()) == null) {
+			throw new JobPersistenceException("The job (" + newTrigger.getJobKey() + ") referenced by the trigger does not exist.");
+		}
+
+		// 向Trigger（List）集合中添加元素。
+		triggers.add(tw);
+		
+		// 获取Trigger对应的分组。并把Trigger插入Trigger分组中。
+		HashMap<TriggerKey, TriggerWrapper> grpMap = triggersByGroup.get(newTrigger.getKey().getGroup());
+		if (grpMap == null) {
+			grpMap = new HashMap<TriggerKey, TriggerWrapper>(100);
+			triggersByGroup.put(newTrigger.getKey().getGroup(), grpMap);
+		}
+		grpMap.put(newTrigger.getKey(), tw);
+		triggersByKey.put(tw.key, tw);
+
+		// 判断暂停TriggerGroup集合中是否存在该Trigger的Group。
+		if (pausedTriggerGroups.contains(newTrigger.getKey().getGroup()) || pausedJobGroups.contains(newTrigger.getJobKey().getGroup())) {
+		
+			// 修改TriggerWrapper的状态。
+			tw.state = TriggerWrapper.STATE_PAUSED;
+			
+			// 判断堵塞Job中是否存在对应的Job。如果存在，修改TriggerWrapper的状态。
+			if (blockedJobs.contains(tw.jobKey)) {
+				tw.state = TriggerWrapper.STATE_PAUSED_BLOCKED;
+			}
+		
+		// 判断堵塞Job中是否存在对应的Job。如果存在，修改TriggerWrapper的状态。
+		} else if (blockedJobs.contains(tw.jobKey)) {
+			tw.state = TriggerWrapper.STATE_BLOCKED;
+			
+		// 向timeTriggers中添加一个数据。
+		} else {
+			timeTriggers.add(tw);
+		}
+	}
+}
+
+
+/**
+ * 移除Tirgger（trigger【Map、list】集合、trigger分组集合）
+ * 如果要允许删除孤立的Job，并且Job允许删除，删除Trigger时，并把孤立的Job也删除，并通知SchedulerListener。
+ * 删除是一个同步操作。
+ */
+location：RAMJobStore
+private boolean removeTrigger(TriggerKey key, boolean removeOrphanedJob) {
+
+	boolean found;
+
+	synchronized (lock) {
+		// 移除triggersByKey（Map）已经存在的Trigger。
+		found = (triggersByKey.remove(key) != null);
+		
+		// 判断以前的Trigger时候为null。
+		if (found) {
+			TriggerWrapper tw = null;
+			
+			// 获取Trigger分组。
+			HashMap<TriggerKey, TriggerWrapper> grpMap = triggersByGroup.get(key.getGroup());
+			
+			// 如果对应的分组存在，移除分组中对应的Trigger，如果移除Trigger后的分组，Trigger分组的中的数据量为0，则把分组也移除。
+			if (grpMap != null) {
+				grpMap.remove(key);
+				if (grpMap.size() == 0) {
+					triggersByGroup.remove(key.getGroup());
+				}
+			}
+			
+			// ArrayList<TriggerWrapper> triggers。遍历Trigger集合，移除trigger（List）结合中的对应Trigger。
+			Iterator<TriggerWrapper> tgs = triggers.iterator();
+			while (tgs.hasNext()) {
+				tw = tgs.next();
+				if (key.equals(tw.key)) {
+					tgs.remove();
+					break;
+				}
+			}
+			
+			移除TreeSet<TriggerWrapper> timeTriggers中的数据。
+			timeTriggers.remove(tw);
+
+			// 移除孤立的Job。
+			if (removeOrphanedJob) {
+				// 获取Trigger对应的Job。
+				JobWrapper jw = jobsByKey.get(tw.jobKey);
+				
+				// 获取JobStore中Trigger对应的Job与给定的Job一致的Trigger。
+				List<OperableTrigger> trigs = getTriggersForJob(tw.jobKey);
+				
+				// 如果对应的Trigger不存在，说明删除的Trigger对应的Job被孤立了，把Job也删除，
+				// isDurable()：用于确定Job被孤立以后，是否保留存储，默认为false。
+				if ((trigs == null || trigs.size() == 0) && !jw.jobDetail.isDurable()) {
+					
+					// 删除Job。
+					if (removeJob(jw.key)) {
+					
+						// 通知Scheduler监听器，Job已经删除。
+						signaler.notifySchedulerListenersJobDeleted(jw.key);
+					}
+				}
+			}
+		}
+	}
+
+	return found;
+}
+
+
+/**
+ * 获取JobStore中Trigger对应的Job与给定的Job一致的Trigger。
+ */
+location：RAMJobStore
+public List<OperableTrigger> getTriggersForJob(JobKey jobKey) {
+	ArrayList<OperableTrigger> trigList = new ArrayList<OperableTrigger>();
+
+	synchronized (lock) {
+	
+		// 遍历triggers。
+		for (TriggerWrapper tw : triggers) {
+			
+			// 判断Trigger中Job与给定的Job是否是一样的，如果一样添加到List。
+			if (tw.jobKey.equals(jobKey)) {
+				trigList.add((OperableTrigger) tw.trigger.clone());
+			}
+		}
+	}
+
+	return trigList;
+}
+
+/**
+ * 通知Scheduler监听器，Job已经删除。
+ */
+location：SchedulerSignalerImpl
+public void notifySchedulerListenersJobDeleted(JobKey jobKey) {
+	sched.notifySchedulerListenersJobDeleted(jobKey);
+}
+
+/**
+ * 通知Scheduler监听器，Job已经删除。
+ */
+location：QuartzScheduler
+public void notifySchedulerListenersJobDeleted(JobKey jobKey) {
+
+	// 获取监听器。
+	List<SchedulerListener> schedListeners = buildSchedulerListenerList();
+
+	// 调用监听器的jobDeleted操作。
+	for(SchedulerListener sl: schedListeners) {
+		try {
+			sl.jobDeleted操作。(jobKey);
+		} catch (Exception e) {
+			getLog().error("Error while notifying SchedulerListener of JobAdded.", e);
+		}
+	}
+}
+
+/**
+ * 通知QuartzSchedulerThread
+ */
+location：QuartzScheduler
+protected void notifySchedulerThread(long candidateNewNextFireTime) {
+	// 当Scheduler发生改变，是否需要通知，默认为false。
+	if (isSignalOnSchedulingChange()) {
+		signaler.signalSchedulingChange(candidateNewNextFireTime);
+	}
+}
+
+
+/**
+ * 通过QuartzSchedulerThread进行调用。阿
+ */
+location：SchedulerSignalerImpl
+public void signalSchedulingChange(long candidateNewNextFireTime) {
+	schedThread.signalSchedulingChange(candidateNewNextFireTime);
+}
+
+
+/**
+ * 设置signaled为true；signaledNextFireTime的时间。
+ * 并通知sigLock。
+ */
+location：QuartzSchedulerThread
+public void signalSchedulingChange(long candidateNewNextFireTime) {
+	synchronized(sigLock) {
+		signaled = true;
+		signaledNextFireTime = candidateNewNextFireTime;
+		sigLock.notifyAll();
+	}
+}
+
+
+/**
+ * 通知Scheduler监听器，当JobDetail被放入Scheduler中时，jobScheduled(..)被调用。
+ */
+public void notifySchedulerListenersSchduled(Trigger trigger) {
+	// 获取定时器中的SchedulerLinstener。
+	List<SchedulerListener> schedListeners = buildSchedulerListenerList();
+
+	// 依次通知SchedulerLinstener，并调用SchedulerLinstener的jobScheduled方法。
+	for(SchedulerListener sl: schedListeners) {
+		try {
+			sl.jobScheduled(trigger);
+		} catch (Exception e) {
+			getLog().error("Error while notifying SchedulerListener of scheduled job." + "  Triger=" + trigger.getKey(), e);
+		}
+	}
+}
+
+
+
+###############################################################################################
+###########################      	   	启动Quartz      #######################################
+###############################################################################################
+location：StdScheduler
+public void start() throws SchedulerException {
+	sched.start();
+}
+
+/**
+ * 启动QuartzScheduler的线程，这些线程触发Triggers。
+ */
+location：QuartzScheduler
+public void start() throws SchedulerException {
+
+	// 判断QuartzScheduler的状态是否是停止或者是暂停状态。
+	if (shuttingDown|| closed) {
+		throw new SchedulerException("The Scheduler cannot be restarted after shutdown() has been called.");
+	}
+
+	// 通知Scheduler监听器，定时任务开始启动。
+	notifySchedulerListenersStarting();
+
+	// initialStart：初始化日期，默认为null。
+	if (initialStart == null) {
+		initialStart = new Date();
+		// RAMJobStore的schedulerStarted什么都没有做。
+		this.resources.getJobStore().schedulerStarted(); 
+
+		// 启动插件。
+		startPlugins();
+	} else {
+		resources.getJobStore().schedulerResumed();
+	}
+
+	// 切换暂停状态为false，即QuartzSchedulerThread为运行状态。
+	schedThread.togglePause(false);
+
+	getLog().info("Scheduler " + resources.getUniqueIdentifier() + " started.");
+	
+	// 通知Scheduler监听器，定时任务已经启动。
+	notifySchedulerListenersStarted();
+}
+
+/**
+ * 通知Scheduler监听器，定时任务开始启动。
+ */
+location：QuartzScheduler
+public void notifySchedulerListenersStarting() {
+	List<SchedulerListener> schedListeners = buildSchedulerListenerList();
+
+	for (SchedulerListener sl : schedListeners) {
+		try {
+			sl.schedulerStarting();
+		} catch (Exception e) {
+			getLog().error("Error while notifying SchedulerListener of startup.", e);
+		}
+	}
+}
+
+location：RAMJobStore
+public void schedulerStarted() {
+        
+}
+
+/**
+ * 在初始化QuartzSchedulerThread，paused（暂停状态，用于判断是否已经启动的）为true，这个时候QuartzSchedulerThread是暂停的，
+ * 如果是启动Quartz，那个pause就位false，设置暂停状态。
+ */
+location：QuartzSchedulerThread
+void togglePause(boolean pause) {
+	synchronized (sigLock) {
+		paused = pause;
+
+		if (paused) {
+			signalSchedulingChange(0);
+		} else {
+			sigLock.notifyAll();
+		}
+	}
 }

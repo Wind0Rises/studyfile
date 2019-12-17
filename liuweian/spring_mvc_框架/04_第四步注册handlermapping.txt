@@ -1,0 +1,284 @@
+
+
+
+############################################
+##################    第四步   #############
+############################################
+初始化第四步：初始化HandlerMapping
+private void initHandlerMappings(ApplicationContext context) {
+	this.handlerMappings = null;
+
+	// detectAllHandlerMappings默认为true
+	if (this.detectAllHandlerMappings) {
+		// 查找所有的HandlerMappings在ApplicationContext，包含祖先context的
+		Map<String, HandlerMapping> matchingBeans = BeanFactoryUtils.beansOfTypeIncludingAncestors(context, HandlerMapping.class, true, false);
+		
+		if (!matchingBeans.isEmpty()) {
+			this.handlerMappings = new ArrayList<HandlerMapping>(matchingBeans.values());
+			// 按顺序排列HandlerMappings。
+			AnnotationAwareOrderComparator.sort(this.handlerMappings);
+		}
+	} else {
+		try {
+			HandlerMapping hm = context.getBean(HANDLER_MAPPING_BEAN_NAME, HandlerMapping.class);
+			this.handlerMappings = Collections.singletonList(hm);
+		} catch (NoSuchBeanDefinitionException ex) {
+			// 忽略，最后将添加一个默认的HandlerMapping
+		}
+	}
+
+	// 如果没有找到其他映射，请确保我们至少有一个HandlerMapping，通过注册默认的HandlerMapping。
+	// 默认初始化两个BeanNameUrlHandlerMapping和DefaultAnnotationHandlerMapping两个HandlerMapping
+	if (this.handlerMappings == null) {
+		this.handlerMappings = getDefaultStrategies(context, HandlerMapping.class);
+		if (logger.isDebugEnabled()) {
+			logger.debug("No HandlerMappings found in servlet '" + getServletName() + "': using default");
+		}
+	}
+}
+
+
+
+
+
+@SuppressWarnings("unchecked")
+protected <T> List<T> getDefaultStrategies(ApplicationContext context, Class<T> strategyInterface) {
+
+	String key = strategyInterface.getName();
+	// 默认BeanNameUrlHandlerMapping和DefaultAnnotationHandlerMapping
+	String value = defaultStrategies.getProperty(key);
+	
+	if (value != null) {
+		String[] classNames = StringUtils.commaDelimitedListToStringArray(value);
+		List<T> strategies = new ArrayList<T>(classNames.length);
+		for (String className : classNames) {
+			try {
+				Class<?> clazz = ClassUtils.forName(className, DispatcherServlet.class.getClassLoader());
+				Object strategy = createDefaultStrategy(context, clazz);
+				strategies.add((T) strategy);
+			} catch (ClassNotFoundException ex) {
+				throw new BeanInitializationException("Could not find DispatcherServlet's default strategy class [" + className + "] for interface [" + key + "]", ex);
+			} catch (LinkageError err) {
+				throw new BeanInitializationException("Error loading DispatcherServlet's default strategy class [" + className + "] for interface [" + key + "]: problem with class file or dependent class", err);
+			}
+		}
+		return strategies;
+	} else {
+		return new LinkedList<T>();
+	}
+}
+
+protected Object createDefaultStrategy(ApplicationContext context, Class<?> clazz) {
+	return context.getAutowireCapableBeanFactory().createBean(clazz);
+}
+
+
+public <T> T createBean(Class<T> beanClass) throws BeansException {
+	// 使用原型bean定义，以避免将bean注册为依赖bean。
+	RootBeanDefinition bd = new RootBeanDefinition(beanClass);
+	bd.setScope(SCOPE_PROTOTYPE);
+	bd.allowCaching = ClassUtils.isCacheSafe(beanClass, getBeanClassLoader());
+	return (T) createBean(beanClass.getName(), bd, null);
+}
+
+// 创建Bean
+location：AbstractAutowireCapableBeanFactory
+protected Object createBean(String beanName, RootBeanDefinition mbd, Object[] args) throws BeanCreationException {
+	if (logger.isDebugEnabled()) {
+		logger.debug("Creating instance of bean '" + beanName + "'");
+	}
+	RootBeanDefinition mbdToUse = mbd;
+
+	// Make sure bean class is actually resolved at this point, and
+	// clone the bean definition in case of a dynamically resolved Class
+	// which cannot be stored in the shared merged bean definition.
+	Class<?> resolvedClass = resolveBeanClass(mbd, beanName);
+	if (resolvedClass != null && !mbd.hasBeanClass() && mbd.getBeanClassName() != null) {
+		mbdToUse = new RootBeanDefinition(mbd);
+		mbdToUse.setBeanClass(resolvedClass);
+	}
+
+	// Prepare method overrides.
+	try {
+		mbdToUse.prepareMethodOverrides();
+	}
+	catch (BeanDefinitionValidationException ex) {
+		throw new BeanDefinitionStoreException(mbdToUse.getResourceDescription(),
+				beanName, "Validation of method overrides failed", ex);
+	}
+
+	try {
+		// Give BeanPostProcessors a chance to return a proxy instead of the target bean instance.
+		Object bean = resolveBeforeInstantiation(beanName, mbdToUse);
+		if (bean != null) {
+			return bean;
+		}
+	}
+	catch (Throwable ex) {
+		throw new BeanCreationException(mbdToUse.getResourceDescription(), beanName,
+				"BeanPostProcessor before instantiation of bean failed", ex);
+	}
+
+	Object beanInstance = doCreateBean(beanName, mbdToUse, args);
+	if (logger.isDebugEnabled()) {
+		logger.debug("Finished creating instance of bean '" + beanName + "'");
+	}
+	return beanInstance;
+}
+
+
+protected Object doCreateBean(final String beanName, final RootBeanDefinition mbd, final Object[] args) throws BeanCreationException {
+
+	// 实例化Bean
+	BeanWrapper instanceWrapper = null;
+	if (mbd.isSingleton()) {
+		instanceWrapper = this.factoryBeanInstanceCache.remove(beanName);
+	}
+	if (instanceWrapper == null) {
+		instanceWrapper = createBeanInstance(beanName, mbd, args);
+	}
+	final Object bean = (instanceWrapper != null ? instanceWrapper.getWrappedInstance() : null);
+	Class<?> beanType = (instanceWrapper != null ? instanceWrapper.getWrappedClass() : null);
+	mbd.resolvedTargetType = beanType;
+
+	// Allow post-processors to modify the merged bean definition.
+	synchronized (mbd.postProcessingLock) {
+		if (!mbd.postProcessed) {
+			try {
+				applyMergedBeanDefinitionPostProcessors(mbd, beanType, beanName);
+			}
+			catch (Throwable ex) {
+				throw new BeanCreationException(mbd.getResourceDescription(), beanName,
+						"Post-processing of merged bean definition failed", ex);
+			}
+			mbd.postProcessed = true;
+		}
+	}
+
+	// Eagerly cache singletons to be able to resolve circular references
+	// even when triggered by lifecycle interfaces like BeanFactoryAware.
+	boolean earlySingletonExposure = (mbd.isSingleton() && this.allowCircularReferences &&
+			isSingletonCurrentlyInCreation(beanName));
+	if (earlySingletonExposure) {
+		if (logger.isDebugEnabled()) {
+			logger.debug("Eagerly caching bean '" + beanName +
+					"' to allow for resolving potential circular references");
+		}
+		addSingletonFactory(beanName, new ObjectFactory<Object>() {
+			@Override
+			public Object getObject() throws BeansException {
+				return getEarlyBeanReference(beanName, mbd, bean);
+			}
+		});
+	}
+
+	// Initialize the bean instance.
+	Object exposedObject = bean;
+	try {
+		populateBean(beanName, mbd, instanceWrapper);
+		if (exposedObject != null) {
+			exposedObject = initializeBean(beanName, exposedObject, mbd);
+		}
+	}
+	catch (Throwable ex) {
+		if (ex instanceof BeanCreationException && beanName.equals(((BeanCreationException) ex).getBeanName())) {
+			throw (BeanCreationException) ex;
+		}
+		else {
+			throw new BeanCreationException(
+					mbd.getResourceDescription(), beanName, "Initialization of bean failed", ex);
+		}
+	}
+
+	if (earlySingletonExposure) {
+		Object earlySingletonReference = getSingleton(beanName, false);
+		if (earlySingletonReference != null) {
+			if (exposedObject == bean) {
+				exposedObject = earlySingletonReference;
+			}
+			else if (!this.allowRawInjectionDespiteWrapping && hasDependentBean(beanName)) {
+				String[] dependentBeans = getDependentBeans(beanName);
+				Set<String> actualDependentBeans = new LinkedHashSet<String>(dependentBeans.length);
+				for (String dependentBean : dependentBeans) {
+					if (!removeSingletonIfCreatedForTypeCheckOnly(dependentBean)) {
+						actualDependentBeans.add(dependentBean);
+					}
+				}
+				if (!actualDependentBeans.isEmpty()) {
+					throw new BeanCurrentlyInCreationException(beanName,
+							"Bean with name '" + beanName + "' has been injected into other beans [" +
+							StringUtils.collectionToCommaDelimitedString(actualDependentBeans) +
+							"] in its raw version as part of a circular reference, but has eventually been " +
+							"wrapped. This means that said other beans do not use the final version of the " +
+							"bean. This is often the result of over-eager type matching - consider using " +
+							"'getBeanNamesOfType' with the 'allowEagerInit' flag turned off, for example.");
+				}
+			}
+		}
+	}
+
+	// Register bean as disposable.
+	try {
+		registerDisposableBeanIfNecessary(beanName, bean, mbd);
+	}
+	catch (BeanDefinitionValidationException ex) {
+		throw new BeanCreationException(
+				mbd.getResourceDescription(), beanName, "Invalid destruction signature", ex);
+	}
+
+	return exposedObject;
+}
+
+
+
+
+################################## 注册过程  ##########################################
+################################## 注册过程  ##########################################
+location：AbstractUrlHandlerMapping
+protected void registerHandler(String[] urlPaths, String beanName) throws BeansException, IllegalStateException {
+	Assert.notNull(urlPaths, "URL path array must not be null");
+	for (String urlPath : urlPaths) {
+		registerHandler(urlPath, beanName);
+	}
+}
+
+location：AbstractUrlHandlerMapping
+protected void registerHandler(String urlPath, Object handler) throws BeansException, IllegalStateException {
+	Assert.notNull(urlPath, "URL path must not be null");
+	Assert.notNull(handler, "Handler object must not be null");
+	Object resolvedHandler = handler;
+
+	// Eagerly resolve handler if referencing singleton via name.
+	if (!this.lazyInitHandlers && handler instanceof String) {
+		String handlerName = (String) handler;
+		if (getApplicationContext().isSingleton(handlerName)) {
+			resolvedHandler = getApplicationContext().getBean(handlerName);
+		}
+	}
+
+	Object mappedHandler = this.handlerMap.get(urlPath);
+	if (mappedHandler != null) {
+		if (mappedHandler != resolvedHandler) {
+			throw new IllegalStateException(
+					"Cannot map " + getHandlerDescription(handler) + " to URL path [" + urlPath +
+					"]: There is already " + getHandlerDescription(mappedHandler) + " mapped.");
+		}
+	} else {
+		if (urlPath.equals("/")) {
+			if (logger.isInfoEnabled()) {
+				logger.info("Root mapping to " + getHandlerDescription(handler));
+			}
+			setRootHandler(resolvedHandler);
+		} else if (urlPath.equals("/*")) {
+			if (logger.isInfoEnabled()) {
+				logger.info("Default mapping to " + getHandlerDescription(handler));
+			}
+			setDefaultHandler(resolvedHandler);
+		} else {
+			this.handlerMap.put(urlPath, resolvedHandler);
+			if (logger.isInfoEnabled()) {
+				logger.info("Mapped URL path [" + urlPath + "] onto " + getHandlerDescription(handler));
+			}
+		}
+	}
+}
