@@ -14,9 +14,11 @@ public class Constants {
 
     }
 
-    public final static String RESOURCES_PATH = "/tomcat-002-basisservlet/src/main/resources";
+    public final static int SERVER_PORT = 8878;
 
-    public final static String JAVA_PATH = "/tomcat-002-basisservlet/src/main/java";
+    public final static String RESOURCES_PATH = "/tomcat-003-connector/src/main/resources";
+
+    public final static String JAVA_PATH = "/tomcat-003-connector/src/main/java";
 
     public final static String DEFAULT_ROOT_PATH = "webroot";
 

@@ -8,10 +8,7 @@ import java.io.InputStream;
 import java.io.UnsupportedEncodingException;
 import java.net.Socket;
 import java.security.Principal;
-import java.util.Collection;
-import java.util.Enumeration;
-import java.util.Locale;
-import java.util.Map;
+import java.util.*;
 
 /**
  * 把一个socket封装成一个request。
@@ -20,31 +17,66 @@ import java.util.Map;
  */
 public class Request implements ServletRequest {
 
+    private Map<String, String> headers = new HashMap<>(64);
+
     private InputStream inputStream;
 
     private String uri;
 
+    private String method;
+
+    private String scheme;
+
+    private boolean specifyReq;
+
     public Request(InputStream inputStream) {
         this.inputStream = inputStream;
+        specifyReq = false;
+        parse();
     }
 
     /**
      * 解析Socket的InputStream。
      */
-    public void parse() {
-        StringBuffer request = new StringBuffer();
-        byte[] buffer = new byte[2048];
+    private void parse() {
+        StringBuffer requestString = new StringBuffer();
+
         try {
             // 读取数据。
-            int ch;
+            int available = inputStream.available();
+
+            if(available == 0) {
+                specifyReq = true;
+                return;
+            }
+
+            byte[] buffer = new byte[available];
+
+            int readLength = 0;
+            int readResult;
 
             // 如果第一次buffer没有读满，第二次进来就会一直卡着。
-            while ((ch = inputStream.read(buffer)) != -1) {
-                String result = new String(buffer, 0, ch, "UTF-8");
-                request.append(result);
-                if (ch < 2048) {
+            while((readResult = inputStream.read(buffer)) != -1) {
+                // 保存读取的数据。
+                String readString = new String(buffer, 0, readResult);
+                requestString.append(readString);
+
+                // 判断下一步。
+                readLength += readResult;
+                if (readLength < available) {
+                    continue;
+                } else if (readLength == available) {
                     break;
+                } else {
+                    available = inputStream.available();
+                    if (available <= readLength) {
+                        break;
+                    }
                 }
+            }
+
+            if (inputStream != null) {
+                inputStream.close();
             }
 
         } catch (IOException e) {
@@ -52,28 +84,48 @@ public class Request implements ServletRequest {
             e.printStackTrace();
         }
 
-        System.out.println("【服务端】获取的内容: " + request.toString());
-        uri = parseUri(request);
-        System.out.println("【服务端】请求的URI: " + uri);
+        System.out.println("【服务端】获取的内容: " );
+        System.out.println(requestString.toString());
+
+
+        parseHeaderLine(requestString.toString());
+        System.out.println("【服务端】方法类型： " + method + "；请求的URI:" + uri + ";协议：" + scheme);
+
+        parseHeader(requestString.toString());
+    }
+
+
+    /**
+     * 解析请求行
+     * @param requestString
+     */
+    private void parseHeaderLine(String requestString) {
+        String headerLine = requestString.substring(0, requestString.indexOf(System.getProperty("line.separator")));
+        String[] headerLineParameter = headerLine.split(" ");
+        method = headerLineParameter[0];
+        uri = headerLineParameter[1];
+        scheme = headerLineParameter[2];
     }
 
     /**
-     * 从socket的inputStream读取的内容中获取URI。
+     * 解析请求头。
+     * @param processString
      */
-    private String parseUri(StringBuffer request) {
-        int index1;
-        int index2;
+    private void parseHeader(String processString) {
+        String[] result = processString.split(System.getProperty("line.separator"));
 
-        index1 = request.indexOf(" ");
-        if (index1 != -1) {
-            index2 = request.indexOf(" ", index1 + 1);
+        for (int i = 0; i < result.length; i++) {
+            if (i == 0) {
+                continue;
+            }
 
-            if (index2 > index1) {
-                return request.substring(index1 + 1, index2);
+            String header = result[i];
+
+            if (header != null) {
+                String[] preHeader = header.split(":");
+                headers.put(preHeader[0].trim(), preHeader[1].trim());
             }
         }
-
-        return null;
     }
 
     /**
@@ -83,15 +135,22 @@ public class Request implements ServletRequest {
         return uri;
     }
 
+    public boolean isSpecifyReq() {
+        return specifyReq;
+    }
+
+    public void setSpecifyReq(boolean specifyReq) {
+        this.specifyReq = specifyReq;
+    }
 
     @Override
     public Object getAttribute(String name) {
-        return null;
+        return headers.get(name);
     }
 
     @Override
     public Enumeration<String> getAttributeNames() {
-        return null;
+        return Collections.enumeration(headers.keySet());
     }
 
     @Override
@@ -121,7 +180,7 @@ public class Request implements ServletRequest {
 
     @Override
     public ServletInputStream getInputStream() throws IOException {
-        return null;
+        return (ServletInputStream) inputStream;
     }
 
     @Override

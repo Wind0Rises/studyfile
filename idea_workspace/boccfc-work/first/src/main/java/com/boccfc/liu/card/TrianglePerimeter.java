@@ -13,6 +13,7 @@ public class TrianglePerimeter {
         int result = -1;
 
         Arrays.sort(arrays);
+
         for (int i = arrays.length -3; i >= 0; i--) {
             int a = arrays[i];
             int b = arrays[i + 1];
