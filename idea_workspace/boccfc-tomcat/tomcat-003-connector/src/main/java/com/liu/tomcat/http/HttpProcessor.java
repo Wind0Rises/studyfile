@@ -67,6 +67,9 @@ public class HttpProcessor {
         } catch (IOException e) {
             e.printStackTrace();
         }
+    }
+
+    private void parseRequest(InputStream inputStream, OutputStream outputStream) {
 
     }
 }
