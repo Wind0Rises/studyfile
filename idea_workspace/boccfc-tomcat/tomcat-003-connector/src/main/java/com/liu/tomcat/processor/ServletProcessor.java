@@ -7,7 +7,6 @@ import com.sun.org.apache.bcel.internal.classfile.ConstantString;
 
 import javax.servlet.Servlet;
 import javax.servlet.ServletException;
-import javax.servlet.ServletResponse;
 import java.io.File;
 import java.io.IOException;
 import java.net.MalformedURLException;

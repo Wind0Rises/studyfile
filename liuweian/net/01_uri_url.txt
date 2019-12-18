@@ -1,0 +1,19 @@
+URI：表示统一资源标识符（Uniform Resource Identifier）引用。该类被final修饰，此类的实例是不可变的。
+	URI类提供了用于从其组件或通过解析其字符串形式创建URI实例的构造函数，用于访问实例的各个组件的方法以及用于规范化，解析和相对化URI实例的方法。 
+	
+当前支持的模式：
+	data：链接中直接包含经过BASE64编码的数据
+	file：本地磁盘上的文件。
+	ftp：FTP服务器。
+	http：使用超文本传输协议。
+	mailto：电子邮件的地址。
+	magnet：可以通过对等网络(端对端P2P，如BitTorrent)下载的资源。
+	telnet：基于Telnet的服务的连接。
+	urn：统一资源名(Uniform Resource Name)。
+	
+	
+	
+
+	
+URL：统一资源位置（Uniform Resource Location），际上，URL就是一种特殊的URI，它除了标识一个资源，还会为资源提供一个特定的网络位置，客户端可以通
+	过它来获取URL对应的资源。

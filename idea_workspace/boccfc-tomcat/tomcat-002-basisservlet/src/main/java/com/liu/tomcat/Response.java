@@ -1,18 +1,22 @@
 package com.liu.tomcat;
 
-import javax.servlet.ServletOutputStream;
+import com.liu.tomcat.util.Constants;
+
+import javax.servlet.*;
 import javax.servlet.http.Cookie;
 import javax.servlet.http.HttpServletResponse;
 import java.io.*;
 import java.net.Socket;
 import java.util.Collection;
+import java.util.Enumeration;
 import java.util.Locale;
+import java.util.Map;
 
 /**
  * 把一个socket的OutputStream封装成一个Response对应。
  * @author Liuweian
  */
-public class Response implements HttpServletResponse {
+public class Response implements ServletResponse {
 
     private OutputStream outputStream;
 
@@ -43,7 +47,7 @@ public class Response implements HttpServletResponse {
 
         try {
             if (request.getUri() != null) {
-                File file = new File(HttpServer.WEB_ROOT, request.getUri());
+                File file = new File(Constants.DEFAULT_WEB_ROOT, request.getUri());
                 writer = new PrintWriter(outputStream, true);
                 if (file.exists()) {
                     fis = new FileInputStream(file);
@@ -87,111 +91,6 @@ public class Response implements HttpServletResponse {
     }
 
     @Override
-    public void addCookie(Cookie cookie) {
-
-    }
-
-    @Override
-    public boolean containsHeader(String name) {
-        return false;
-    }
-
-    @Override
-    public String encodeURL(String url) {
-        return null;
-    }
-
-    @Override
-    public String encodeRedirectURL(String url) {
-        return null;
-    }
-
-    @Override
-    public String encodeUrl(String url) {
-        return null;
-    }
-
-    @Override
-    public String encodeRedirectUrl(String url) {
-        return null;
-    }
-
-    @Override
-    public void sendError(int sc, String msg) throws IOException {
-
-    }
-
-    @Override
-    public void sendError(int sc) throws IOException {
-
-    }
-
-    @Override
-    public void sendRedirect(String location) throws IOException {
-
-    }
-
-    @Override
-    public void setDateHeader(String name, long date) {
-
-    }
-
-    @Override
-    public void addDateHeader(String name, long date) {
-
-    }
-
-    @Override
-    public void setHeader(String name, String value) {
-
-    }
-
-    @Override
-    public void addHeader(String name, String value) {
-
-    }
-
-    @Override
-    public void setIntHeader(String name, int value) {
-
-    }
-
-    @Override
-    public void addIntHeader(String name, int value) {
-
-    }
-
-    @Override
-    public void setStatus(int sc) {
-
-    }
-
-    @Override
-    public void setStatus(int sc, String sm) {
-
-    }
-
-    @Override
-    public int getStatus() {
-        return 0;
-    }
-
-    @Override
-    public String getHeader(String name) {
-        return null;
-    }
-
-    @Override
-    public Collection<String> getHeaders(String name) {
-        return null;
-    }
-
-    @Override
-    public Collection<String> getHeaderNames() {
-        return null;
-    }
-
-    @Override
     public String getCharacterEncoding() {
         return null;
     }
@@ -206,11 +105,6 @@ public class Response implements HttpServletResponse {
         return null;
     }
 
-    /**
-     *
-     *
-     */
-    @Override
     public PrintWriter getWriter() throws IOException {
         // boolean是否开始autoFlush。
         //      如果为true，表示对println()方法的任何调用都会刷新输出，但是调用print()方法不会输出。
@@ -277,4 +171,6 @@ public class Response implements HttpServletResponse {
     public Locale getLocale() {
         return null;
     }
+
+
 }

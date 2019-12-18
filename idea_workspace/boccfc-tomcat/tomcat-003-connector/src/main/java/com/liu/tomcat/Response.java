@@ -1,88 +1,101 @@
 package com.liu.tomcat;
 
+import com.liu.tomcat.util.Constants;
+
 import javax.servlet.*;
-import javax.servlet.http.*;
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.UnsupportedEncodingException;
+import javax.servlet.http.Cookie;
+import javax.servlet.http.HttpServletResponse;
+import java.io.*;
 import java.net.Socket;
-import java.security.Principal;
 import java.util.Collection;
 import java.util.Enumeration;
 import java.util.Locale;
 import java.util.Map;
 
 /**
- * 把一个socket封装成一个request。
- * 从socket的inputStream中获取对应的信息。
+ * 把一个socket的OutputStream封装成一个Response对应。
  * @author Liuweian
  */
-public class Request implements ServletRequest {
+public class Response implements ServletRequest {
 
-    private InputStream inputStream;
+    private OutputStream outputStream;
 
-    private String uri;
+    private Request request;
 
-    public Request(InputStream inputStream) {
-        this.inputStream = inputStream;
+    private PrintWriter writer;
+
+
+    Response(OutputStream outputStream) {
+        this.outputStream = outputStream;
+    }
+
+    public Request getRequest() {
+        return request;
+    }
+
+    public void setRequest(Request request) {
+        this.request = request;
     }
 
     /**
-     * 解析Socket的InputStream。
+     * 向OutputStream对象中写入数据，
      */
-    public void parse() {
-        StringBuffer request = new StringBuffer();
-        byte[] buffer = new byte[2048];
-        try {
-            // 读取数据。
-            int ch;
+    public void sendStaticResource() throws IOException {
+        byte[] buffer = new byte[1024];
+        FileInputStream fis = null;
+        PrintWriter writer = null;
 
-            // 如果第一次buffer没有读满，第二次进来就会一直卡着。
-            while ((ch = inputStream.read(buffer)) != -1) {
-                String result = new String(buffer, 0, ch, "UTF-8");
-                request.append(result);
-                if (ch < 2048) {
-                    break;
+        try {
+            if (request.getUri() != null) {
+                File file = new File(Constants.DEFAULT_WEB_ROOT, request.getUri());
+                writer = new PrintWriter(outputStream, true);
+                if (file.exists()) {
+                    fis = new FileInputStream(file);
+                    int ch = fis.read(buffer, 0, 1024);
+
+                    if (!request.getUri().contains(".json")) {
+                        String html = "http/1.1 200 ok\n" +"\n\n";
+                        writer.println(html);
+                    }
+
+                    while (ch != -1) {
+                        String readResult = new String(buffer, 0, ch, "UTF-8");
+                        writer.println(readResult);
+                        ch = fis.read(buffer, 0, 1024);
+                    }
+                } else {
+                    String errorMsg = "You request file not find, Please check it.";
+                    writer.write(errorMsg);
                 }
             }
 
-        } catch (IOException e) {
-            System.out.println("#####################");
+        } catch (FileNotFoundException e) {
             e.printStackTrace();
-        }
+        } catch (IOException e) {
+            e.printStackTrace();
+        } finally {
+            if (fis != null) {
+                try {
+                    fis.close();
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }
 
-        System.out.println("【服务端】获取的内容: " + request.toString());
-        uri = parseUri(request);
-        System.out.println("【服务端】请求的URI: " + uri);
-    }
-
-    /**
-     * 从socket的inputStream读取的内容中获取URI。
-     */
-    private String parseUri(StringBuffer request) {
-        int index1;
-        int index2;
-
-        index1 = request.indexOf(" ");
-        if (index1 != -1) {
-            index2 = request.indexOf(" ", index1 + 1);
-
-            if (index2 > index1) {
-                return request.substring(index1 + 1, index2);
+            if (writer != null) {
+                writer.close();
             }
         }
 
-        return null;
+
     }
 
-    /**
-     * 获取URI。
-     */
-    public String getUri() {
-        return uri;
+    public PrintWriter getWriter() throws IOException {
+        // boolean是否开始autoFlush。
+        //      如果为true，表示对println()方法的任何调用都会刷新输出，但是调用print()方法不会输出。
+        writer = new PrintWriter(outputStream, true);
+        return writer;
     }
-
 
     @Override
     public Object getAttribute(String name) {

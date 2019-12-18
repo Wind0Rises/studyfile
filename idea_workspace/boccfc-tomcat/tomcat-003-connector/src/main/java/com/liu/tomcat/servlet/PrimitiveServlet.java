@@ -1,4 +1,4 @@
-package com.liu.tomcat;
+package com.liu.tomcat.servlet;
 
 import javax.servlet.*;
 import java.io.IOException;
@@ -7,7 +7,7 @@ public class PrimitiveServlet implements Servlet {
 
     @Override
     public void init(ServletConfig config) throws ServletException {
-
+        System.out.println("PrimitiveServlet Servlet...init");
     }
 
     @Override
@@ -17,7 +17,7 @@ public class PrimitiveServlet implements Servlet {
 
     @Override
     public void service(ServletRequest req, ServletResponse res) throws ServletException, IOException {
-
+        System.out.println("##########################  PrimitiveServlet Servlet...service  #########################");
     }
 
     @Override
