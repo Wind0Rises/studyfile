@@ -1,0 +1,1083 @@
+public static void main(String args[]) {
+
+	// private static Bootstrap daemon = null;
+	// 再初始化完成之前不能设置daemon。
+	if (daemon == null) {
+		Bootstrap bootstrap = new Bootstrap();
+		try {
+			// 初始化操作，创建ClassLoader和Catalina实例，把创建的Catalina实例对象设置给Bootstrap的catalinaDaemon属性。
+			bootstrap.init();
+		} catch (Throwable t) {
+			handleThrowable(t);
+			t.printStackTrace();
+			return;
+		}
+		
+		// 把bootstrap设置给daemon属性。
+		daemon = bootstrap;
+	} else {
+		Thread.currentThread().setContextClassLoader(daemon.catalinaLoader);
+	}
+
+	try {
+		String command = "start";
+		if (args.length > 0) {
+			command = args[args.length - 1];
+		}
+
+		// 根据不同的命令进行不同的操作。
+		if (command.equals("startd")) {
+			args[args.length - 1] = "start";
+			daemon.load(args);
+			daemon.start();
+		} else if (command.equals("stopd")) {
+			args[args.length - 1] = "stop";
+			daemon.stop();
+		} else if (command.equals("start")) {
+			daemon.setAwait(true);
+			daemon.load(args);
+			daemon.start();
+			if (null == daemon.getServer()) {
+				System.exit(1);
+			}
+		} else if (command.equals("stop")) {
+			daemon.stopServer(args);
+		} else if (command.equals("configtest")) {
+			daemon.load(args);
+			if (null == daemon.getServer()) {
+				System.exit(1);
+			}
+			System.exit(0);
+		} else {
+			log.warn("Bootstrap: command \"" + command + "\" does not exist.");
+		}
+	} catch (Throwable t) {
+		if (t instanceof InvocationTargetException && t.getCause() != null) {
+			t = t.getCause();
+		}
+		handleThrowable(t);
+		t.printStackTrace();
+		System.exit(1);
+	}
+
+}
+
+
+/**
+ * 创建ClassLoader，并加载各种类。然后创建Catalina实例对象，并调用Catalina的setParentClassLoader方法。
+ * 这个方法也就是一个初始化过程。
+ */
+location：Bootstrap
+public void init() throws Exception {
+
+	// 创建ClassLoader。
+	initClassLoaders();
+
+	// 把ClassLoader设置给线程。
+	Thread.currentThread().setContextClassLoader(catalinaLoader);
+
+	// classLoader加载对应的文件。
+	SecurityClassLoad.securityClassLoad(catalinaLoader);
+
+	if (log.isDebugEnabled()) {
+		log.debug("Loading startup class");
+	}
+	
+	// 获取Catalina实例对象。
+	Class<?> startupClass = catalinaLoader.loadClass("org.apache.catalina.startup.Catalina");
+	Object startupInstance = startupClass.getConstructor().newInstance();
+
+	// Set the shared extensions class loader
+	if (log.isDebugEnabled()) {
+		log.debug("Setting startup class properties");
+	}
+	
+	String methodName = "setParentClassLoader";
+	
+	Class<?> paramTypes[] = new Class[1];
+	paramTypes[0] = Class.forName("java.lang.ClassLoader");
+	
+	Object paramValues[] = new Object[1];
+	paramValues[0] = sharedLoader;
+	
+	// 调用Catalina.setParentClassLoader()方法。
+	Method method = startupInstance.getClass().getMethod(methodName, paramTypes);
+	method.invoke(startupInstance, paramValues);
+
+	catalinaDaemon = startupInstance;
+}
+
+/**
+ * 创建ClassLoader。
+ */
+location：Bootstrap
+private void initClassLoaders() {
+	try {
+		// 创建类加载器。默认为URLClassLoader。
+		commonLoader = createClassLoader("common", null);
+		
+		if( commonLoader == null ) {
+			commonLoader=this.getClass().getClassLoader();
+		}
+		
+		// 创建一个类加载器。更具server.loader配置信息。
+		catalinaLoader = createClassLoader("server", commonLoader);
+		
+		// 创建一个类加载器。更具shared.loader配置信息。
+		sharedLoader = createClassLoader("shared", commonLoader);
+	} catch (Throwable t) {
+		handleThrowable(t);
+		log.error("Class loader creation threw exception", t);
+		System.exit(1);
+	}
+}
+
+/**
+ * 从配置信息中，获取common.loader对应的属性值，更具属性值创建Repository，并创建一个ClassLoader。
+ */
+location：Bootstrap
+private ClassLoader createClassLoader(String name, ClassLoader parent) throws Exception {
+
+	// 从配置信息中获取common.loader信息，主要是加载jar的位置。
+	String value = CatalinaProperties.getProperty(name + ".loader");
+	if ((value == null) || (value.equals(""))) {
+		return parent;
+	}
+
+	// 替换${catalina.base}等值，换为具体的值。
+	value = replace(value);
+
+	List<Repository> repositories = new ArrayList<>();
+
+	// 对"\"进行替换，和对整体字符串进行分割。
+	String[] repositoryPaths = getPaths(value);
+
+	// 根据path构建Repository。
+	for (String repository : repositoryPaths) {
+		try {
+			@SuppressWarnings("unused")
+			URL url = new URL(repository);
+			repositories.add(new Repository(repository, RepositoryType.URL));
+			continue;
+		} catch (MalformedURLException e) {
+			
+		}
+
+		if (repository.endsWith("*.jar")) {
+			repository = repository.substring(0, repository.length() - "*.jar".length());
+			repositories.add(new Repository(repository, RepositoryType.GLOB));
+		} else if (repository.endsWith(".jar")) {
+			repositories.add(new Repository(repository, RepositoryType.JAR));
+		} else {
+			repositories.add(new Repository(repository, RepositoryType.DIR));
+		}
+	}
+
+	// 创建一个类加载器。
+	return ClassLoaderFactory.createClassLoader(repositories, parent);
+}
+
+#####################################      catalina.properties部分信息    ####################################################    
+			common.loader="${catalina.base}/lib","${catalina.base}/lib/*.jar","${catalina.home}/lib","${catalina.home}/lib/*.jar"
+			package.access=sun.,org.apache.catalina.,org.apache.coyote.,org.apache.jasper.,org.apache.tomcat.
+				package.definition=sun.,java.,org.apache.catalina.,org.apache.coyote.,\
+			org.apache.jasper.,org.apache.naming.,org.apache.tomcat.
+			server.loader=
+			shared.loader=
+			tomcat.util.scan.StandardJarScanFilter.jarsToScan=\
+				log4j-taglib*.jar,\
+				log4j-web*.jar,\
+				log4javascript*.jar,\
+				slf4j-taglib*.jar
+			tomcat.util.buf.StringCache.byte.enabled=true
+#############################################################################################################################
+
+/**
+ * 加载CatalinaProperties类时，CatalinaProperties获取加载对应的配置文件，默认加载catalina.config文件。
+ */
+location：CatalinaProperties
+static {
+	loadProperties();
+}
+
+
+/**
+ * 加载配置信息。
+ */
+location：CatalinaProperties
+private static void loadProperties() {
+
+	InputStream is = null;
+	
+	// 获取系统的catalina.config配置
+	try {
+		String configUrl = System.getProperty("catalina.config");
+		if (configUrl != null) {
+			is = (new URL(configUrl)).openStream();
+		}
+	} catch (Throwable t) {
+		handleThrowable(t);
+	}
+
+	// 从项目根目录下加载conf文件夹下的catalina.properties文件。
+	if (is == null) {
+		try {
+			File home = new File(Bootstrap.getCatalinaBase());
+			File conf = new File(home, "conf");
+			File propsFile = new File(conf, "catalina.properties");
+			is = new FileInputStream(propsFile);
+		} catch (Throwable t) {
+			handleThrowable(t);
+		}
+	}
+
+	// 加载Tomcat下的org/apache/catalina/startup/catalina.properties文件。 
+	if (is == null) {
+		try {
+			is = CatalinaProperties.class.getResourceAsStream("/org/apache/catalina/startup/catalina.properties");
+		} catch (Throwable t) {
+			handleThrowable(t);
+		}
+	}
+
+	if (is != null) {
+		try {
+			properties = new Properties();
+			properties.load(is);
+		} catch (Throwable t) {
+			handleThrowable(t);
+			log.warn(t);
+		} finally {
+			try {
+				is.close();
+			} catch (IOException ioe) {
+				log.warn("Could not close catalina.properties", ioe);
+			}
+		}
+	}
+
+	if ((is == null)) {
+		log.warn("Failed to load catalina.properties");
+		properties = new Properties();
+	}
+
+	// 将配置属性注册到系统属性中。
+	Enumeration<?> enumeration = properties.propertyNames();
+	while (enumeration.hasMoreElements()) {
+		String name = (String) enumeration.nextElement();
+		String value = properties.getProperty(name);
+		if (value != null) {
+			System.setProperty(name, value);
+		}
+	}
+}
+
+
+
+
+
+
+
+
+
+
+#############################################################################################################################################
+#####################################################             Start                ######################################################
+#############################################################################################################################################
+
+/**
+ * 通过反射，设置Catalina的await属性为传入的值。这个await为true。
+ */
+location：Bootstrap 
+public void setAwait(boolean await) throws Exception {
+
+	Class<?> paramTypes[] = new Class[1];
+	paramTypes[0] = Boolean.TYPE;
+	
+	Object paramValues[] = new Object[1];
+	paramValues[0] = Boolean.valueOf(await);
+	
+	Method method = catalinaDaemon.getClass().getMethod("setAwait", paramTypes);
+	method.invoke(catalinaDaemon, paramValues);
+
+}
+
+/**
+ * 通过反射，调用Catalina的load的方法。
+ */ 
+location：Bootstrap
+private void load(String[] arguments) throws Exception {
+	String methodName = "load";
+	Object param[];
+	Class<?> paramTypes[];
+	
+	if (arguments==null || arguments.length==0) {
+		paramTypes = null;
+		param = null;
+	} else {
+		paramTypes = new Class[1];
+		paramTypes[0] = arguments.getClass();
+		param = new Object[1];
+		param[0] = arguments;
+	}
+	Method method = catalinaDaemon.getClass().getMethod(methodName, paramTypes);
+	if (log.isDebugEnabled()) {
+		log.debug("Calling startup class " + method);
+	}
+	
+	method.invoke(catalinaDaemon, param);
+}
+
+/**
+ *
+ */
+location：Catalina
+public void load(String args[]) {
+	try {
+		if (arguments(args)) {
+			load();
+		}
+	} catch (Exception e) {
+		e.printStackTrace(System.out);
+	}
+}
+
+/**
+ *
+ */
+location：Catalina
+public void load() {
+
+	// loaded：初始化为false。
+	if (loaded) {
+		return;
+	}
+	loaded = true;
+
+	long t1 = System.nanoTime();
+
+	// 初始化文件夹，（temp临时文件夹）
+	initDirs();
+
+	// Before digester - it may be needed
+	initNaming();
+
+	// Digester通过匹配一系列元素嵌套模式来执行XML的输入流，以执行在解析开始之前添加的Rule。
+	Digester digester = createStartDigester();
+
+	InputSource inputSource = null;
+	InputStream inputStream = null;
+	File file = null;
+	
+	try {
+		try {
+			// 获取conf/server.xml文件。
+			file = configFile();
+			inputStream = new FileInputStream(file);
+			inputSource = new InputSource(file.toURI().toURL().toString());
+		} catch (Exception e) {
+			if (log.isDebugEnabled()) {
+				log.debug(sm.getString("catalina.configFail", file), e);
+			}
+		}
+		if (inputStream == null) {
+			try {
+				inputStream = getClass().getClassLoader().getResourceAsStream(getConfigFile());
+				inputSource = new InputSource(getClass().getClassLoader().getResource(getConfigFile()).toString());
+			} catch (Exception e) {
+				if (log.isDebugEnabled()) {
+					log.debug(sm.getString("catalina.configFail", getConfigFile()), e);
+				}
+			}
+		}
+
+		if (inputStream == null) {
+			try {
+				inputStream = getClass().getClassLoader().getResourceAsStream("server-embed.xml");
+				inputSource = new InputSource
+				(getClass().getClassLoader().getResource("server-embed.xml").toString());
+			} catch (Exception e) {
+				if (log.isDebugEnabled()) {
+					log.debug(sm.getString("catalina.configFail", "server-embed.xml"), e);
+				}
+			}
+		}
+
+		if (inputStream == null || inputSource == null) {
+			if  (file == null) {
+				log.warn(sm.getString("catalina.configFail", getConfigFile() + "] or [server-embed.xml]"));
+			} else {
+				log.warn(sm.getString("catalina.configFail", file.getAbsolutePath()));
+				if (file.exists() && !file.canRead()) {
+					log.warn("Permissions incorrect, read permission is not allowed on the file.");
+				}
+			}
+			return;
+		}
+
+		try {
+			inputSource.setByteStream(inputStream);
+			// 刷新，
+			digester.push(this);
+			
+			// 解析Xml。
+			digester.parse(inputSource);
+		} catch (SAXParseException spe) {
+			log.warn("Catalina.start using " + getConfigFile() + ": " + spe.getMessage());
+			return;
+		} catch (Exception e) {
+			log.warn("Catalina.start using " + getConfigFile() + ": " , e);
+			return;
+		}
+		
+	} finally {
+		if (inputStream != null) {
+			try {
+				inputStream.close();
+			} catch (IOException e) {
+				
+			}
+		}
+	}
+
+	// Server：StandardServer，在解析XML时候设置的。
+	getServer().setCatalina(this);
+	getServer().setCatalinaHome(Bootstrap.getCatalinaHomeFile());
+	getServer().setCatalinaBase(Bootstrap.getCatalinaBaseFile());
+
+	initStreams();
+
+	try {
+		getServer().init();
+	} catch (LifecycleException e) {
+		if (Boolean.getBoolean("org.apache.catalina.startup.EXIT_ON_INIT_FAILURE")) {
+			throw new java.lang.Error(e);
+		} else {
+			log.error("Catalina.start", e);
+		}
+	}
+
+	long t2 = System.nanoTime();
+	if(log.isInfoEnabled()) {
+		log.info("Initialization processed in " + ((t2 - t1) / 1000000) + " ms");
+	}
+}
+
+protected void initNaming() {
+	if (!useNaming) {
+		log.info( "Catalina naming disabled");
+		System.setProperty("catalina.useNaming", "false");
+	} else {
+		System.setProperty("catalina.useNaming", "true");
+		String value = "org.apache.naming";
+		String oldValue = System.getProperty(javax.naming.Context.URL_PKG_PREFIXES);
+		if (oldValue != null) {
+			value = value + ":" + oldValue;
+		}
+		
+		System.setProperty(javax.naming.Context.URL_PKG_PREFIXES, value);
+		if( log.isDebugEnabled() ) {
+			log.debug("Setting naming prefix=" + value);
+		}
+		
+		value = System.getProperty(javax.naming.Context.INITIAL_CONTEXT_FACTORY);
+		if (value == null) {
+			System.setProperty(javax.naming.Context.INITIAL_CONTEXT_FACTORY, "org.apache.naming.java.javaURLContextFactory");
+		} else {
+			log.debug( "INITIAL_CONTEXT_FACTORY already set " + value );
+		}
+	}
+}
+
+protected Digester createStartDigester() {
+	long t1=System.currentTimeMillis();
+	
+	Digester digester = new Digester();
+	digester.setValidating(false);
+	digester.setRulesValidation(true);
+	
+	Map<Class<?>, List<String>> fakeAttributes = new HashMap<>();
+	
+	List<String> objectAttrs = new ArrayList<>();
+	objectAttrs.add("className");
+	fakeAttributes.put(Object.class, objectAttrs);
+	
+	List<String> contextAttrs = new ArrayList<>();
+	contextAttrs.add("source");
+	fakeAttributes.put(StandardContext.class, contextAttrs);
+	
+	digester.setFakeAttributes(fakeAttributes);
+	digester.setUseContextClassLoader(true);
+
+	digester.addObjectCreate("Server", "org.apache.catalina.core.StandardServer", "className");
+	digester.addSetProperties("Server");
+	digester.addSetNext("Server", "setServer", "org.apache.catalina.Server");
+
+	digester.addObjectCreate("Server/GlobalNamingResources", "org.apache.catalina.deploy.NamingResourcesImpl");
+	digester.addSetProperties("Server/GlobalNamingResources");
+	digester.addSetNext("Server/GlobalNamingResources", "setGlobalNamingResources", "org.apache.catalina.deploy.NamingResourcesImpl");
+
+	digester.addObjectCreate("Server/Listener", null, "className");
+	digester.addSetProperties("Server/Listener");
+	digester.addSetNext("Server/Listener", "addLifecycleListener", "org.apache.catalina.LifecycleListener");
+
+	digester.addObjectCreate("Server/Service", "org.apache.catalina.core.StandardService", "className");
+	digester.addSetProperties("Server/Service");
+	digester.addSetNext("Server/Service", "addService", "org.apache.catalina.Service");
+
+	digester.addObjectCreate("Server/Service/Listener", null, "className");
+	digester.addSetProperties("Server/Service/Listener");
+	digester.addSetNext("Server/Service/Listener", "addLifecycleListener", "org.apache.catalina.LifecycleListener");
+
+	digester.addObjectCreate("Server/Service/Executor", "org.apache.catalina.core.StandardThreadExecutor", "className");
+	digester.addSetProperties("Server/Service/Executor");
+
+	digester.addSetNext("Server/Service/Executor", "addExecutor", "org.apache.catalina.Executor");
+
+	digester.addRule("Server/Service/Connector", new ConnectorCreateRule());
+	digester.addRule("Server/Service/Connector", new SetAllPropertiesRule(new String[]{"executor", "sslImplementationName"}));
+	digester.addSetNext("Server/Service/Connector", "addConnector", "org.apache.catalina.connector.Connector");
+
+	digester.addObjectCreate("Server/Service/Connector/SSLHostConfig", "org.apache.tomcat.util.net.SSLHostConfig");
+	digester.addSetProperties("Server/Service/Connector/SSLHostConfig");
+	digester.addSetNext("Server/Service/Connector/SSLHostConfig", "addSslHostConfig", "org.apache.tomcat.util.net.SSLHostConfig");
+
+	digester.addRule("Server/Service/Connector/SSLHostConfig/Certificate", new CertificateCreateRule());
+	digester.addRule("Server/Service/Connector/SSLHostConfig/Certificate", new SetAllPropertiesRule(new String[]{"type"}));
+	digester.addSetNext("Server/Service/Connector/SSLHostConfig/Certificate", "addCertificate", "org.apache.tomcat.util.net.SSLHostConfigCertificate");
+
+	digester.addObjectCreate("Server/Service/Connector/SSLHostConfig/OpenSSLConf", "org.apache.tomcat.util.net.openssl.OpenSSLConf");
+	digester.addSetProperties("Server/Service/Connector/SSLHostConfig/OpenSSLConf");
+	digester.addSetNext("Server/Service/Connector/SSLHostConfig/OpenSSLConf", "setOpenSslConf", "org.apache.tomcat.util.net.openssl.OpenSSLConf");
+
+	digester.addObjectCreate("Server/Service/Connector/SSLHostConfig/OpenSSLConf/OpenSSLConfCmd", "org.apache.tomcat.util.net.openssl.OpenSSLConfCmd");
+	digester.addSetProperties("Server/Service/Connector/SSLHostConfig/OpenSSLConf/OpenSSLConfCmd");
+	digester.addSetNext("Server/Service/Connector/SSLHostConfig/OpenSSLConf/OpenSSLConfCmd", "addCmd", "org.apache.tomcat.util.net.openssl.OpenSSLConfCmd");
+
+	digester.addObjectCreate("Server/Service/Connector/Listener", null, "className");
+	digester.addSetProperties("Server/Service/Connector/Listener");
+	digester.addSetNext("Server/Service/Connector/Listener", "addLifecycleListener", "org.apache.catalina.LifecycleListener");
+
+	digester.addObjectCreate("Server/Service/Connector/UpgradeProtocol", null, "className");
+	digester.addSetProperties("Server/Service/Connector/UpgradeProtocol");
+	digester.addSetNext("Server/Service/Connector/UpgradeProtocol", "addUpgradeProtocol", "org.apache.coyote.UpgradeProtocol");
+
+	digester.addRuleSet(new NamingRuleSet("Server/GlobalNamingResources/"));
+	digester.addRuleSet(new EngineRuleSet("Server/Service/"));
+	digester.addRuleSet(new HostRuleSet("Server/Service/Engine/"));
+	digester.addRuleSet(new ContextRuleSet("Server/Service/Engine/Host/"));
+	addClusterRuleSet(digester, "Server/Service/Engine/Host/Cluster/");
+	digester.addRuleSet(new NamingRuleSet("Server/Service/Engine/Host/Context/"));
+
+
+	digester.addRule("Server/Service/Engine", new SetParentClassLoaderRule(parentClassLoader));
+	addClusterRuleSet(digester, "Server/Service/Engine/Cluster/");
+
+	long t2=System.currentTimeMillis();
+	if (log.isDebugEnabled()) {
+		log.debug("Digester for server.xml created " + ( t2-t1 ));
+	}
+	return (digester);
+}
+
+
+
+
+
+
+
+
+
+/**
+ * NEW --> INITIALIZING --> INITIALIZED --> STARTING_PREP --> STARTING  --> 
+ */ 
+public final synchronized void init() throws LifecycleException {
+	
+	if (!state.equals(LifecycleState.NEW)) {
+		invalidTransition(Lifecycle.BEFORE_INIT_EVENT);
+	}
+
+	try {
+		setStateInternal(LifecycleState.INITIALIZING, null, false);
+		initInternal();
+		setStateInternal(LifecycleState.INITIALIZED, null, false);
+	} catch (Throwable t) {
+		ExceptionUtils.handleThrowable(t);
+		setStateInternal(LifecycleState.FAILED, null, false);
+		throw new LifecycleException(sm.getString("lifecycleBase.initFail",toString()), t);
+	}
+}
+
+
+/**
+ * 设置状态，并触发生命周期监听器。
+ */ 
+location：LifeCycleBase
+private synchronized void setStateInternal(LifecycleState state, Object data, boolean check) throws LifecycleException {
+
+	if (log.isDebugEnabled()) {
+		log.debug(sm.getString("lifecycleBase.setState", this, state));
+	}
+
+	if (check) {
+		if (state == null) {
+			invalidTransition("null");
+			return;
+		}
+
+		// 无效的过度。
+		if (!(state == LifecycleState.FAILED || (this.state == LifecycleState.STARTING_PREP && state == LifecycleState.STARTING) ||
+				(this.state == LifecycleState.STOPPING_PREP && state == LifecycleState.STOPPING) ||
+				(this.state == LifecycleState.FAILED && state == LifecycleState.STOPPING))) {
+			invalidTransition(state.name());
+		}
+	}
+
+	this.state = state;
+	
+	// 获取生命周期时间。
+	String lifecycleEvent = state.getLifecycleEvent();
+	
+	// 调用生命周期监听器。
+	if (lifecycleEvent != null) {
+		fireLifecycleEvent(lifecycleEvent, data);
+	}
+}
+
+
+/**
+ * 调用生命周期监听器。
+ */
+location：LifeCycleBase
+protected void fireLifecycleEvent(String type, Object data) {
+	LifecycleEvent event = new LifecycleEvent(this, type, data);
+	for (LifecycleListener listener : lifecycleListeners) {
+		listener.lifecycleEvent(event);
+	}
+}
+
+
+public StandardServer() {
+
+	super();
+
+	globalNamingResources = new NamingResourcesImpl();
+	globalNamingResources.setContainer(this);
+
+	if (isUseNaming()) {
+		namingContextListener = new NamingContextListener();
+		addLifecycleListener(namingContextListener);
+	} else {
+		namingContextListener = null;
+	}
+}
+
+/**
+ *
+ */
+location：StandardServer
+protected void initInternal() throws LifecycleException {
+
+	super.initInternal();
+
+	onameStringCache = register(new StringCache(), "type=StringCache");
+
+	MBeanFactory factory = new MBeanFactory();
+	factory.setContainer(this);
+	onameMBeanFactory = register(factory, "type=MBeanFactory");
+
+	// globalNamingResources进行初始化。NamingResourcesImpl
+	globalNamingResources.init();
+
+	if (getCatalina() != null) {
+		ClassLoader cl = getCatalina().getParentClassLoader();
+		
+		while (cl != null && cl != ClassLoader.getSystemClassLoader()) {
+			if (cl instanceof URLClassLoader) {
+				URL[] urls = ((URLClassLoader) cl).getURLs();
+				for (URL url : urls) {
+					if (url.getProtocol().equals("file")) {
+						try {
+							File f = new File (url.toURI());
+							if (f.isFile() && f.getName().endsWith(".jar")) {
+								ExtensionValidator.addSystemResource(f);
+							}
+						} catch (URISyntaxException e) {
+							
+						} catch (IOException e) {
+							
+						}
+					}
+				}
+			}
+			cl = cl.getParent();
+		}
+	}
+	
+	// StandardService进行初始化操作。
+	// Service	-->  可以有多个？
+	// 		Executor
+	// 		Connector
+	//		Engine
+	// 			Engine
+	// 				Host
+	//					Context
+	//						Wrapper
+	for (int i = 0; i < services.length; i++) {
+		services[i].init();
+	}
+}
+
+/**
+ *
+ */
+location：StandardService
+protected void initInternal() throws LifecycleException {
+
+	super.initInternal();
+
+	if (engine != null) {
+		engine.init();
+	}
+
+	// 初始化Executors
+	for (Executor executor : findExecutors()) {
+		if (executor instanceof JmxEnabled) {
+			((JmxEnabled) executor).setDomain(getDomain());
+		}
+		executor.init();
+	}
+
+	// 初始化mapper监听器。---> MapperListener
+	mapperListener.init();
+
+	// 初始化Connectors
+	synchronized (connectorsLock) {
+		for (Connector connector : connectors) {
+			try {
+				connector.init();
+			} catch (Exception e) {
+				String message = sm.getString("standardService.connector.initFailed", connector);
+				log.error(message, e);
+
+				if (Boolean.getBoolean("org.apache.catalina.startup.EXIT_ON_INIT_FAILURE")) {
+					throw new LifecycleException(message);
+				}
+			}
+		}
+	}
+}
+
+location：MapperListener
+protected void initInternal() throws LifecycleException {
+	if (oname == null) {
+		mserver = Registry.getRegistry(null, null).getMBeanServer();
+
+		oname = register(this, getObjectNameKeyProperties());
+	}
+}
+
+location：Connector
+protected void initInternal() throws LifecycleException {
+
+	super.initInternal();
+
+	// 初始化adapter。请求处理器的实现，该处理将处理委托给CoyoteAdapter。
+	adapter = new CoyoteAdapter(this);
+	protocolHandler.setAdapter(adapter);
+
+	
+	if (null == parseBodyMethodsSet) {
+		// getParseBodyMethods()：默认为POST
+		setParseBodyMethods(getParseBodyMethods());
+	}
+
+	if (protocolHandler.isAprRequired() && !AprLifecycleListener.isAprAvailable()) {
+		throw new LifecycleException(sm.getString("coyoteConnector.protocolHandlerNoApr", getProtocolHandlerClassName()));
+	}
+	
+	if (AprLifecycleListener.isAprAvailable() && AprLifecycleListener.getUseOpenSSL() && protocolHandler instanceof AbstractHttp11JsseProtocol) {
+		AbstractHttp11JsseProtocol<?> jsseProtocolHandler = (AbstractHttp11JsseProtocol<?>) protocolHandler;
+		if (jsseProtocolHandler.isSSLEnabled() && jsseProtocolHandler.getSslImplementationName() == null) {
+			jsseProtocolHandler.setSslImplementationName(OpenSSLImplementation.class.getName());
+		}
+	}
+
+	/**
+	 * 启动
+	 */ 
+	try {
+		protocolHandler.init();
+	} catch (Exception e) {
+		throw new LifecycleException(sm.getString("coyoteConnector.protocolHandlerInitializationFailed"), e);
+	}
+}
+
+/**
+ * 根据协议设置protocolHandler。
+ */
+location：Connector
+public void setProtocol(String protocol) {
+
+	boolean aprConnector = AprLifecycleListener.isAprAvailable() && AprLifecycleListener.getUseAprConnector();
+
+	if ("HTTP/1.1".equals(protocol) || protocol == null) {
+		if (aprConnector) {
+			setProtocolHandlerClassName("org.apache.coyote.http11.Http11AprProtocol");
+		} else {
+			setProtocolHandlerClassName("org.apache.coyote.http11.Http11NioProtocol");
+		}
+	} else if ("AJP/1.3".equals(protocol)) {
+		if (aprConnector) {
+			setProtocolHandlerClassName("org.apache.coyote.ajp.AjpAprProtocol");
+		} else {
+			setProtocolHandlerClassName("org.apache.coyote.ajp.AjpNioProtocol");
+		}
+	} else {
+		setProtocolHandlerClassName(protocol);
+	}
+}
+
+/**
+ * 初始化：Http11NioProtocol
+ */
+location：Http11NioProtocol
+public void init() throws Exception {
+	for (UpgradeProtocol upgradeProtocol : upgradeProtocols) {
+		configureUpgradeProtocol(upgradeProtocol);
+	}
+
+	super.init();
+}
+
+/**
+ *
+ */
+location：AbstractProtocol
+public void init() throws Exception {
+	if (getLog().isInfoEnabled()) {
+		getLog().info(sm.getString("abstractProtocolHandler.init", getName()));
+	}
+
+	if (oname == null) {
+		oname = createObjectName();
+		if (oname != null) {
+			Registry.getRegistry(null, null).registerComponent(this, oname, null);
+		}
+	}
+
+	if (this.domain != null) {
+		rgOname = new ObjectName(domain + ":type=GlobalRequestProcessor,name=" + getName());
+		Registry.getRegistry(null, null).registerComponent(getHandler().getGlobal(), rgOname, null);
+	}
+
+	String endpointName = getName();
+	endpoint.setName(endpointName.substring(1, endpointName.length()-1));
+	endpoint.setDomain(domain);
+
+	endpoint.init();
+}
+
+public void init() throws Exception {
+	testServerCipherSuitesOrderSupport();
+	super.init();
+}
+
+location：AbstractEndpoint
+public void init() throws Exception {
+	// bindOnInit = true
+	if (bindOnInit) {
+		bind();
+		bindState = BindState.BOUND_ON_INIT;
+	}
+	if (this.domain != null) {
+		oname = new ObjectName(domain + ":type=ThreadPool,name=\"" + getName() + "\"");
+		Registry.getRegistry(null, null).registerComponent(this, oname, null);
+
+		ObjectName socketPropertiesOname = new ObjectName(domain + ":type=ThreadPool,name=\"" + getName() + "\",subType=SocketProperties");
+		socketProperties.setObjectName(socketPropertiesOname);
+		Registry.getRegistry(null, null).registerComponent(socketProperties, socketPropertiesOname, null);
+
+		for (SSLHostConfig sslHostConfig : findSslHostConfigs()) {
+			registerJmx(sslHostConfig);
+		}
+	}
+}
+
+/**
+ * 创建服务端，打开socket连接。
+ */
+location：NioEndPoint
+public void bind() throws Exception {
+
+	if (!getUseInheritedChannel()) {
+		/**
+		 * 打开一个serverSocke。
+		 */
+		serverSock = ServerSocketChannel.open();
+		socketProperties.setProperties(serverSock.socket());
+		
+		// 创建地址。
+		InetSocketAddress addr = (getAddress()!=null?new InetSocketAddress(getAddress(),getPort()):new InetSocketAddress(getPort()));
+		
+		// 绑定地址，socket运行。
+		serverSock.socket().bind(addr, getAcceptCount());
+	} else {
+		Channel ic = System.inheritedChannel();
+		
+		if (ic instanceof ServerSocketChannel) {
+			serverSock = (ServerSocketChannel) ic;
+		}
+		if (serverSock == null) {
+			throw new IllegalArgumentException(sm.getString("endpoint.init.bind.inherited"));
+		}
+	}
+	
+	// 设置ServerSocket为非堵塞模式。
+	serverSock.configureBlocking(true); 
+
+	if (acceptorThreadCount == 0) {
+		acceptorThreadCount = 1;
+	}
+	
+	if (pollerThreadCount <= 0) {
+		pollerThreadCount = 1;
+	}
+	
+	setStopLatch(new CountDownLatch(pollerThreadCount));
+
+	// 初始化SSL。
+	initialiseSsl();
+
+	selectorPool.open();
+}
+
+/**
+ * 打开，
+ */
+location：NioSeletorPool
+public void open() throws IOException {
+	enabled = true;
+	getSharedSelector();
+	if (SHARED) {
+		blockingSelector = new NioBlockingSelector();
+		blockingSelector.open(getSharedSelector());
+	}
+}
+
+/**
+ * WindowsSelectorImpl
+ */
+location：NioSeletorPool
+protected Selector getSharedSelector() throws IOException {
+	if (SHARED && SHARED_SELECTOR == null) {
+		synchronized ( NioSelectorPool.class ) {
+			if ( SHARED_SELECTOR == null )  {
+				SHARED_SELECTOR = Selector.open();
+				log.info("Using a shared selector for servlet write/read");
+			}
+		}
+	}
+	return  SHARED_SELECTOR;
+}
+
+/**
+ *
+ */
+location：NioBlockingSelector
+public void open(Selector selector) {
+	sharedSelector = selector;
+	
+	// BlockPoller：继承Thread类，该类内部有一个Selector。
+	poller = new BlockPoller();
+	
+	// 设置BlockPoller。
+	poller.selector = sharedSelector;
+	poller.setDaemon(true);
+	poller.setName("NioBlockingSelector.BlockPoller-"+(++threadCounter));
+	
+	// 启动线程
+	poller.start();
+}
+
+/**
+ *
+ */
+location：NioBlockingSelector.BlockPoller
+public void run() {
+	while (run) {
+		try {
+			events();
+			int keyCount = 0;
+			try {
+				int i = wakeupCounter.get();
+				if (i>0) {
+					keyCount = selector.selectNow();
+				} else {
+					wakeupCounter.set(-1);
+					keyCount = selector.select(1000);
+				}
+				wakeupCounter.set(0);
+				if (!run) break;
+			} catch (NullPointerException x ) {
+				if (selector == null) {
+					throw x;
+				}
+				if ( log.isDebugEnabled() ) {
+					log.debug("Possibly encountered sun bug 5076772 on windows JDK 1.5",x);
+				}
+				continue;
+			} catch (CancelledKeyException x) {
+				if (log.isDebugEnabled()) {
+					log.debug("Possibly encountered sun bug 5076772 on windows JDK 1.5",x);
+				}
+				continue;
+			} catch (Throwable x) {
+				ExceptionUtils.handleThrowable(x);
+				log.error("",x);
+				continue;
+			}
+
+			Iterator<SelectionKey> iterator = keyCount > 0 ? selector.selectedKeys().iterator() : null;
+			
+			while (run && iterator != null && iterator.hasNext()) {
+				SelectionKey sk = iterator.next();
+				NioSocketWrapper attachment = (NioSocketWrapper)sk.attachment();
+				try {
+					iterator.remove();
+					sk.interestOps(sk.interestOps() & (~sk.readyOps()));
+					if ( sk.isReadable() ) {
+						countDown(attachment.getReadLatch());
+					}
+					if (sk.isWritable()) {
+						countDown(attachment.getWriteLatch());
+					}
+				} catch (CancelledKeyException ckx) {
+					sk.cancel();
+					countDown(attachment.getReadLatch());
+					countDown(attachment.getWriteLatch());
+				}
+			}
+		}catch ( Throwable t ) {
+			log.error("",t);
+		}
+	}
+	
+	events.clear();
+
+	if (selector.isOpen()) {
+		try {
+			selector.selectNow();
+		}catch( Exception ignore ) {
+			if (log.isDebugEnabled())log.debug("",ignore);
+		}
+	}
+	try {
+		selector.close();
+	}catch( Exception ignore ) {
+		if (log.isDebugEnabled())log.debug("",ignore);
+	}
+}
+
+
+

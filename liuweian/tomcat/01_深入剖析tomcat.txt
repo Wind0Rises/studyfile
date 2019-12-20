@@ -1,0 +1,41 @@
+Tomcat支持三种接收请求的处理方式：BIO、NIO、APR 
+
+1、连接器：
+
+2、HttpProcessor
+
+3、Servlet容器：
+	Catalina中的Servlet容器一共有四种，分别是
+		* Engine：表示整个Catalina引擎。
+		* Host：表示包含一个或者多个Context容器的虚拟主机
+		* Context：表示一个web应用。一个Context可以有多个Wrapper。
+		* Wrapper：表示一个独立的Servlet。
+		
+	管道任务：管道中包含该Servlet容器将要调用的任务。一个阀表示一个具体的任务。在tomcat中有一个基础阀，也可以通过server.xml添加阀，阀的数量指的是添加的阀，不包括
+基础阀。当一个阀执行完成会继续执行下一个阀，基础阀总是最后执行的。
+		pipeline：管道，servlet容器调用invoke()方法来开始调用管道中的阀和基础阀。可以通过addPipeline()等方法，来操作管道的阀。基础阀是最后调用的，是负责处理request
+			对象和对应的response对象。
+		Valve：阀，用来处理接收到的请求，
+		ValveContext：invokeNext()：调用下一个阀，getinfo()：返回ValveContext的信息。
+		Condition：该接口的实现类可以通过接口中的方法至多与一个servlet容器相关联。
+
+	Wrapper：表示一个独立的Servlet。该接口的实现类负责管理其基础servlet，负责调用servlet的init()、service()、destroy()等方法。由于Wrapper是最低级的容器了，所有其
+是无法再添加子元素的，调用添加子元素会报错。Wrapper中有两个比较重要的方法，load()、allocate()。allocate()会分配一个已经初始化过的Servlet实例，load()：载入并初始化
+Servlet类。
+
+	
+	* 容器包含一条管道，容器的invoke()方法会调用管道的invoke方法，
+	* 管道的invoke()方法会调用所有添加到其容器中的阀，然后再调用其他基础阀的invoke()方法；
+	* 在Wrapper实例中，基础阀负责载入相关联的Servlet类，并对请求进行响应。
+	* 在包含子容器的Context实例中，基础阀使用映射器来查找一个子容器，该子容器负责处理接收的请求。若找到了响应的子容器，则调用其Invoke方法，转到步骤1）继续执行
+	
+ContainerBase：
+	此抽象基类的所有子类将包括对Pipeline对象的支持，Pipeline对象使用“责任链”设计，定义了该类使用invoke()方法执行的处理每个接收到的请求。
+	
+4、生命周期Lifecycle：
+	LifeCycle：
+	LifeCycleEven：
+	LifeCycleListener：
+	
+	
+5、对于每一个Http请求，连接器都会调用与之关联的servlet容器的invoke()方法，然后，servlet容器会调用其所有子容器的invoke方法。正常情况下，

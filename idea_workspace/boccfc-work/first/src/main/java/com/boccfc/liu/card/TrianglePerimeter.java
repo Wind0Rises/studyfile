@@ -1,6 +1,8 @@
 package com.boccfc.liu.card;
 
 import java.util.Arrays;
+import java.util.concurrent.LinkedBlockingDeque;
+import java.util.concurrent.LinkedBlockingQueue;
 
 /**
  *
