@@ -5,10 +5,7 @@ List -->  CopyOnWriteArrayList   --  使用ReentrantLock上锁。能够保持线
 Set  -->  CopyOnWriteArraySet	 --  是基于CopyOnWriteArrayList操作的。
 
 
-
-
 CopyOnWriteArrayList：
-
 
 public boolean addIfAbsent(E e) {
 	// 获取CopyOnWriteArrayList内部维护的数组。
