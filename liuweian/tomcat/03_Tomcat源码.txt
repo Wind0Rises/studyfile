@@ -489,11 +489,18 @@ protected void initNaming() {
 	}
 }
 
+
+/**
+ *
+ */
+location：
 protected Digester createStartDigester() {
 	long t1=System.currentTimeMillis();
 	
 	Digester digester = new Digester();
+	// 判读是否严重解析器。
 	digester.setValidating(false);
+	// 是否要规则校验。警告缺少的属性和元素。
 	digester.setRulesValidation(true);
 	
 	Map<Class<?>, List<String>> fakeAttributes = new HashMap<>();
@@ -506,11 +513,24 @@ protected Digester createStartDigester() {
 	contextAttrs.add("source");
 	fakeAttributes.put(StandardContext.class, contextAttrs);
 	
+	// 设置假属性。
 	digester.setFakeAttributes(fakeAttributes);
+	
+	// 在加载用于实例化新对象的类时，我们是否要使用Context ClassLoader？ 默认值为false。
 	digester.setUseContextClassLoader(true);
 
+	// addObjectCreate：为指定的参数添加一个“对象创建”规则。rule指定节点的筛选规则，class设置映射对象。SAX解析时，遇到rule指定的节节点，会创建一个class实例放入堆栈中。
+	// 		digester.addObectCreate("database/user","com.model.UserBean")：解析遇到user节点时，会创建一个UserBean实例并放入堆栈中。
+
+	// addSetProperties(String rule)：设置节点的属性设置规则。当解析遇到符合rule的节点时，根据属性列表中的属性值对，使用Java反射机制使用标准的JavaBean方法设置栈顶对象实例。
+	//		比如：digester.addSetProperties("database/user")：解析遇到user节点时，会获取键值对 userName=guest,password=guest，获得栈顶的UserBean对象，设置实例的userName、password属性；
+	
+	// addSetNext(String rule,String methodName)：设置当前rule节点与父节点的调用规则，当遇到rule节点时，调用堆栈中的次栈顶元素调用methodName方法。将栈顶元素作为次顶元素指定方法的输入参数。
+	// 		比如:digester.addSetNext("database/user","addUser")：调用database实例的addUser，user为参数
+		
 	digester.addObjectCreate("Server", "org.apache.catalina.core.StandardServer", "className");
 	digester.addSetProperties("Server");
+	// 第二参数：要调用的方法名，第三个参数：方法的参数类型。
 	digester.addSetNext("Server", "setServer", "org.apache.catalina.Server");
 
 	digester.addObjectCreate("Server/GlobalNamingResources", "org.apache.catalina.deploy.NamingResourcesImpl");
@@ -519,7 +539,8 @@ protected Digester createStartDigester() {
 
 	digester.addObjectCreate("Server/Listener", null, "className");
 	digester.addSetProperties("Server/Listener");
-	digester.addSetNext("Server/Listener", "addLifecycleListener", "org.apache.catalina.LifecycleListener");
+	// VersionLoggerListener、AprLifecycleListener、JreMemoryLeakPreventionListener、GlobalResourcesLifecycleListener、ThreadLocalLeakPreventionListener。
+	digester.addSetNext("Server/Listener", "addLifecycleListener", "org.apache.catalina.LifecycleListener");    // 被调用
 
 	digester.addObjectCreate("Server/Service", "org.apache.catalina.core.StandardService", "className");
 	digester.addSetProperties("Server/Service");
@@ -580,9 +601,226 @@ protected Digester createStartDigester() {
 	return (digester);
 }
 
+############################################################## 创建对象规则  ########################################################
+/**
+ * 添加对象创建规则。
+ */
+location：Digester
+public void addObjectCreate(String pattern, String className, String attributeName) {
+	addRule(pattern, new ObjectCreateRule(className, attributeName));
+}
+
+/**
+ * 添加规则。
+ */
+location：Digester
+public void addRule(String pattern, Rule rule) {
+	rule.setDigester(this);
+	getRules().add(pattern, rule);
+}
+
+/**
+ * 获取Rules。
+ */
+location：Digester
+public Rules getRules() {
+
+	if (this.rules == null) {
+		this.rules = new RulesBase();
+		this.rules.setDigester(this);
+	}
+	
+	return (this.rules);
+}
 
 
+/**
+ * 添加规则。
+ */
+location：RulesBase
+public void add(String pattern, Rule rule) {
+	int patternLength = pattern.length();
+	if (patternLength>1 && pattern.endsWith("/")) {
+		pattern = pattern.substring(0, patternLength-1);
+	}
 
+	List<Rule> list = cache.get(pattern);
+	if (list == null) {
+		list = new ArrayList<>();
+		cache.put(pattern, list);
+	}
+	
+	list.add(rule);
+	rules.add(rule);
+	
+	if (this.digester != null) {
+		rule.setDigester(this.digester);
+	}
+	if (this.namespaceURI != null) {
+		rule.setNamespaceURI(this.namespaceURI);
+	}
+
+}
+
+/**
+ * 创建一个实例对象，并放入栈顶。
+ */
+location：ObjectCreateRule（继承Rule）
+public void begin(String namespace, String name, Attributes attributes) throws Exception {
+
+	String realClassName = className;
+	
+	if (attributeName != null) {
+		String value = attributes.getValue(attributeName);
+		if (value != null) {
+			realClassName = value;
+		}
+	}
+	if (digester.log.isDebugEnabled()) {
+		digester.log.debug("[ObjectCreateRule]{" + digester.match + "}New " + realClassName);
+	}
+
+	if (realClassName == null) {
+		throw new NullPointerException("No class name specified for " + namespace + " " + name);
+	}
+
+	// 创建实例对象。
+	Class<?> clazz = digester.getClassLoader().loadClass(realClassName);
+	Object instance = clazz.getConstructor().newInstance();
+	
+	// 把创建的实例，放入Digester中的ArrayStack<Object> stack属性中，放入栈顶。
+	digester.push(instance);
+}
+
+/**
+ * 从栈顶弹出创建的实例对象。
+ */
+location：ObjectCreateRule（继承Rule）
+public void end(String namespace, String name) throws Exception {
+	// Digester中的ArrayStack<Object> stack属性中的栈，从栈顶弹出。
+	Object top = digester.pop();
+	
+	if (digester.log.isDebugEnabled()) {
+		digester.log.debug("[ObjectCreateRule]{" + digester.match + "} Pop " + top.getClass().getName());
+	}
+
+}
+
+############################################################## 创建对象规则  ########################################################
+/**
+ * 添加规则。
+ */
+location：Digester
+public void addSetProperties(String pattern) {
+	addRule(pattern, new SetPropertiesRule());
+}
+
+/**
+ * 设置属性规则。
+ */
+location：SetPropertiesRule
+public void begin(String namespace, String theName, Attributes attributes) throws Exception {
+
+	Object top = digester.peek();
+	
+	if (digester.log.isDebugEnabled()) {
+		if (top != null) {
+			digester.log.debug("[SetPropertiesRule]{" + digester.match + "} Set " + top.getClass().getName() + " properties");
+		} else {
+			digester.log.debug("[SetPropertiesRule]{" + digester.match + "} Set NULL properties");
+		}
+	}
+
+	for (int i = 0; i < attributes.getLength(); i++) {
+		String name = attributes.getLocalName(i);
+		if ("".equals(name)) {
+			name = attributes.getQName(i);
+		}
+		String value = attributes.getValue(i);
+
+		if (digester.log.isDebugEnabled()) {
+			digester.log.debug("[SetPropertiesRule]{" + digester.match + "} Setting property '" + name + "' to '" + value + "'");
+		}
+		
+		// isFakeAttribute：判断是否为伪属性。
+		// setProperty：设置属性。
+		// getRulesValidation：是否规则校验。
+		if (!digester.isFakeAttribute(top, name) && !IntrospectionUtils.setProperty(top, name, value) && digester.getRulesValidation()) {
+			digester.log.warn("[SetPropertiesRule]{" + digester.match + "} Setting property '" + name + "' to '" + value + "' did not find a matching property.");
+		}
+	}
+}
+
+
+##############################################################  set Next规则  ########################################################
+/**
+ * 添加规则。
+ */
+location：Digester
+public void addSetNext(String pattern, String methodName, String paramType) {
+	addRule(pattern, new SetNextRule(methodName, paramType));
+}
+
+
+/**
+ *
+ */
+location：SetNextRule
+public void end(String namespace, String name) throws Exception { 
+	// 获取子元素
+	Object child = digester.peek(0);
+	
+	// 获取父元素。
+	Object parent = digester.peek(1);
+	
+	if (digester.log.isDebugEnabled()) {
+		if (parent == null) {
+			digester.log.debug("[SetNextRule]{" + digester.match + "} Call [NULL PARENT]." + methodName + "(" + child + ")");
+		} else {
+			digester.log.debug("[SetNextRule]{" + digester.match + "} Call " + parent.getClass().getName() + "." + methodName + "(" + child + ")");
+		}
+	}
+
+	// 调用
+	IntrospectionUtils.callMethod1(parent, methodName, child, paramType, digester.getClassLoader());
+}
+
+/**
+ * 调用设置的set Next规则的方法。注意MbeansDescriptorsDigesterSource中有很多addOperation操作。这个是初始化GlobalResourcesLifecycleListener时的操作。
+ */
+location：IntrospectionUtils
+public static Object callMethod1(Object target, String methodN, Object param1, String typeParam1, ClassLoader cl) throws Exception {
+	if (target == null || param1 == null) {
+		throw new IllegalArgumentException("IntrospectionUtils: Assert: Illegal params " + target + " " + param1);
+	}
+	
+	if (log.isDebugEnabled()) {
+		log.debug("IntrospectionUtils: callMethod1 " + target.getClass().getName() + " " + param1.getClass().getName() + " " + typeParam1);
+	}
+
+	Class<?> params[] = new Class[1];
+	
+	// 获取参数。如果有产生类型，直接使用参数类型，如果没有，使用子元素的类型。
+	if (typeParam1 == null) {
+		params[0] = param1.getClass();
+	} else {
+		params[0] = cl.loadClass(typeParam1);
+	}
+	
+	// 获取将要调用的方法。
+	Method m = findMethod(target.getClass(), methodN, params);
+	if (m == null) {
+		throw new NoSuchMethodException(target.getClass().getName() + " " + methodN);
+	}
+	
+	// 调用设置的方法。
+	try {
+		return m.invoke(target, new Object[] { param1 });
+	} catch (InvocationTargetException ie) {
+		ExceptionUtils.handleThrowable(ie.getCause());
+		throw ie;
+	}
+}
 
 
 
@@ -673,7 +911,7 @@ public StandardServer() {
 }
 
 /**
- *
+ * 初始化Server。
  */
 location：StandardServer
 protected void initInternal() throws LifecycleException {

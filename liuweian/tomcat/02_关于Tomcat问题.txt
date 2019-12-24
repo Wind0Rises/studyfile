@@ -16,3 +16,663 @@ https://www.cnblogs.com/dadonggg/p/8668386.html
 		　　minProcessors 服务器创建时的最小处理线程数 
 		　　maxProcessors 服务器同时最大处理线程数 
 		　　URIEncoding URL统一编码
+
+		
+2、tomcat什么时候加载webapps下的工程的web.xml，并做了哪些事情？
+
+/**
+ * 部署打包war。
+ */
+location：HostConfig.DeployWar
+public void run() {
+	config.deployWAR(cn, war);
+}
+
+/**
+ * 部署打包war。
+ */
+location：HostConfig
+protected void deployWAR(ContextName cn, File war) {
+	File xml = new File(host.getAppBaseFile(), cn.getBaseName() + "/" + Constants.ApplicationContextXml);
+
+	File warTracker = new File(host.getAppBaseFile(), cn.getBaseName() + Constants.WarTracker);
+
+	boolean xmlInWar = false;
+	try (JarFile jar = new JarFile(war)) {
+		JarEntry entry = jar.getJarEntry(Constants.ApplicationContextXml);
+		if (entry != null) {
+			xmlInWar = true;
+		}
+	} catch (IOException e) {
+		
+	}
+
+	boolean useXml = false;
+
+	if (xml.exists() && unpackWARs && (!warTracker.exists() || warTracker.lastModified() == war.lastModified())) {
+		useXml = true;
+	}
+
+	Context context = null;
+	boolean deployThisXML = isDeployThisXML(war, cn);
+
+	try {
+		if (deployThisXML && useXml && !copyXML) {
+			synchronized (digesterLock) {
+				try {
+					context = (Context) digester.parse(xml);
+				} catch (Exception e) {
+					log.error(sm.getString("hostConfig.deployDescriptor.error", war.getAbsolutePath()), e);
+				} finally {
+					digester.reset();
+					if (context == null) {
+						context = new FailedContext();
+					}
+				}
+			}
+			context.setConfigFile(xml.toURI().toURL());
+		} else if (deployThisXML && xmlInWar) {
+			synchronized (digesterLock) {
+				try (JarFile jar = new JarFile(war)) {
+					JarEntry entry = jar.getJarEntry(Constants.ApplicationContextXml);
+					try (InputStream istream = jar.getInputStream(entry)) {
+						context = (Context) digester.parse(istream);
+					}
+				} catch (Exception e) {
+					log.error(sm.getString( "hostConfig.deployDescriptor.error", war.getAbsolutePath()), e);
+				} finally {
+					digester.reset();
+					if (context == null) {
+						context = new FailedContext();
+					}
+					context.setConfigFile( UriUtil.buildJarUrl(war, Constants.ApplicationContextXml));
+				}
+			}
+		} else if (!deployThisXML && xmlInWar) {
+			
+			log.error(sm.getString("hostConfig.deployDescriptor.blocked", cn.getPath(), Constants.ApplicationContextXml, new File(host.getConfigBaseFile(), cn.getBaseName() + ".xml")));
+		} else {
+			//  【【创建Context对象。默认为：StandardContext】】
+			context = (Context) Class.forName(contextClass).getConstructor().newInstance();
+		}
+	} catch (Throwable t) {
+		ExceptionUtils.handleThrowable(t);
+		log.error(sm.getString("hostConfig.deployWar.error", war.getAbsolutePath()), t);
+	} finally {
+		if (context == null) {
+			context = new FailedContext();
+		}
+	}
+
+	boolean copyThisXml = false;
+	if (deployThisXML) {
+		if (host instanceof StandardHost) {
+			copyThisXml = ((StandardHost) host).isCopyXML();
+		}
+
+		if (!copyThisXml && context instanceof StandardContext) {
+			copyThisXml = ((StandardContext) context).getCopyXML();
+		}
+
+		if (xmlInWar && copyThisXml) {
+			xml = new File(host.getConfigBaseFile(), cn.getBaseName() + ".xml");
+			try (JarFile jar = new JarFile(war)) {
+				JarEntry entry = jar.getJarEntry(Constants.ApplicationContextXml);
+				try (InputStream istream = jar.getInputStream(entry);
+						FileOutputStream fos = new FileOutputStream(xml);
+						BufferedOutputStream ostream = new BufferedOutputStream(fos, 1024)) {
+					byte buffer[] = new byte[1024];
+					while (true) {
+						int n = istream.read(buffer);
+						if (n < 0) {
+							break;
+						}
+						ostream.write(buffer, 0, n);
+					}
+					ostream.flush();
+				}
+			} catch (IOException e) {
+				/* Ignore */
+			}
+		}
+	}
+
+	DeployedApplication deployedApp = new DeployedApplication(cn.getName(), xml.exists() && deployThisXML && copyThisXml);
+
+	long startTime = 0;
+	
+	if(log.isInfoEnabled()) {
+		startTime = System.currentTimeMillis();
+		log.info(sm.getString("hostConfig.deployWar", war.getAbsolutePath()));
+	}
+
+	try {
+		deployedApp.redeployResources.put(war.getAbsolutePath(), Long.valueOf(war.lastModified()));
+
+		if (deployThisXML && xml.exists() && copyThisXml) {
+			deployedApp.redeployResources.put(xml.getAbsolutePath(), Long.valueOf(xml.lastModified()));
+		} else {
+			deployedApp.redeployResources.put((new File(host.getConfigBaseFile(), cn.getBaseName() + ".xml")).getAbsolutePath(), Long.valueOf(0));
+		}
+		
+		// host.getConfigClass() --> org.apache.catalina.startup.ContextConfig
+		Class<?> clazz = Class.forName(host.getConfigClass());
+		LifecycleListener listener = (LifecycleListener) clazz.getConstructor().newInstance();
+		context.addLifecycleListener(listener);
+
+		context.setName(cn.getName());
+		context.setPath(cn.getPath());
+		context.setWebappVersion(cn.getVersion());
+		context.setDocBase(cn.getBaseName() + ".war");
+		
+		// 这个host：StandardEngine[Catalina].StandardHost[localhost]，这个host是怎么设置进来的，什么时候设置进来的？？ 
+		// 在StandardHost初始化时init()-->fireLifecycleEvent() --> [HostConfig] listener.lifecycleEvent(event);  --> [HostConfig] lifecycleEvent(LifecycleEvent event)
+		host.addChild(context);
+	} catch (Throwable t) {
+		ExceptionUtils.handleThrowable(t);
+		log.error(sm.getString("hostConfig.deployWar.error", war.getAbsolutePath()), t);
+	} finally {
+		boolean unpackWAR = unpackWARs;
+		if (unpackWAR && context instanceof StandardContext) {
+			unpackWAR = ((StandardContext) context).getUnpackWAR();
+		}
+		if (unpackWAR && context.getDocBase() != null) {
+			File docBase = new File(host.getAppBaseFile(), cn.getBaseName());
+			deployedApp.redeployResources.put(docBase.getAbsolutePath(), Long.valueOf(docBase.lastModified()));
+			addWatchedResources(deployedApp, docBase.getAbsolutePath(), context);
+			if (deployThisXML && !copyThisXml && (xmlInWar || xml.exists())) {
+				deployedApp.redeployResources.put(xml.getAbsolutePath(), Long.valueOf(xml.lastModified()));
+			}
+		} else {
+			addWatchedResources(deployedApp, null, context);
+		}
+		addGlobalRedeployResources(deployedApp);
+	}
+
+	deployed.put(cn.getName(), deployedApp);
+
+	if (log.isInfoEnabled()) {
+		log.info(sm.getString("hostConfig.deployWar.finished", war.getAbsolutePath(), Long.valueOf(System.currentTimeMillis() - startTime)));
+	}
+}
+
+
+/**
+ *
+ */
+localhost：ContextConfig
+protected void webConfig() {
+
+	// 设置WebXmlParser
+	WebXmlParser webXmlParser = new WebXmlParser(context.getXmlNamespaceAware(), context.getXmlValidation(), context.getXmlBlockExternal());
+
+	Set<WebXml> defaults = new HashSet<>();
+	defaults.add(getDefaultWebXmlFragment(webXmlParser));
+
+	WebXml webXml = createWebXml();
+
+	InputSource contextWebXml = getContextWebXmlSource();
+	if (!webXmlParser.parseWebXml(contextWebXml, webXml, false)) {
+		ok = false;
+	}
+
+	ServletContext sContext = context.getServletContext();
+
+	Map<String,WebXml> fragments = processJarsForWebFragments(webXml, webXmlParser);
+
+
+	Set<WebXml> orderedFragments = null;
+	orderedFragments = WebXml.orderWebFragments(webXml, fragments, sContext);
+
+	if (ok) {
+		processServletContainerInitializers();
+	}
+
+	if  (!webXml.isMetadataComplete() || typeInitializerMap.size() > 0) {
+		processClasses(webXml, orderedFragments);
+	}
+
+	if (!webXml.isMetadataComplete()) {
+		
+		if (ok) {
+			ok = webXml.merge(orderedFragments);
+		}
+
+		webXml.merge(defaults);
+
+		if (ok) {
+			convertJsps(webXml);
+		}
+
+		if (ok) {
+			configureContext(webXml);
+		}
+	} else {
+		webXml.merge(defaults);
+		convertJsps(webXml);
+		configureContext(webXml);
+	}
+
+	if (context.getLogEffectiveWebXml()) {
+		log.info("web.xml:\n" + webXml.toXml());
+	}
+
+	if (ok) {
+		Set<WebXml> resourceJars = new LinkedHashSet<>();
+		for (WebXml fragment : orderedFragments) {
+			resourceJars.add(fragment);
+		}
+		
+		for (WebXml fragment : fragments.values()) {
+			if (!resourceJars.contains(fragment)) {
+				resourceJars.add(fragment);
+			}
+		}
+		processResourceJARs(resourceJars);
+		
+	}
+
+	if (ok) {
+		for (Map.Entry<ServletContainerInitializer, Set<Class<?>>> entry : initializerClassMap.entrySet()) {
+			if (entry.getValue().isEmpty()) {
+				context.addServletContainerInitializer(entry.getKey(), null);
+			} else {
+				context.addServletContainerInitializer(entry.getKey(), entry.getValue());
+			}
+		}
+	}
+}
+
+/**
+ *
+ */ 
+location：WebXmlParser
+public WebXmlParser(boolean namespaceAware, boolean validation, boolean blockExternal) {
+	webRuleSet = new WebRuleSet(false);
+	webDigester = DigesterFactory.newDigester(validation, namespaceAware, webRuleSet, blockExternal);
+	webDigester.getParser();
+
+	webFragmentRuleSet = new WebRuleSet(true);
+	webFragmentDigester = DigesterFactory.newDigester(validation, namespaceAware, webFragmentRuleSet, blockExternal);
+	webFragmentDigester.getParser();
+}
+
+/**
+ *
+ */ 
+localhost：DigesterFactory
+public static Digester newDigester(boolean xmlValidation, boolean xmlNamespaceAware, RuleSet rule, boolean blockExternal) {
+	Digester digester = new Digester();
+	digester.setNamespaceAware(xmlNamespaceAware);
+	digester.setValidating(xmlValidation);
+	digester.setUseContextClassLoader(true);
+	EntityResolver2 resolver = new LocalResolver(SERVLET_API_PUBLIC_IDS, SERVLET_API_SYSTEM_IDS, blockExternal);
+	digester.setEntityResolver(resolver);
+	if (rule != null) {
+		digester.addRuleSet(rule);
+	}
+	return digester;
+}
+
+/**
+ *
+ */ 
+location：Digester
+public void addRuleSet(RuleSet ruleSet) {
+
+	String oldNamespaceURI = getRuleNamespaceURI();
+	@SuppressWarnings("deprecation")
+	String newNamespaceURI = ruleSet.getNamespaceURI();
+	if (log.isDebugEnabled()) {
+		if (newNamespaceURI == null) {
+			log.debug("addRuleSet() with no namespace URI");
+		} else {
+			log.debug("addRuleSet() with namespace URI " + newNamespaceURI);
+		}
+	}
+	setRuleNamespaceURI(newNamespaceURI);
+	ruleSet.addRuleInstances(this);
+	setRuleNamespaceURI(oldNamespaceURI);
+
+}
+
+/**
+ * fullPrefix：webapp。
+ */
+location：Digester
+public void addRuleInstances(Digester digester) {
+
+	digester.addRule(fullPrefix, new SetPublicIdRule("setPublicId"));
+	digester.addRule(fullPrefix, new IgnoreAnnotationsRule());
+	digester.addRule(fullPrefix, new VersionRule());
+
+	digester.addRule(fullPrefix + "/absolute-ordering", absoluteOrdering);
+	digester.addRule(fullPrefix + "/ordering", relativeOrdering);
+
+	if (fragment) {
+		digester.addRule(fullPrefix + "/name", name);
+		digester.addCallMethod(fullPrefix + "/ordering/after/name", "addAfterOrdering", 0);
+		digester.addCallMethod(fullPrefix + "/ordering/after/others", "addAfterOrderingOthers");
+		digester.addCallMethod(fullPrefix + "/ordering/before/name", "addBeforeOrdering", 0);
+		digester.addCallMethod(fullPrefix + "/ordering/before/others", "addBeforeOrderingOthers");
+	} else {
+		// web.xml
+		digester.addCallMethod(fullPrefix + "/absolute-ordering/name", "addAbsoluteOrdering", 0);
+		digester.addCallMethod(fullPrefix + "/absolute-ordering/others", "addAbsoluteOrderingOthers");
+		digester.addRule(fullPrefix + "/deny-uncovered-http-methods", new SetDenyUncoveredHttpMethodsRule());
+	}
+
+	digester.addCallMethod(fullPrefix + "/context-param", "addContextParam", 2);
+	digester.addCallParam(fullPrefix + "/context-param/param-name", 0);
+	digester.addCallParam(fullPrefix + "/context-param/param-value", 1);
+
+	digester.addCallMethod(fullPrefix + "/display-name", "setDisplayName", 0);
+
+	digester.addRule(fullPrefix + "/distributable", new SetDistributableRule());
+
+	configureNamingRules(digester);
+
+	digester.addObjectCreate(fullPrefix + "/error-page", "org.apache.tomcat.util.descriptor.web.ErrorPage");
+	digester.addSetNext(fullPrefix + "/error-page", "addErrorPage", "org.apache.tomcat.util.descriptor.web.ErrorPage");
+
+	digester.addCallMethod(fullPrefix + "/error-page/error-code", "setErrorCode", 0);
+	digester.addCallMethod(fullPrefix + "/error-page/exception-type", "setExceptionType", 0);
+	digester.addCallMethod(fullPrefix + "/error-page/location", "setLocation", 0);
+
+	digester.addObjectCreate(fullPrefix + "/filter", "org.apache.tomcat.util.descriptor.web.FilterDef");
+	digester.addSetNext(fullPrefix + "/filter", "addFilter", "org.apache.tomcat.util.descriptor.web.FilterDef");
+
+	digester.addCallMethod(fullPrefix + "/filter/description", "setDescription", 0);
+	digester.addCallMethod(fullPrefix + "/filter/display-name", "setDisplayName", 0);
+	digester.addCallMethod(fullPrefix + "/filter/filter-class", "setFilterClass", 0);
+	digester.addCallMethod(fullPrefix + "/filter/filter-name", "setFilterName", 0);
+	digester.addCallMethod(fullPrefix + "/filter/icon/large-icon", "setLargeIcon", 0);
+	digester.addCallMethod(fullPrefix + "/filter/icon/small-icon", "setSmallIcon", 0);
+	digester.addCallMethod(fullPrefix + "/filter/async-supported", "setAsyncSupported", 0);
+
+	digester.addCallMethod(fullPrefix + "/filter/init-param", "addInitParameter", 2);
+	digester.addCallParam(fullPrefix + "/filter/init-param/param-name", 0);
+	digester.addCallParam(fullPrefix + "/filter/init-param/param-value", 1);
+
+	digester.addObjectCreate(fullPrefix + "/filter-mapping", "org.apache.tomcat.util.descriptor.web.FilterMap");
+	digester.addSetNext(fullPrefix + "/filter-mapping", "addFilterMapping", "org.apache.tomcat.util.descriptor.web.FilterMap");
+
+	digester.addCallMethod(fullPrefix + "/filter-mapping/filter-name", "setFilterName", 0);
+	digester.addCallMethod(fullPrefix + "/filter-mapping/servlet-name", "addServletName", 0);
+	digester.addCallMethod(fullPrefix + "/filter-mapping/url-pattern", "addURLPattern", 0);
+
+	digester.addCallMethod(fullPrefix + "/filter-mapping/dispatcher", "setDispatcher", 0);
+	digester.addCallMethod(fullPrefix + "/listener/listener-class", "addListener", 0);
+	digester.addRule(fullPrefix + "/jsp-config", jspConfig);
+
+	digester.addObjectCreate(fullPrefix + "/jsp-config/jsp-property-group", "org.apache.tomcat.util.descriptor.web.JspPropertyGroup");
+	digester.addSetNext(fullPrefix + "/jsp-config/jsp-property-group", "addJspPropertyGroup", "org.apache.tomcat.util.descriptor.web.JspPropertyGroup");
+	digester.addCallMethod(fullPrefix + "/jsp-config/jsp-property-group/deferred-syntax-allowed-as-literal", "setDeferredSyntax", 0);
+	digester.addCallMethod(fullPrefix + "/jsp-config/jsp-property-group/el-ignored", "setElIgnored", 0);
+	digester.addCallMethod(fullPrefix + "/jsp-config/jsp-property-group/include-coda", "addIncludeCoda", 0);
+	digester.addCallMethod(fullPrefix + "/jsp-config/jsp-property-group/include-prelude", "addIncludePrelude", 0);
+	digester.addCallMethod(fullPrefix + "/jsp-config/jsp-property-group/is-xml", "setIsXml", 0);
+	digester.addCallMethod(fullPrefix + "/jsp-config/jsp-property-group/page-encoding", "setPageEncoding", 0);
+	digester.addCallMethod(fullPrefix + "/jsp-config/jsp-property-group/scripting-invalid", "setScriptingInvalid", 0);
+	digester.addCallMethod(fullPrefix + "/jsp-config/jsp-property-group/trim-directive-whitespaces", "setTrimWhitespace", 0);
+	digester.addCallMethod(fullPrefix + "/jsp-config/jsp-property-group/url-pattern", "addUrlPattern", 0);
+	digester.addCallMethod(fullPrefix + "/jsp-config/jsp-property-group/default-content-type", "setDefaultContentType", 0);
+	digester.addCallMethod(fullPrefix + "/jsp-config/jsp-property-group/buffer", "setBuffer", 0);
+	digester.addCallMethod(fullPrefix + "/jsp-config/jsp-property-group/error-on-undeclared-namespace", "setErrorOnUndeclaredNamespace", 0);
+
+	digester.addRule(fullPrefix + "/login-config", loginConfig);
+
+	digester.addObjectCreate(fullPrefix + "/login-config", "org.apache.tomcat.util.descriptor.web.LoginConfig");
+	digester.addSetNext(fullPrefix + "/login-config", "setLoginConfig", "org.apache.tomcat.util.descriptor.web.LoginConfig");
+
+	digester.addCallMethod(fullPrefix + "/login-config/auth-method", "setAuthMethod", 0);
+	digester.addCallMethod(fullPrefix + "/login-config/realm-name", "setRealmName", 0);
+	digester.addCallMethod(fullPrefix + "/login-config/form-login-config/form-error-page", "setErrorPage", 0);
+	digester.addCallMethod(fullPrefix + "/login-config/form-login-config/form-login-page", "setLoginPage", 0);
+
+	digester.addCallMethod(fullPrefix + "/mime-mapping", "addMimeMapping", 2);
+	digester.addCallParam(fullPrefix + "/mime-mapping/extension", 0);
+	digester.addCallParam(fullPrefix + "/mime-mapping/mime-type", 1);
+
+
+	digester.addObjectCreate(fullPrefix + "/security-constraint", "org.apache.tomcat.util.descriptor.web.SecurityConstraint");
+	digester.addSetNext(fullPrefix + "/security-constraint", "addSecurityConstraint", "org.apache.tomcat.util.descriptor.web.SecurityConstraint");
+
+	digester.addRule(fullPrefix + "/security-constraint/auth-constraint", new SetAuthConstraintRule());
+	digester.addCallMethod(fullPrefix + "/security-constraint/auth-constraint/role-name", "addAuthRole", 0);
+	digester.addCallMethod(fullPrefix + "/security-constraint/display-name", "setDisplayName", 0);
+	digester.addCallMethod(fullPrefix + "/security-constraint/user-data-constraint/transport-guarantee", "setUserConstraint", 0);
+
+	digester.addObjectCreate(fullPrefix + "/security-constraint/web-resource-collection", "org.apache.tomcat.util.descriptor.web.SecurityCollection");
+	digester.addSetNext(fullPrefix + "/security-constraint/web-resource-collection", "addCollection", "org.apache.tomcat.util.descriptor.web.SecurityCollection");
+	digester.addCallMethod(fullPrefix + "/security-constraint/web-resource-collection/http-method", "addMethod", 0);
+	digester.addCallMethod(fullPrefix + "/security-constraint/web-resource-collection/http-method-omission", "addOmittedMethod", 0);
+	digester.addCallMethod(fullPrefix + "/security-constraint/web-resource-collection/url-pattern", "addPattern", 0);
+	digester.addCallMethod(fullPrefix + "/security-constraint/web-resource-collection/web-resource-name", "setName", 0);
+
+	digester.addCallMethod(fullPrefix + "/security-role/role-name", "addSecurityRole", 0);
+
+	digester.addRule(fullPrefix + "/servlet", new ServletDefCreateRule());
+	digester.addSetNext(fullPrefix + "/servlet", "addServlet", "org.apache.tomcat.util.descriptor.web.ServletDef");
+
+	digester.addCallMethod(fullPrefix + "/servlet/init-param", "addInitParameter", 2);
+	digester.addCallParam(fullPrefix + "/servlet/init-param/param-name", 0);
+	digester.addCallParam(fullPrefix + "/servlet/init-param/param-value", 1);
+
+	digester.addCallMethod(fullPrefix + "/servlet/jsp-file", "setJspFile", 0);
+	digester.addCallMethod(fullPrefix + "/servlet/load-on-startup", "setLoadOnStartup", 0);
+	digester.addCallMethod(fullPrefix + "/servlet/run-as/role-name", "setRunAs", 0);
+
+	digester.addObjectCreate(fullPrefix + "/servlet/security-role-ref", "org.apache.tomcat.util.descriptor.web.SecurityRoleRef");
+	digester.addSetNext(fullPrefix + "/servlet/security-role-ref", "addSecurityRoleRef", "org.apache.tomcat.util.descriptor.web.SecurityRoleRef");
+	digester.addCallMethod(fullPrefix + "/servlet/security-role-ref/role-link", "setLink", 0);
+	digester.addCallMethod(fullPrefix + "/servlet/security-role-ref/role-name", "setName", 0);
+
+	digester.addCallMethod(fullPrefix + "/servlet/servlet-class", "setServletClass", 0);
+	digester.addCallMethod(fullPrefix + "/servlet/servlet-name", "setServletName", 0);
+
+	digester.addObjectCreate(fullPrefix + "/servlet/multipart-config", "org.apache.tomcat.util.descriptor.web.MultipartDef");
+	digester.addSetNext(fullPrefix + "/servlet/multipart-config", "setMultipartDef", "org.apache.tomcat.util.descriptor.web.MultipartDef");
+	digester.addCallMethod(fullPrefix + "/servlet/multipart-config/location", "setLocation", 0);
+	digester.addCallMethod(fullPrefix + "/servlet/multipart-config/max-file-size", "setMaxFileSize", 0);
+	digester.addCallMethod(fullPrefix + "/servlet/multipart-config/max-request-size", "setMaxRequestSize", 0);
+	digester.addCallMethod(fullPrefix + "/servlet/multipart-config/file-size-threshold", "setFileSizeThreshold", 0);
+
+	digester.addCallMethod(fullPrefix + "/servlet/async-supported", "setAsyncSupported", 0);
+	digester.addCallMethod(fullPrefix + "/servlet/enabled", "setEnabled", 0);
+
+
+	digester.addRule(fullPrefix + "/servlet-mapping", new CallMethodMultiRule("addServletMapping", 2, 0));
+	digester.addCallParam(fullPrefix + "/servlet-mapping/servlet-name", 1);
+	digester.addRule(fullPrefix + "/servlet-mapping/url-pattern", new CallParamMultiRule(0));
+
+	digester.addRule(fullPrefix + "/session-config", sessionConfig);
+	digester.addObjectCreate(fullPrefix + "/session-config", "org.apache.tomcat.util.descriptor.web.SessionConfig");
+	digester.addSetNext(fullPrefix + "/session-config", "setSessionConfig", "org.apache.tomcat.util.descriptor.web.SessionConfig");
+	digester.addCallMethod(fullPrefix + "/session-config/session-timeout", "setSessionTimeout", 0);
+	digester.addCallMethod(fullPrefix + "/session-config/cookie-config/name", "setCookieName", 0);
+	digester.addCallMethod(fullPrefix + "/session-config/cookie-config/domain", "setCookieDomain", 0);
+	digester.addCallMethod(fullPrefix + "/session-config/cookie-config/path", "setCookiePath", 0);
+	digester.addCallMethod(fullPrefix + "/session-config/cookie-config/comment", "setCookieComment", 0);
+	digester.addCallMethod(fullPrefix + "/session-config/cookie-config/http-only", "setCookieHttpOnly", 0);
+	digester.addCallMethod(fullPrefix + "/session-config/cookie-config/secure", "setCookieSecure", 0);
+	digester.addCallMethod(fullPrefix + "/session-config/cookie-config/max-age", "setCookieMaxAge", 0);
+	digester.addCallMethod(fullPrefix + "/session-config/tracking-mode", "addSessionTrackingMode", 0);
+
+	// Taglibs pre Servlet 2.4
+	digester.addRule(fullPrefix + "/taglib", new TaglibLocationRule(false));
+	digester.addCallMethod(fullPrefix + "/taglib", "addTaglib", 2);
+	digester.addCallParam(fullPrefix + "/taglib/taglib-location", 1);
+	digester.addCallParam(fullPrefix + "/taglib/taglib-uri", 0);
+
+	// Taglibs Servlet 2.4 onwards
+	digester.addRule(fullPrefix + "/jsp-config/taglib", new TaglibLocationRule(true));
+	digester.addCallMethod(fullPrefix + "/jsp-config/taglib", "addTaglib", 2);
+	digester.addCallParam(fullPrefix + "/jsp-config/taglib/taglib-location", 1);
+	digester.addCallParam(fullPrefix + "/jsp-config/taglib/taglib-uri", 0);
+
+	digester.addCallMethod(fullPrefix + "/welcome-file-list/welcome-file", "addWelcomeFile", 0);
+
+	digester.addCallMethod(fullPrefix + "/locale-encoding-mapping-list/locale-encoding-mapping",  "addLocaleEncodingMapping", 2);
+	digester.addCallParam(fullPrefix + "/locale-encoding-mapping-list/locale-encoding-mapping/locale", 0);
+	digester.addCallParam(fullPrefix + "/locale-encoding-mapping-list/locale-encoding-mapping/encoding", 1);
+
+	digester.addRule(fullPrefix + "/post-construct", new LifecycleCallbackRule("addPostConstructMethods", 2, true));
+	digester.addCallParam(fullPrefix + "/post-construct/lifecycle-callback-class", 0);
+	digester.addCallParam(fullPrefix + "/post-construct/lifecycle-callback-method", 1);
+
+	digester.addRule(fullPrefix + "/pre-destroy", new LifecycleCallbackRule("addPreDestroyMethods", 2, false));
+	digester.addCallParam(fullPrefix + "/pre-destroy/lifecycle-callback-class", 0);
+	digester.addCallParam(fullPrefix + "/pre-destroy/lifecycle-callback-method", 1);
+}
+
+/**
+ * 添加调用方法规则。
+ */
+location：Digester
+public void addCallMethod(String pattern, String methodName, int paramCount) {
+	addRule(pattern, new CallMethodRule(methodName, paramCount));
+}
+
+/**
+ * 设置参数。
+ */
+location：CallMethodRule
+public void begin(String namespace, String name, Attributes attributes) throws Exception {
+
+	if (paramCount > 0) {
+		Object parameters[] = new Object[paramCount];
+		for (int i = 0; i < parameters.length; i++) {
+			parameters[i] = null;
+		}
+		digester.pushParams(parameters);
+	}
+
+}
+
+
+/**
+ * Process the body text of this element.
+ */
+location：CallMethodRule
+public void body(String namespace, String name, String bodyText)
+		throws Exception {
+
+	if (paramCount == 0) {
+		this.bodyText = bodyText.trim();
+	}
+
+}
+
+
+/**
+ * Process the end of this element.
+ */
+location：CallMethodRule
+public void end(String namespace, String name) throws Exception {
+
+	Object parameters[] = null;
+	if (paramCount > 0) {
+
+		parameters = (Object[]) digester.popParams();
+
+		if (digester.log.isTraceEnabled()) {
+			for (int i=0,size=parameters.length;i<size;i++) {
+				digester.log.trace("[CallMethodRule](" + i + ")" + parameters[i]) ;
+			}
+		}
+
+		if (paramCount == 1 && parameters[0] == null) {
+			return;
+		}
+
+	} else if (paramTypes != null && paramTypes.length != 0) {
+
+		if (bodyText == null) {
+			return;
+		}
+
+		parameters = new Object[1];
+		parameters[0] = bodyText;
+	}
+
+	Object paramValues[] = new Object[paramTypes.length];
+	for (int i = 0; i < paramTypes.length; i++) {
+		if(
+			parameters[i] == null ||
+			 (parameters[i] instanceof String &&
+			   !String.class.isAssignableFrom(paramTypes[i]))) {
+
+			paramValues[i] =
+					IntrospectionUtils.convert((String) parameters[i], paramTypes[i]);
+		} else {
+			paramValues[i] = parameters[i];
+		}
+	}
+
+	Object target;
+	if (targetOffset >= 0) {
+		target = digester.peek(targetOffset);
+	} else {
+		target = digester.peek( digester.getCount() + targetOffset );
+	}
+
+	if (target == null) {
+		StringBuilder sb = new StringBuilder();
+		sb.append("[CallMethodRule]{");
+		sb.append(digester.match);
+		sb.append("} Call target is null (");
+		sb.append("targetOffset=");
+		sb.append(targetOffset);
+		sb.append(",stackdepth=");
+		sb.append(digester.getCount());
+		sb.append(")");
+		throw new org.xml.sax.SAXException(sb.toString());
+	}
+
+	if (digester.log.isDebugEnabled()) {
+		StringBuilder sb = new StringBuilder("[CallMethodRule]{");
+		sb.append(digester.match);
+		sb.append("} Call ");
+		sb.append(target.getClass().getName());
+		sb.append(".");
+		sb.append(methodName);
+		sb.append("(");
+		for (int i = 0; i < paramValues.length; i++) {
+			if (i > 0) {
+				sb.append(",");
+			}
+			if (paramValues[i] == null) {
+				sb.append("null");
+			} else {
+				sb.append(paramValues[i].toString());
+			}
+			sb.append("/");
+			if (paramTypes[i] == null) {
+				sb.append("null");
+			} else {
+				sb.append(paramTypes[i].getName());
+			}
+		}
+		sb.append(")");
+		digester.log.debug(sb.toString());
+	}
+	Object result = IntrospectionUtils.callMethodN(target, methodName, paramValues, paramTypes);
+	processMethodCallResult(result);
+}
+
+WebXml：表示web.xml和web-fragment.xml的通用元素。
+	Map<String, String> contextParams = new HashMap<>()：保存context-param标签。
+	Map<String, ErrorPage> errorPages = new HashMap<>()：保存error-page标签。
+	Set<FilterMap> filterMaps = new LinkedHashSet<>()、Set<String> filterMappingNames = new HashSet<>()：保存filter-mapping标签。
+	Map<String, FilterDef> filters = new LinkedHashMap<>()：保存filter标签。
+	Set<String> listeners = new LinkedHashSet<>()：保存listener标签。
+	Map<String, String> servletMappings = new HashMap<>()、Set<String> servletMappingNames = new HashSet<>()：保存servlet-mapping标签。
+	Map<String, ServletDef> servlets = new HashMap<>()：保存servlet标签。
+	
+
+3、tomcat是如何更具请求定位Servlet的？？
+
+4、tomcat内部有几种线程？？
+
+5、简述一下自己对tomcat的理解？？

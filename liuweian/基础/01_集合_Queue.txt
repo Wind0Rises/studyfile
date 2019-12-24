@@ -38,3 +38,11 @@ Deque接口：
 	
 	boolean remove(Object o)：从双端队列中删除指定元素第一出现的元素，如果双端队列不包含元素，则它保持不变。如果有元素并且删除了则返回true。如果指定元素
 		与队列的类型不符，会抛出异常。如果元素为null，
+		
+		
+Stack：继承Vector，是线程安全的。
+	push(E item)：向栈顶添加元素。
+	E pop()：删除并返回栈顶元素。
+	E peek()：查看栈顶元素。
+	boolean empty()：判断这个栈是否为空。
+	int search(Object o)：
