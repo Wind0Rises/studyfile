@@ -14,10 +14,12 @@
 	setState()：设置AQS的同步状态。
 	
 获取锁：
-	acquire(): 以独占方式获取锁。   可以仔细研究多个线程获取锁的过程？？？
-	
+	acquire(): 以独占方式获取锁。
+	acquireShared()：以共享方式获取锁。
 	
 释放锁：
+	release()：释放独占锁。
+	releaseShared()：释放共享锁。
 
 
 #############################   内部类   #######################################
@@ -84,21 +86,21 @@ class Node {
 
 
 
+独占模式：
+	获取锁：
+		首先尝试获取锁，如果获取到锁，直接返回。如果尝试获取锁失败以后，把当前操作封装成一个Node，并把封装的Node放到一个FIFO队里中，然后通过CAS把AQS的尾节点更新
+		为刚刚封装的节点，【如果尾节点更新失败，会自旋更新节点】。更新尾节点成功以后，检查尾节点的前驱节点是否是头节，如果是头结点，再次获取锁，获取成功直接返回，
+		如果不是头节点，去除状态为取消的节点，然后挂起线程。
+	
+	释放锁：
+		如果尝试释放锁成功，需要把头节点从有效状态（waitStatus < 0）通过CAS改为取消状态（waitStatus = 0）。获取后继节点中，状态为有效状态的节点，并启动 节点中的
+		线程。
+	
+	注意事项：
+		# 尝试获取锁的时候，使用CAS更改AQS的同步状态。
 
-/**
- * 独占模式：
-		获取锁：首先尝试获取锁，如果获取到锁，直接返回。如果尝试获取锁失败以后，把当前操作封装成一个Node，并把封装的Node放到一个FIFO队里中，并通过CAS把
-			 AQS的尾节点更新为刚刚封装的节点，【如果尾节点更新失败，会自选更新节点】。如果尾节点的前驱节点是头节点会再次尝试获取锁。
-		
-		释放锁：把AQS的当前设置为null，修改共享状态【尝试释放锁】==》如果尝试释放锁成功把头结点状态修改（CAS修改）为0  ===》 如果有可执行状态的后继节点，唤醒后继节点。
-		
-		
- * 		注意事项：
- * 			# 尝试获取锁的时候，使用CAS更改AQS的同步状态。
- * 			# 
- *
- *
- */
+
+
 #######################################################################################################################################################
 #########################################                        独占锁代码解析                  ######################################################
 #######################################################################################################################################################
@@ -184,7 +186,7 @@ private Node enq(final Node node) {
 	}
 }
 
-// cas设置头节点，尾节点为空时，头节点也为空，这个是头尾是一个节点。
+// CAS设置头节点，尾节点为空时，头节点也为空，这个是头尾是一个节点。
 private final boolean compareAndSetHead(Node update) {
 	return unsafe.compareAndSwapObject(this, headOffset, null, update);
 }
@@ -193,8 +195,9 @@ private final boolean compareAndSetHead(Node update) {
 /**
  * head   <-----------> tail
  *    p(可能是head也可能不是)  <-->  node 
+ * 
+ * node为刚刚设置的尾节点。这个时候尾节点可能已经变了。
  */ 
-// node为刚刚设置的尾节点。这个时候尾节点可能已经变了。
 final boolean acquireQueued(final Node node, int arg) {
 	boolean failed = true;	
 	try {
@@ -205,8 +208,10 @@ final boolean acquireQueued(final Node node, int arg) {
 			
 			// 如果node的前驱节点是头节点【并且】尝试获取锁并且成功了，进入if语句，说明这个时候这个节点已经获取到锁了。
 			if (p == head && tryAcquire(arg)) {	
+			
 				// 把该节点设置为头节点，头节点的thread为空，并且没有前驱节点。
 				setHead(node);
+				
 				// 把以前的头节点的后继节点设置为null，这个时候头结点就出队来。
 				p.next = null;
 				failed = false;
@@ -254,11 +259,11 @@ private static boolean shouldParkAfterFailedAcquire(Node pred, Node node) {
 		return true;
 	}
 	
-	// 该节点已经取消。
+	// 判断前驱节点的状态是否为取消状态。
 	if (ws > 0) {
 		do {
-			// 把node的前驱的前驱复制给node前驱，就是从队列中取出pred节点。这个会一直判断，直到找到node的上面的第一个waitStatus不大于0的节点。
 			/**
+			 * （把node的前驱）的前驱复制给node前驱，就是从队列中取出pred节点。这个会一直判断，直到找到node的上面的第一个waitStatus不大于0的节点。
 			 *  pred.prev  <-->  pred   <-->   node
 			 *  pred.prev  <-->  node
 			 */
@@ -285,7 +290,9 @@ private final boolean parkAndCheckInterrupt() {
 	return Thread.interrupted();
 }
 
-
+/**
+ *
+ */
 private void cancelAcquire(Node node) {
 	if (node == null) {
 		return;
@@ -293,9 +300,11 @@ private void cancelAcquire(Node node) {
 
 	node.thread = null;
 
+	// 节点的前驱节点。
 	Node pred = node.prev;
 	
 	while (pred.waitStatus > 0) {
+		// （把node的前驱）的前驱复制给node前驱，就是从队列中取出pred节点。
 		node.prev = pred = pred.prev;
 	}
 
@@ -303,12 +312,13 @@ private void cancelAcquire(Node node) {
 
 	node.waitStatus = Node.CANCELLED;
 
+	// compareAndSetTail()：CAS修改队列的尾节点。
 	if (node == tail && compareAndSetTail(node, pred)) {
+		// CAS修改前驱的后继节点为null。
 		compareAndSetNext(pred, predNext, null);
 	} else {
 		int ws;
-		if (pred != head &&
-			((ws = pred.waitStatus) == Node.SIGNAL || (ws <= 0 && compareAndSetWaitStatus(pred, ws, Node.SIGNAL))) && pred.thread != null) {
+		if (pred != head && ((ws = pred.waitStatus) == Node.SIGNAL || (ws <= 0 && compareAndSetWaitStatus(pred, ws, Node.SIGNAL))) && pred.thread != null) {
 			Node next = node.next;
 			
 			if (next != null && next.waitStatus <= 0) {
@@ -323,10 +333,11 @@ private void cancelAcquire(Node node) {
 }
 
 
-###############################################    独占锁--解锁  #########################################################################
+######################################################    独占锁--解锁  #########################################################################
 /**
  * 解锁过程。
- * 如果尝试释放锁成功，需要把头节点从有效状态（waitStatus < 0）通过CAS改为取消状态（waitStatus = 0）。
+ * 如果尝试释放锁成功，需要把头节点从有效状态（waitStatus < 0）通过CAS改为取消状态（waitStatus = 0）。获取后继节点中，状态为有效状态的节点，并启动
+ * 节点中的线程。
  */
 public final boolean release(int arg) {
 	if (tryRelease(arg)) {
@@ -392,7 +403,6 @@ public final boolean hasQueuedPredecessors() {
 	
 	// 如果头节点和尾节点是一个节点 === 返回false。
 	// 如果头节点和尾节点不是同一个节点  true  && 【头节点的后继节点为空 或者 头节点的后继节点不为空，但是后继节点里的线程不是当前线程】  ==>  true
-	
 	return h != t && ((s = h.next) == null || s.thread != Thread.currentThread());
 }
 
@@ -409,9 +419,11 @@ protected final void setExclusiveOwnerThread(Thread thread) {
 #######################################################################################################################################################
    
 #########################################                            获取锁                       #####################################################
-tryReleaseShared  =====》  ReadWriteLock_ReadLock
+tryReleaseShared  =====>  ReadWriteLock_ReadLock
+
+
 /**
- * 尝试获取锁失败 == 》
+ * 尝试获取锁失败 ==>
  */
 public final void acquireShared(int arg) {
 	if (tryAcquireShared(arg) < 0) {
@@ -424,18 +436,20 @@ public final void acquireShared(int arg) {
  * 尝试获取共享锁。
  * 		返回值：负数  ===  失败
  * 		返回值： 0    ===  如果共享模式下获取成功，但是后续共享模式获取不成功。
- * 		返回值：证书  ===  如果共享模式下的获取成功并且后续共享模式下的获取也可能成功，则为正值，在这种情况下，后续的等待线程必须检查可用性。
+ * 		返回值：正数  ===  如果共享模式下的获取成功并且后续共享模式下的获取也可能成功，则为正值，在这种情况下，后续的等待线程必须检查可用性。
  */
 protected int tryAcquireShared(int arg) {
 	throw new UnsupportedOperationException();
 }
 
 /** 
- * 如果该节点的前驱节点是头节点，会继续尝试获取共享锁，获取共享锁成功以后，
+ * 将当前节点添加到等待队里中，然后进行自旋操作。
+ * 		如果该节点的前驱节点是头节点，再次尝试获取共享锁，获取共享锁成功以后，
  * 获取共享锁。
  * 共享锁会有两个队列，一个在AQS中，一个在Node中
  */ 
 private void doAcquireShared(int arg) {
+
 	// 如果是共享模式，需要向等待队列中添加时，需要传入一个Node，这个Node是一个final和static修饰的。
 	final Node node = addWaiter(Node.SHARED);
 	boolean failed = true;
@@ -443,8 +457,11 @@ private void doAcquireShared(int arg) {
 	try {
 		boolean interrupted = false;
 		for (;;) {
+		
+			// predecessor()：获取当前节点的前驱节点。
 			// 如果该节点的前驱节点，如果是前驱节点是head节点，会从尝试获取共享锁。
 			final Node p = node.predecessor();
+			
 			if (p == head) {
 				int r = tryAcquireShared(arg);
 				
@@ -461,6 +478,8 @@ private void doAcquireShared(int arg) {
 					return;
 				}
 			}
+			
+			
 			if (shouldParkAfterFailedAcquire(p, node) && parkAndCheckInterrupt()) {
 				interrupted = true;
 			}
@@ -482,9 +501,10 @@ private void setHeadAndPropagate(Node node, int propagate) {
 	// 把该节点设置为头节点，头节点的thread为空，并且没有前驱节点。
 	setHead(node);
 	
-	// propagate > 0说明获取锁成功。代表可以继续acquire
+	// propagate > 0说明获取锁成功。代表可以继续acquire。如果当前节点获取共享锁成功以后，
 	// 判断老的头结点和新的头结点，如果新老头节点为有效状态（waitStatus < 0）进入循环。
 	if (propagate > 0 || h == null || h.waitStatus < 0 || (h = head) == null || h.waitStatus < 0) {
+	
 		// 获取节点的后继节点。
 		Node s = node.next;
 		
@@ -497,7 +517,9 @@ private void setHeadAndPropagate(Node node, int propagate) {
 
 
 /**
- * 把头节点的状态改为SIGNAL，并把当前线程挂起。
+ * 头节点不为空并且头节点和尾节点不是一个节点。
+ *  	如果头节点的状态为SIGNAL，
+ * 
  */
 private void doReleaseShared() {
 
@@ -507,12 +529,12 @@ private void doReleaseShared() {
 		// 头节点不为空 【并且】 头节点和尾节点不是一个节点。
 		if (h != null && h != tail) {
 		
-			
 			int ws = h.waitStatus;
-			// 如果头节点处于唤醒状态【只要前继结点释放锁，就会通知标识为SIGNAL状态的后继结点的线程执行】
+			
+			// 如果头节点处于唤醒状态 【只要前继结点释放锁，就会通知标识为SIGNAL状态的后继结点的线程执行】
 			if (ws == Node.SIGNAL) {
 			
-				// cas把头节点改为0。如果成功，唤醒该节点的有效状态的后继节点。
+				// CAS把头节点改为0[初始化状态]。如果成功，唤醒该节点的有效状态的后继节点。
 				if (!compareAndSetWaitStatus(h, Node.SIGNAL, 0)) {
 					continue;            
 				}
@@ -520,7 +542,7 @@ private void doReleaseShared() {
 				// 唤醒该节点的有效状态的后继节点。
 				unparkSuccessor(h);
 				
-			// 如果头节点状态为0，就CAS把头结点的改为PROPAGATE。
+			// 如果头节点状态为0，就CAS把头结点的改为PROPAGATE。【PROPAGATE：共享模式中，该状态标识结点的线程处于可运行状态】
 			} else if (ws == 0 && !compareAndSetWaitStatus(h, 0, Node.PROPAGATE)) {
 				continue;                
 			}
