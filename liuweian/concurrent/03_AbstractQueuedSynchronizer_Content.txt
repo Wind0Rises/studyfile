@@ -218,7 +218,9 @@ final boolean acquireQueued(final Node node, int arg) {
 				return interrupted;
 			}
 			
-			// parkAndCheckInterrupt()方法中的LockSupport.park(this)方法会让线程挂起。
+			// shouldParkAfterFailedAcquire：设置节点为SIGNAL，如果节点状态大于0，表示节点为取消状态，把队列中节点状态为取消的节点从队列中删除
+			// 												   如果节点状态不大于0，通过CAS把节点状态修改为SIGNAL。
+			// parkAndCheckInterrupt：挂起当前线程。
 			if (shouldParkAfterFailedAcquire(p, node) && parkAndCheckInterrupt()) {
 				interrupted = true;
 			}
@@ -325,6 +327,7 @@ private void cancelAcquire(Node node) {
 				compareAndSetNext(pred, predNext, next);
 			}
 		} else {
+			// 把头节点从有效状态（waitStatus < 0）通过CAS改为取消状态（waitStatus = 0）。并把后继节点状态（waitStatus < 0）的节点的线程唤醒。
 			unparkSuccessor(node);
 		}
 
@@ -345,6 +348,8 @@ public final boolean release(int arg) {
 		
 		// 头节点不为空，并且状态不等于0(0代表是初始化状态)
 		if (h != null && h.waitStatus != 0) {
+		
+			// 把头节点从有效状态（waitStatus < 0）通过CAS改为取消状态（waitStatus = 0）。并把后继节点状态（waitStatus < 0）的节点的线程唤醒。
 			unparkSuccessor(h);
 		}
 		return true;
@@ -463,10 +468,13 @@ private void doAcquireShared(int arg) {
 			final Node p = node.predecessor();
 			
 			if (p == head) {
+			
+				// 尝试获取锁。很有可能这个时候有其他线程也要获取共享锁失败，被添加到等待队列。
 				int r = tryAcquireShared(arg);
 				
 				// 如果尝试获取共享锁成功以后，
 				if (r >= 0) {
+				
 					setHeadAndPropagate(node, r);
 					p.next = null; 
 					
@@ -479,7 +487,10 @@ private void doAcquireShared(int arg) {
 				}
 			}
 			
-			
+			// 如果还是获取共享锁失败，把当前线程挂起
+			// shouldParkAfterFailedAcquire：设置节点为SIGNAL，如果节点状态大于0，表示节点为取消状态，把队列中节点状态为取消的节点从队列中删除
+			// 												   如果节点状态不大于0，通过CAS把节点状态修改为SIGNAL。
+			// parkAndCheckInterrupt：挂起当前线程。
 			if (shouldParkAfterFailedAcquire(p, node) && parkAndCheckInterrupt()) {
 				interrupted = true;
 			}
@@ -492,6 +503,7 @@ private void doAcquireShared(int arg) {
 }
 
 /**
+ * 如果节点获取锁成功，说明这个节点就是头节点？？
  * node：当前节点
  * propagate：尝试获取共享锁的结果。
  */
@@ -508,6 +520,7 @@ private void setHeadAndPropagate(Node node, int propagate) {
 		// 获取节点的后继节点。
 		Node s = node.next;
 		
+		// 如果获取共享锁的节点存在后继节点，并且节点是共享状态的，继续释放后继节点。
 		// 如果后继节点null 【或者】 判断这个节点是否是共享模式的。
 		if (s == null || s.isShared()) {
 			doReleaseShared();
@@ -517,6 +530,8 @@ private void setHeadAndPropagate(Node node, int propagate) {
 
 
 /**
+ * 节点的初始状态为0。
+ * 队列只能从前往后走。
  * 头节点不为空并且头节点和尾节点不是一个节点。
  *  	如果头节点的状态为SIGNAL，
  * 
@@ -529,9 +544,13 @@ private void doReleaseShared() {
 		// 头节点不为空 【并且】 头节点和尾节点不是一个节点。
 		if (h != null && h != tail) {
 		
+			// 如果是共享锁的话，这个状态是SIGNAL。
+			// 获取头节点的状态。
 			int ws = h.waitStatus;
 			
-			// 如果头节点处于唤醒状态 【只要前继结点释放锁，就会通知标识为SIGNAL状态的后继结点的线程执行】
+			
+			// 挂起的节点会通过shouldParkAfterFailedAcquire方法把节点的前驱节点设置为SIGNAL。
+			// 如果头节点处于唤醒状态，直接唤醒头节点。 【只要前继结点释放锁，就会通知标识为SIGNAL状态的后继结点的线程执行】
 			if (ws == Node.SIGNAL) {
 			
 				// CAS把头节点改为0[初始化状态]。如果成功，唤醒该节点的有效状态的后继节点。
@@ -539,7 +558,7 @@ private void doReleaseShared() {
 					continue;            
 				}
 				
-				// 唤醒该节点的有效状态的后继节点。
+				// 把头节点从有效状态（waitStatus < 0）通过CAS改为取消状态（waitStatus = 0）。并把后继节点状态（waitStatus < 0）的节点的线程唤醒。
 				unparkSuccessor(h);
 				
 			// 如果头节点状态为0，就CAS把头结点的改为PROPAGATE。【PROPAGATE：共享模式中，该状态标识结点的线程处于可运行状态】
