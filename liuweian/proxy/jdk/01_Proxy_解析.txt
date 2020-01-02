@@ -1,0 +1,627 @@
+* JDK动态代理类会生成：Object的toString()、hashCode()、equals()方法，和被代理接口的方法。
+* JDK动态代理类都会基础java.lang.reflect.Proxy类，实现被代理类实现的接口。
+* JDK动态代理类的调用方法：都是使用super.h.invoke(Object proxy, Method method, Object[] args)方法，
+						   super.h是一个InvokeHandler，用于分派方法调用的，最终调用的你自己实现的InvokeHandler对象。
+* 生成的代理类，默认生成一个参数为InvocationHandler的构造函数，这个参数调用父类的构造函数，并设置InvocationHandler。
+
+
+
+/**
+ * 返回指定接口的代理类的实例，该实例将方法调用dispatches(分派)到指定的invoke handler程序。
+ * @param interfaces 代理类要实现的接口列表，代理类可能不仅仅实现了一个接口。
+ * @param h h是一个InvokeHandler，用于分派方法调用的。
+ */
+location：Proxy
+public static Object newProxyInstance(ClassLoader loader, Class<?>[] interfaces, InvocationHandler h) throws IllegalArgumentException{
+	Objects.requireNonNull(h);
+
+	// 复制代理类实现的接口
+	final Class<?>[] intfs = interfaces.clone();
+	
+	// 获取安全管理器。
+	final SecurityManager sm = System.getSecurityManager();
+	if (sm != null) {
+		checkProxyAccess(Reflection.getCallerClass(), loader, intfs);
+	}
+
+	/*
+	 * 查找或者生成指定的代理类。【【【重要】】】
+	 */
+	Class<?> cl = getProxyClass0(loader, intfs);
+
+	/*
+	 * 使用特定的Invocation Handler调用其的构造函数。
+	 */
+	try {
+		if (sm != null) {
+			checkNewProxyPermission(Reflection.getCallerClass(), cl);
+		}
+
+		// 获取构造函数。
+		final Constructor<?> cons = cl.getConstructor(constructorParams);
+		
+		// 
+		final InvocationHandler ih = h;
+		
+		if (!Modifier.isPublic(cl.getModifiers())) {
+			AccessController.doPrivileged(new PrivilegedAction<Void>() {
+				public Void run() {
+					cons.setAccessible(true);
+					return null;
+				}
+			});
+		}
+		
+		// 生成代理类的实例对象。
+		return cons.newInstance(new Object[]{h});
+		
+	} catch (IllegalAccessException|InstantiationException e) {
+		throw new InternalError(e.toString(), e);
+	} catch (InvocationTargetException e) {
+		Throwable t = e.getCause();
+		if (t instanceof RuntimeException) {
+			throw (RuntimeException) t;
+		} else {
+			throw new InternalError(t.toString(), t);
+		}
+	} catch (NoSuchMethodException e) {
+		throw new InternalError(e.toString(), e);
+	}
+}
+
+/**
+ * 生成代理类。 在调用此方法之前，必须调用checkProxyAccess方法执行权限检查。
+ */
+location：Proxy
+private static Class<?> getProxyClass0(ClassLoader loader, Class<?>... interfaces) {
+	if (interfaces.length > 65535) {
+		throw new IllegalArgumentException("interface limit exceeded");
+	}
+
+	// proxyClassCache：缓存代理类的
+	return proxyClassCache.get(loader, interfaces);
+}
+
+/**
+ *
+ */
+location：WeakCache
+public V get(K key, P parameter) {
+	// 参数校验。
+	Objects.requireNonNull(parameter);
+
+	expungeStaleEntries();
+
+	// 生成一个key
+	Object cacheKey = CacheKey.valueOf(key, refQueue);
+
+	// 从缓存中获取。
+	ConcurrentMap<Object, Supplier<V>> valuesMap = map.get(cacheKey);
+	
+	if (valuesMap == null) {
+	
+		// putIfAbsent()：如果map中存在key，直接返回老的key；如果不存在，进行put操作。
+		ConcurrentMap<Object, Supplier<V>> oldValuesMap = map.putIfAbsent(cacheKey, valuesMap = new ConcurrentHashMap<>());
+		
+		if (oldValuesMap != null) {
+			valuesMap = oldValuesMap;
+		}
+	}
+
+	// subKeyFactory.apply(..)：用于通过给定的ClassLoader和interfaces数组生成、定义并返回代理类。
+	Object subKey = Objects.requireNonNull(subKeyFactory.apply(key, parameter));
+	
+	// 判断是否有缓存，
+	Supplier<V> supplier = valuesMap.get(subKey);
+	
+	Factory factory = null;
+
+	while (true) {
+		// 如果缓存有，直接在缓存中获取，并返回。
+		if (supplier != null) {
+		
+			V value = supplier.get();
+			if (value != null) {
+				return value;
+			}
+		}
+		if (factory == null) {
+			factory = new Factory(key, parameter, subKey, valuesMap);
+		}
+
+		if (supplier == null) {
+		
+			// 把factory放入缓存中。
+			supplier = valuesMap.putIfAbsent(subKey, factory);
+			
+			if (supplier == null) {
+				supplier = factory;
+			}
+		} else {
+			if (valuesMap.replace(subKey, supplier, factory)) {
+				supplier = factory;
+			} else {
+				supplier = valuesMap.get(subKey);
+			}
+		}
+	}
+}
+
+
+/**
+ * 一个工厂函数，用于通过给定的ClassLoader和interfaces数组生成、定义并返回代理类。
+ * BiFunction：是一个函数式接口。
+ */
+location：Proxy
+private static final class ProxyClassFactory implements BiFunction<ClassLoader, Class<?>[], Class<?>> {
+	// 代理类的类名称前缀：$Proxy
+	private static final String proxyClassNamePrefix = "$Proxy";
+
+	// 下一个用于生成唯一代理类名称的数字
+	private static final AtomicLong nextUniqueNumber = new AtomicLong();
+
+	@Override
+	public Class<?> apply(ClassLoader loader, Class<?>[] interfaces) {
+
+		Map<Class<?>, Boolean> interfaceSet = new IdentityHashMap<>(interfaces.length);
+		
+		// 遍历接口。
+		for (Class<?> intf : interfaces) {
+			
+			// 验证ClassLoader是否将此接口的名称解析为相同的Class对象。
+			Class<?> interfaceClass = null;
+			try {
+				// forName(..)：第二个参数，用于确定是否要进行初始化操作。
+				interfaceClass = Class.forName(intf.getName(), false, loader);
+			} catch (ClassNotFoundException e) {
+			
+			}
+			
+			// 判断这个类加载器加载的类与给定的类是否是同一个。
+			if (interfaceClass != intf) {
+				throw new IllegalArgumentException(intf + " is not visible from class loader");
+			}
+			
+			
+			// 验证加载的类，是否是一个接口。这就是为什么JDK只能代理接口的原因。
+			if (!interfaceClass.isInterface()) {
+				throw new IllegalArgumentException(interfaceClass.getName() + " is not an interface");
+			}
+			
+
+			 // 验证加载的类是不是一个副本
+			if (interfaceSet.put(interfaceClass, Boolean.TRUE) != null) {
+				throw new IllegalArgumentException("repeated interface: " + interfaceClass.getName());
+			}
+		}
+
+		String proxyPkg = null;
+		int accessFlags = Modifier.PUBLIC | Modifier.FINAL;
+
+		
+		// 记录非公共代理接口的包，以便将在同一包中定义代理类。 验证所有非公共代理接口都在同一程序包中。
+		for (Class<?> intf : interfaces) {
+			
+			// 获取类的修饰符			
+			int flags = intf.getModifiers();
+			
+			// 判断是否是public。
+			if (!Modifier.isPublic(flags)) {
+				accessFlags = Modifier.FINAL;
+				String name = intf.getName();
+				int n = name.lastIndexOf('.');
+				
+				// 获取包名。
+				String pkg = ((n == -1) ? "" : name.substring(0, n + 1));
+				if (proxyPkg == null) {
+					proxyPkg = pkg;
+				
+				// 不在同一个包下。
+				} else if (!pkg.equals(proxyPkg)) {
+					throw new IllegalArgumentException("non-public interfaces from different packages");
+				}
+			}
+		}
+
+		// 如果没有non-public的代理接口。使用com.sun.proxy包。
+		if (proxyPkg == null) {
+			proxyPkg = ReflectUtil.PROXY_PACKAGE + ".";
+		}
+
+		// 获取代理类的名称。
+		long num = nextUniqueNumber.getAndIncrement();
+		String proxyName = proxyPkg + proxyClassNamePrefix + num;
+
+		// 【【【【生成一个指定的代理类   --> 代理类的class文件。】】】】
+		byte[] proxyClassFile = ProxyGenerator.generateProxyClass(proxyName, interfaces, accessFlags);
+		
+		try {
+			// defineClass0(..)：是一个native方法，生成一个代理类的Class对象。
+			return defineClass0(loader, proxyName, proxyClassFile, 0, proxyClassFile.length);
+		} catch (ClassFormatError e) {
+			throw new IllegalArgumentException(e.toString());
+		}
+	}
+}
+
+/**
+ * var0：代理类名称
+ * var1：被代理类的实现的接口名称。
+ * var2：修饰符。
+ */
+location：ProxyGenerator
+public static byte[] generateProxyClass(final String var0, Class<?>[] var1, int var2) {
+	
+	// 获取ProxyGenerator对象。
+	ProxyGenerator var3 = new ProxyGenerator(var0, var1, var2);
+	
+	// 生成class文件。
+	final byte[] var4 = var3.generateClassFile();
+	if (saveGeneratedFiles) {
+		AccessController.doPrivileged(new PrivilegedAction<Void>() {
+			public Void run() {
+				try {
+					int var1 = var0.lastIndexOf(46);
+					Path var2;
+					if (var1 > 0) {
+						Path var3 = Paths.get(var0.substring(0, var1).replace('.', File.separatorChar));
+						Files.createDirectories(var3);
+						var2 = var3.resolve(var0.substring(var1 + 1, var0.length()) + ".class");
+					} else {
+						var2 = Paths.get(var0 + ".class");
+					}
+
+					Files.write(var2, var4, new OpenOption[0]);
+					return null;
+				} catch (IOException var4x) {
+					throw new InternalError("I/O exception saving generated file: " + var4x);
+				}
+			}
+		});
+	}
+
+	return var4;
+}
+
+
+/**
+ * 可以看到generateClassFile()方法是按照Class文件结构进行动态拼接的。什么是Class文件呢？在这里我们先要说明下，我们平时编写的Java文件是以.java结尾的，
+ * 在编写好了之后通过编译器进行编译会生成.class文件，这个.class文件就是Class文件。Java程序的执行只依赖于Class文件，和Java文件是没有关系的。这个Class
+ * 文件描述了一个类的信息，当我们需要使用到一个类时，Java虚拟机就会提前去加载这个类的Class文件并进行初始化和相关的检验工作，Java虚拟机能够保证在你使
+ * 用到这个类之前就会完成这些工作，我们只需要安心的去使用它就好了，而不必关心Java虚拟机是怎样加载它的。当然，Class文件并不一定非得通过编译Java文件而
+ * 来，你甚至可以直接通过文本编辑器来编写Class文件。在这里，JDK动态代理就是通过程序来动态生成Class文件的。我们再次回到上面的代码中，可以看到，生成
+ * Class文件主要分为三步：
+ * 
+ * 		第一步：收集所有要生成的代理方法，将其包装成ProxyMethod对象并注册到Map集合中。
+ * 		第二步：收集所有要为Class文件生成的字段信息和方法信息。
+ * 		第三步：完成了上面的工作后，开始组装Class文件。
+ * 
+ * 我们知道一个类的核心部分就是它的字段和方法。我们重点聚焦第二步，看看它为代理类生成了哪些字段和方法。在第二步中，按顺序做了下面四件事。
+ * 		1.为代理类生成一个带参构造器，传入InvocationHandler实例的引用并调用父类的带参构造器。
+ * 		2.遍历代理方法Map集合，为每个代理方法生成对应的Method类型静态域，并将其添加到fields集合中。
+ * 		3.遍历代理方法Map集合，为每个代理方法生成对应的MethodInfo对象，并将其添加到methods集合中。
+ * 		4.为代理类生成静态初始化方法，该静态初始化方法主要是将每个代理方法的引用赋值给对应的静态字段。
+ */
+private byte[] generateClassFile() {
+	/* 
+	 * 第一步, 将所有的方法组装成ProxyMethod对象。
+	 */
+	// 首先为代理类生成toString, hashCode, equals等代理方法
+	this.addProxyMethod(hashCodeMethod, Object.class);
+	this.addProxyMethod(equalsMethod, Object.class);
+	this.addProxyMethod(toStringMethod, Object.class);
+	Class[] var1 = this.interfaces;
+	int var2 = var1.length;
+
+	
+	// 遍历每一个接口的每一个方法, 并且为其生成ProxyMethod对象
+	int var3;
+	Class var4;
+	for(var3 = 0; var3 < var2; ++var3) {
+		var4 = var1[var3];
+		Method[] var5 = var4.getMethods();
+		int var6 = var5.length;
+
+		for(int var7 = 0; var7 < var6; ++var7) {
+			Method var8 = var5[var7];
+			this.addProxyMethod(var8, var4);
+		}
+	}
+
+	// 对于具有相同签名的代理方法, 检验方法的返回值是否兼容
+	Iterator var11 = this.proxyMethods.values().iterator();
+	List var12;
+	while(var11.hasNext()) {
+		var12 = (List)var11.next();
+		checkReturnTypes(var12);
+	}
+
+	/**
+	 * 第二步, 组装要生成的class文件的所有的字段信息和方法信息
+	 */
+	Iterator var15;
+	try {
+		// 添加构造器方法
+		this.methods.add(this.generateConstructor());
+		var11 = this.proxyMethods.values().iterator();
+
+		// 遍历缓存中的代理方法
+		while(var11.hasNext()) {
+			var12 = (List)var11.next();
+			var15 = var12.iterator();
+
+			while(var15.hasNext()) {
+				ProxyGenerator.ProxyMethod var16 = (ProxyGenerator.ProxyMethod)var15.next();
+				// 添加代理类的静态字段, 例如:private static Method m1;
+				this.fields.add(new ProxyGenerator.FieldInfo(var16.methodFieldName, "Ljava/lang/reflect/Method;", 10));
+				
+				// 添加代理类的代理方法
+				this.methods.add(var16.generateMethod());
+			}
+		}
+		
+		// 添加代理类的静态字段初始化方法
+		this.methods.add(this.generateStaticInitializer());
+	} catch (IOException var10) {
+		throw new InternalError("unexpected I/O Exception", var10);
+	}
+
+	// 验证方法和字段集合不能大于65535
+	if (this.methods.size() > 65535) {
+		throw new IllegalArgumentException("method limit exceeded");
+	} else if (this.fields.size() > 65535) {
+		throw new IllegalArgumentException("field limit exceeded");
+	} else {
+	
+		/**
+		 * 第三步, 写入最终的class文件
+		 */
+		// 验证常量池中存在代理类的全限定名
+		this.cp.getClass(dotToSlash(this.className));
+		// 验证常量池中存在代理类父类的全限定名, 父类名为:"java/lang/reflect/Proxy"
+		this.cp.getClass("java/lang/reflect/Proxy");
+		var1 = this.interfaces;
+		var2 = var1.length;
+
+		// 验证常量池存在代理类接口的全限定名
+		for(var3 = 0; var3 < var2; ++var3) {
+			var4 = var1[var3];
+			this.cp.getClass(dotToSlash(var4.getName()));
+		}
+
+		// 接下来要开始写入文件了,设置常量池只读
+		this.cp.setReadOnly();
+		ByteArrayOutputStream var13 = new ByteArrayOutputStream();
+		DataOutputStream var14 = new DataOutputStream(var13);
+
+		try {
+			// 写入魔数
+			var14.writeInt(-889275714);
+			
+			// 写入次版本号
+			var14.writeShort(0);
+			
+			// 写入主版本号
+			var14.writeShort(49);
+			
+			// 写入常量池
+			this.cp.write(var14);
+			
+			// 写入访问修饰符
+			var14.writeShort(this.accessFlags);
+			
+			// 写入类索引
+			var14.writeShort(this.cp.getClass(dotToSlash(this.className)));
+			
+			// 写入父类索引, 【【【【【【【生成的代理类都继承自Proxy】】】】】】】
+			var14.writeShort(this.cp.getClass("java/lang/reflect/Proxy"));
+			
+			// 写入接口计数值
+			var14.writeShort(this.interfaces.length);
+			Class[] var17 = this.interfaces;
+			int var18 = var17.length;
+
+			// 写入接口集合
+			for(int var19 = 0; var19 < var18; ++var19) {
+				Class var22 = var17[var19];
+				var14.writeShort(this.cp.getClass(dotToSlash(var22.getName())));
+			}
+
+			// 写入字段计数值
+			var14.writeShort(this.fields.size());
+			var15 = this.fields.iterator();
+
+			// 写入字段集合 
+			while(var15.hasNext()) {
+				ProxyGenerator.FieldInfo var20 = (ProxyGenerator.FieldInfo)var15.next();
+				var20.write(var14);
+			}
+
+			// 写入方法计数值
+			var14.writeShort(this.methods.size());
+			var15 = this.methods.iterator();
+
+			// 写入方法集合
+			while(var15.hasNext()) {
+				ProxyGenerator.MethodInfo var21 = (ProxyGenerator.MethodInfo)var15.next();
+				var21.write(var14);
+			}
+
+			// 写入属性计数值, 代理类class文件没有属性所以为0
+			var14.writeShort(0);
+			
+			// 转换成二进制数组输出
+			return var13.toByteArray();
+		} catch (IOException var9) {
+			throw new InternalError("unexpected I/O Exception", var9);
+		}
+	}
+}
+
+
+
+############################################################################################################################################################
+##########################################################         Cglib        ############################################################################
+############################################################################################################################################################
+
+
+生成的Class类：
+	生成的代理类：extends ByProxyClass implements Factory。
+	生成的类其中另外两个：extends FastClass
+
+
+
+location：Enhancer
+public Object create() {
+	classOnly = false;
+	argumentTypes = null;
+	return createHelper();
+}
+
+location：Enhancer
+private Object createHelper() {
+	// 检查。
+	preValidate();
+	
+	// 创建一个key。
+	Object key = KEY_FACTORY.newInstance((superclass != null) ? superclass.getName() : null,
+			ReflectUtils.getNames(interfaces),
+			filter == ALL_ZERO ? null : new WeakCacheKey<CallbackFilter>(filter),
+			callbackTypes,
+			useFactory,
+			interceptDuringConstruction,
+			serialVersionUID);
+	
+	this.currentKey = key;
+	
+	Object result = super.create(key);
+	return result;
+}
+
+location：Enhancer --> AbstractClassGenerator
+protected Object create(Object key) {
+	try {
+		ClassLoader loader = getClassLoader();
+		Map<ClassLoader, ClassLoaderData> cache = CACHE;
+		ClassLoaderData data = cache.get(loader);
+		
+		if (data == null) {
+			synchronized (AbstractClassGenerator.class) {
+				cache = CACHE;
+				data = cache.get(loader);
+				if (data == null) {
+					Map<ClassLoader, ClassLoaderData> newCache = new WeakHashMap<ClassLoader, ClassLoaderData>(cache);
+					data = new ClassLoaderData(loader);
+					newCache.put(loader, data);
+					CACHE = newCache;
+				}
+			}
+		}
+		
+		this.key = key;
+		
+		// 创建代理对类，【【重要】】
+		Object obj = data.get(this, getUseCache());
+		
+		if (obj instanceof Class) {
+			return firstInstance((Class) obj);
+		}
+		
+		return nextInstance(obj);
+	} catch (RuntimeException e) {
+		throw e;
+	} catch (Error e) {
+		throw e;
+	} catch (Exception e) {
+		throw new CodeGenerationException(e);
+	}
+}
+
+/**
+ * useCache：是否使用缓存。
+ */
+location：AbstractClassGenerator.ClassLoaderData
+public Object get(AbstractClassGenerator gen, boolean useCache) {
+	if (!useCache) {
+		return gen.generate(ClassLoaderData.this);
+	} else {
+		Object cachedValue = generatedClasses.get(gen);
+		return gen.unwrapCachedValue(cachedValue);
+	}
+}
+
+/**
+ *
+ */
+location：Enhancer
+protected Object nextInstance(Object instance) {
+	EnhancerFactoryData data = (EnhancerFactoryData) instance;
+
+	if (classOnly) {
+		return data.generatedClass;
+	}
+
+	Class[] argumentTypes = this.argumentTypes;
+	Object[] arguments = this.arguments;
+	if (argumentTypes == null) {
+		argumentTypes = Constants.EMPTY_CLASS_ARRAY;
+		arguments = null;
+	}
+	
+	return data.newInstance(argumentTypes, arguments, callbacks);
+}
+
+/**
+ *
+ */
+location：Enhancer
+public Object newInstance(Class[] argumentTypes, Object[] arguments, Callback[] callbacks) {
+	setThreadCallbacks(callbacks);
+	
+	try {
+		if (primaryConstructorArgTypes == argumentTypes || Arrays.equals(primaryConstructorArgTypes, argumentTypes)) {
+			return ReflectUtils.newInstance(primaryConstructor, arguments);
+		}
+		
+		return ReflectUtils.newInstance(generatedClass, argumentTypes, arguments);
+		
+	} finally {
+		setThreadCallbacks(null);
+	}
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

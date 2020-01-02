@@ -1,0 +1,79 @@
+package com.sun.proxy;
+
+import com.liu.theory.aop.reflect.ITestInterface;
+import java.lang.reflect.InvocationHandler;
+import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
+import java.lang.reflect.UndeclaredThrowableException;
+
+/**
+ * 代理类都是继承Proxy类。
+ * 调用都是通过Proxy类的成员变量InvocationHandler的invoke(..)方法调用的。
+ * 默认实现Object类的toString、hashCode、equals这三个方法。
+ * 其默认生成一个有参构造函数，传入InvocationHandler,并调用父类的构造函数。
+ */
+public final class $Proxy0 extends Proxy implements ITestInterface {
+
+   private static Method m1;
+   private static Method m2;
+   private static Method m3;
+   private static Method m0;
+
+
+   public $Proxy0(InvocationHandler var1) throws  {
+      super(var1);
+   }
+
+   public final boolean equals(Object var1) throws  {
+      try {
+         return ((Boolean)super.h.invoke(this, m1, new Object[]{var1})).booleanValue();
+      } catch (RuntimeException | Error var3) {
+         throw var3;
+      } catch (Throwable var4) {
+         throw new UndeclaredThrowableException(var4);
+      }
+   }
+
+   public final String toString() throws  {
+      try {
+         return (String)super.h.invoke(this, m2, (Object[])null);
+      } catch (RuntimeException | Error var2) {
+         throw var2;
+      } catch (Throwable var3) {
+         throw new UndeclaredThrowableException(var3);
+      }
+   }
+
+   public final void testMethod(String var1) throws  {
+      try {
+         super.h.invoke(this, m3, new Object[]{var1});
+      } catch (RuntimeException | Error var3) {
+         throw var3;
+      } catch (Throwable var4) {
+         throw new UndeclaredThrowableException(var4);
+      }
+   }
+
+   public final int hashCode() throws  {
+      try {
+         return ((Integer)super.h.invoke(this, m0, (Object[])null)).intValue();
+      } catch (RuntimeException | Error var2) {
+         throw var2;
+      } catch (Throwable var3) {
+         throw new UndeclaredThrowableException(var3);
+      }
+   }
+
+   static {
+      try {
+         m1 = Class.forName("java.lang.Object").getMethod("equals", new Class[]{Class.forName("java.lang.Object")});
+         m2 = Class.forName("java.lang.Object").getMethod("toString", new Class[0]);
+         m3 = Class.forName("com.liu.theory.aop.reflect.ITestInterface").getMethod("testMethod", new Class[]{Class.forName("java.lang.String")});
+         m0 = Class.forName("java.lang.Object").getMethod("hashCode", new Class[0]);
+      } catch (NoSuchMethodException var2) {
+         throw new NoSuchMethodError(var2.getMessage());
+      } catch (ClassNotFoundException var3) {
+         throw new NoClassDefFoundError(var3.getMessage());
+      }
+   }
+}

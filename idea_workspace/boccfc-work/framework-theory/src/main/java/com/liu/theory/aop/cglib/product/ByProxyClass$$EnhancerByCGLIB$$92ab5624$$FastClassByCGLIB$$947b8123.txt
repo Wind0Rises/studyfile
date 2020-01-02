@@ -1,0 +1,282 @@
+package com.liu.theory.aop.cglib;
+
+import java.lang.reflect.Method;
+import net.sf.cglib.core.ReflectUtils;
+import net.sf.cglib.core.Signature;
+import net.sf.cglib.proxy.Callback;
+import net.sf.cglib.proxy.Factory;
+import net.sf.cglib.proxy.MethodInterceptor;
+import net.sf.cglib.proxy.MethodProxy;
+
+public class ByProxyClass$$EnhancerByCGLIB$$92ab5624 extends ByProxyClass implements Factory {
+    private boolean CGLIB$BOUND;
+
+    public static Object CGLIB$FACTORY_DATA;
+
+    private static final ThreadLocal CGLIB$THREAD_CALLBACKS;
+
+    private static final Callback[] CGLIB$STATIC_CALLBACKS;
+
+    /**
+     * 生成的拦截器。
+     */
+    private MethodInterceptor CGLIB$CALLBACK_0;
+
+    private static Object CGLIB$CALLBACK_FILTER;
+
+    /**
+     * 被代理方法
+     */
+    private static final Method CGLIB$byProxyMethod$0$Method;
+
+    /**
+     * 代理方法。
+     */
+    private static final MethodProxy CGLIB$byProxyMethod$0$Proxy;
+
+    private static final Object[] CGLIB$emptyArgs;
+
+    private static final Method CGLIB$equals$1$Method;
+
+    private static final MethodProxy CGLIB$equals$1$Proxy;
+
+    private static final Method CGLIB$toString$2$Method;
+
+    private static final MethodProxy CGLIB$toString$2$Proxy;
+
+    private static final Method CGLIB$hashCode$3$Method;
+
+    private static final MethodProxy CGLIB$hashCode$3$Proxy;
+
+    private static final Method CGLIB$clone$4$Method;
+
+    private static final MethodProxy CGLIB$clone$4$Proxy;
+
+    static void CGLIB$STATICHOOK1() {
+        CGLIB$THREAD_CALLBACKS = new ThreadLocal();
+
+        CGLIB$emptyArgs = new Object[0];
+
+        // 代理类。
+        Class clazz1 = Class.forName("com.liu.theory.aop.cglib.ByProxyClass$$EnhancerByCGLIB$$92ab5624");
+
+        // 被代理类。
+        Class clazz2;
+        CGLIB$byProxyMethod$0$Method = ReflectUtils.findMethods(new String[] { "byProxyMethod", "()V" }, (clazz2 = Class.forName("com.liu.theory.aop.cglib.ByProxyClass")).getDeclaredMethods())[0];
+        CGLIB$byProxyMethod$0$Proxy = MethodProxy.create(clazz2, clazz1, "()V", "byProxyMethod", "CGLIB$byProxyMethod$0");
+        ReflectUtils.findMethods(new String[] { "byProxyMethod", "()V" }, (clazz2 = Class.forName("com.liu.theory.aop.cglib.ByProxyClass")).getDeclaredMethods());
+        CGLIB$equals$1$Method = ReflectUtils.findMethods(new String[] { "equals", "(Ljava/lang/Object;)Z", "toString", "()Ljava/lang/String;", "hashCode", "()I", "clone", "()Ljava/lang/Object;" }, (clazz2 = Class.forName("java.lang.Object")).getDeclaredMethods())[0];
+        CGLIB$equals$1$Proxy = MethodProxy.create(clazz2, clazz1, "(Ljava/lang/Object;)Z", "equals", "CGLIB$equals$1");
+        CGLIB$toString$2$Method = ReflectUtils.findMethods(new String[] { "equals", "(Ljava/lang/Object;)Z", "toString", "()Ljava/lang/String;", "hashCode", "()I", "clone", "()Ljava/lang/Object;" }, (clazz2 = Class.forName("java.lang.Object")).getDeclaredMethods())[1];
+        CGLIB$toString$2$Proxy = MethodProxy.create(clazz2, clazz1, "()Ljava/lang/String;", "toString", "CGLIB$toString$2");
+        CGLIB$hashCode$3$Method = ReflectUtils.findMethods(new String[] { "equals", "(Ljava/lang/Object;)Z", "toString", "()Ljava/lang/String;", "hashCode", "()I", "clone", "()Ljava/lang/Object;" }, (clazz2 = Class.forName("java.lang.Object")).getDeclaredMethods())[2];
+        CGLIB$hashCode$3$Proxy = MethodProxy.create(clazz2, clazz1, "()I", "hashCode", "CGLIB$hashCode$3");
+        CGLIB$clone$4$Method = ReflectUtils.findMethods(new String[] { "equals", "(Ljava/lang/Object;)Z", "toString", "()Ljava/lang/String;", "hashCode", "()I", "clone", "()Ljava/lang/Object;" }, (clazz2 = Class.forName("java.lang.Object")).getDeclaredMethods())[3];
+        CGLIB$clone$4$Proxy = MethodProxy.create(clazz2, clazz1, "()Ljava/lang/Object;", "clone", "CGLIB$clone$4");
+        ReflectUtils.findMethods(new String[] { "equals", "(Ljava/lang/Object;)Z", "toString", "()Ljava/lang/String;", "hashCode", "()I", "clone", "()Ljava/lang/Object;" }, (clazz2 = Class.forName("java.lang.Object")).getDeclaredMethods());
+    }
+
+    final void CGLIB$byProxyMethod$0() {
+        super.byProxyMethod();
+    }
+
+    /**
+     * 代理类中的被代理方法。使用final进行修饰。
+     */
+    public final void byProxyMethod() {
+        if (this.CGLIB$CALLBACK_0 == null) {
+            this.CGLIB$CALLBACK_0;
+            CGLIB$BIND_CALLBACKS(this);
+        }
+        if (this.CGLIB$CALLBACK_0 != null) {
+            return;
+        }
+        super.byProxyMethod();
+    }
+
+    final boolean CGLIB$equals$1(Object paramObject) {
+        return super.equals(paramObject);
+    }
+
+    public final boolean equals(Object paramObject) {
+        if (this.CGLIB$CALLBACK_0 == null) {
+            this.CGLIB$CALLBACK_0;
+            CGLIB$BIND_CALLBACKS(this);
+        }
+
+        if (this.CGLIB$CALLBACK_0 != null) {
+            this.CGLIB$CALLBACK_0.intercept(this, CGLIB$equals$1$Method, new Object[] { paramObject }, CGLIB$equals$1$Proxy);
+            return (this.CGLIB$CALLBACK_0.intercept(this, CGLIB$equals$1$Method, new Object[] { paramObject }, CGLIB$equals$1$Proxy) == null) ? false : ((Boolean)this.CGLIB$CALLBACK_0.intercept(this, CGLIB$equals$1$Method, new Object[] { paramObject }, CGLIB$equals$1$Proxy)).booleanValue();
+        }
+
+        return super.equals(paramObject);
+    }
+
+    final String CGLIB$toString$2() {
+        return super.toString();
+    }
+
+    public final String toString() {
+        if (this.CGLIB$CALLBACK_0 == null) {
+            this.CGLIB$CALLBACK_0;
+            CGLIB$BIND_CALLBACKS(this);
+        }
+        return (this.CGLIB$CALLBACK_0 != null) ? (String)this.CGLIB$CALLBACK_0.intercept(this, CGLIB$toString$2$Method, CGLIB$emptyArgs, CGLIB$toString$2$Proxy) : super.toString();
+    }
+
+    final int CGLIB$hashCode$3() { return super.hashCode(); }
+
+    public final int hashCode() {
+        if (this.CGLIB$CALLBACK_0 == null) {
+            this.CGLIB$CALLBACK_0;
+            CGLIB$BIND_CALLBACKS(this);
+        }
+        if (this.CGLIB$CALLBACK_0 != null) {
+            this.CGLIB$CALLBACK_0.intercept(this, CGLIB$hashCode$3$Method, CGLIB$emptyArgs, CGLIB$hashCode$3$Proxy);
+            return (this.CGLIB$CALLBACK_0.intercept(this, CGLIB$hashCode$3$Method, CGLIB$emptyArgs, CGLIB$hashCode$3$Proxy) == null) ? 0 : ((Number)this.CGLIB$CALLBACK_0.intercept(this, CGLIB$hashCode$3$Method, CGLIB$emptyArgs, CGLIB$hashCode$3$Proxy)).intValue();
+        }
+        return super.hashCode();
+    }
+
+    final Object CGLIB$clone$4() throws CloneNotSupportedException { return super.clone(); }
+
+    protected final Object clone() throws CloneNotSupportedException {
+        if (this.CGLIB$CALLBACK_0 == null) {
+            this.CGLIB$CALLBACK_0;
+            CGLIB$BIND_CALLBACKS(this);
+        }
+        return (this.CGLIB$CALLBACK_0 != null) ? this.CGLIB$CALLBACK_0.intercept(this, CGLIB$clone$4$Method, CGLIB$emptyArgs, CGLIB$clone$4$Proxy) : super.clone();
+    }
+
+    public static MethodProxy CGLIB$findMethodProxy(Signature paramSignature) { // Byte code:
+        //   0: aload_0
+        //   1: invokevirtual toString : ()Ljava/lang/String;
+        //   4: dup
+        //   5: invokevirtual hashCode : ()I
+        //   8: lookupswitch default -> 120, -508378822 -> 60, 1826985398 -> 72, 1913648695 -> 84, 1984935277 -> 96, 2057713757 -> 108
+        //   60: ldc 'clone()Ljava/lang/Object;'
+        //   62: invokevirtual equals : (Ljava/lang/Object;)Z
+        //   65: ifeq -> 121
+        //   68: getstatic com/liu/theory/aop/cglib/ByProxyClass$$EnhancerByCGLIB$$92ab5624.CGLIB$clone$4$Proxy : Lnet/sf/cglib/proxy/MethodProxy;
+        //   71: areturn
+        //   72: ldc 'equals(Ljava/lang/Object;)Z'
+        //   74: invokevirtual equals : (Ljava/lang/Object;)Z
+        //   77: ifeq -> 121
+        //   80: getstatic com/liu/theory/aop/cglib/ByProxyClass$$EnhancerByCGLIB$$92ab5624.CGLIB$equals$1$Proxy : Lnet/sf/cglib/proxy/MethodProxy;
+        //   83: areturn
+        //   84: ldc 'toString()Ljava/lang/String;'
+        //   86: invokevirtual equals : (Ljava/lang/Object;)Z
+        //   89: ifeq -> 121
+        //   92: getstatic com/liu/theory/aop/cglib/ByProxyClass$$EnhancerByCGLIB$$92ab5624.CGLIB$toString$2$Proxy : Lnet/sf/cglib/proxy/MethodProxy;
+        //   95: areturn
+        //   96: ldc 'hashCode()I'
+        //   98: invokevirtual equals : (Ljava/lang/Object;)Z
+        //   101: ifeq -> 121
+        //   104: getstatic com/liu/theory/aop/cglib/ByProxyClass$$EnhancerByCGLIB$$92ab5624.CGLIB$hashCode$3$Proxy : Lnet/sf/cglib/proxy/MethodProxy;
+        //   107: areturn
+        //   108: ldc 'byProxyMethod()V'
+        //   110: invokevirtual equals : (Ljava/lang/Object;)Z
+        //   113: ifeq -> 121
+        //   116: getstatic com/liu/theory/aop/cglib/ByProxyClass$$EnhancerByCGLIB$$92ab5624.CGLIB$byProxyMethod$0$Proxy : Lnet/sf/cglib/proxy/MethodProxy;
+        //   119: areturn
+        //   120: pop
+        //   121: aconst_null
+        //   122: areturn
+    }
+
+    public ByProxyClass$$EnhancerByCGLIB$$92ab5624() {
+        CGLIB$BIND_CALLBACKS(this);
+    }
+
+    public static void CGLIB$SET_THREAD_CALLBACKS(Callback[] paramArrayOfCallback) {
+        CGLIB$THREAD_CALLBACKS.set(paramArrayOfCallback);
+    }
+
+    public static void CGLIB$SET_STATIC_CALLBACKS(Callback[] paramArrayOfCallback) {
+        CGLIB$STATIC_CALLBACKS = paramArrayOfCallback;
+    }
+
+    private static final void CGLIB$BIND_CALLBACKS(Object paramObject) {
+        ByProxyClass$$EnhancerByCGLIB$$92ab5624 byProxyClass$$EnhancerByCGLIB$$92ab5624 = (ByProxyClass$$EnhancerByCGLIB$$92ab5624)paramObject;
+
+        if (!byProxyClass$$EnhancerByCGLIB$$92ab5624.CGLIB$BOUND) {
+
+            byProxyClass$$EnhancerByCGLIB$$92ab5624.CGLIB$BOUND = true;
+
+            if (CGLIB$THREAD_CALLBACKS.get() == null) {
+                CGLIB$THREAD_CALLBACKS.get();
+                if (CGLIB$STATIC_CALLBACKS == null) {
+                    CGLIB$STATIC_CALLBACKS;
+                    return;
+                }
+            }
+            byProxyClass$$EnhancerByCGLIB$$92ab5624.CGLIB$CALLBACK_0 = (MethodInterceptor)(Callback[])CGLIB$THREAD_CALLBACKS.get()[0];
+        }
+    }
+
+    public Object newInstance(Callback[] paramArrayOfCallback) {
+        CGLIB$SET_THREAD_CALLBACKS(paramArrayOfCallback);
+        CGLIB$SET_THREAD_CALLBACKS(null);
+        return new ByProxyClass$$EnhancerByCGLIB$$92ab5624();
+    }
+
+    public Object newInstance(Callback paramCallback) {
+        CGLIB$SET_THREAD_CALLBACKS(new Callback[] { paramCallback });
+        CGLIB$SET_THREAD_CALLBACKS(null);
+        return new ByProxyClass$$EnhancerByCGLIB$$92ab5624();
+    }
+
+    public Object newInstance(Class[] paramArrayOfClass, Object[] paramArrayOfObject, Callback[] paramArrayOfCallback) { // Byte code:
+        //   0: aload_3
+        //   1: invokestatic CGLIB$SET_THREAD_CALLBACKS : ([Lnet/sf/cglib/proxy/Callback;)V
+        //   4: new com/liu/theory/aop/cglib/ByProxyClass$$EnhancerByCGLIB$$92ab5624
+        //   7: dup
+        //   8: aload_1
+        //   9: dup
+        //   10: arraylength
+        //   11: tableswitch default -> 35, 0 -> 28
+        //   28: pop
+        //   29: invokespecial <init> : ()V
+        //   32: goto -> 49
+        //   35: goto -> 38
+        //   38: pop
+        //   39: new java/lang/IllegalArgumentException
+        //   42: dup
+        //   43: ldc 'Constructor not found'
+        //   45: invokespecial <init> : (Ljava/lang/String;)V
+        //   48: athrow
+        //   49: aconst_null
+        //   50: invokestatic CGLIB$SET_THREAD_CALLBACKS : ([Lnet/sf/cglib/proxy/Callback;)V
+        //   53: areturn
+    }
+
+    public Callback getCallback(int paramInt) {
+        CGLIB$BIND_CALLBACKS(this);
+        switch (paramInt) {
+            case 0:
+        }
+        this.CGLIB$CALLBACK_0;
+        return null;
+    }
+
+    public void setCallback(int paramInt, Callback paramCallback) {
+        switch (paramInt) {
+        case 0:
+            this.CGLIB$CALLBACK_0 = (MethodInterceptor)paramCallback;
+            break;
+        }
+    }
+
+    public Callback[] getCallbacks() {
+        CGLIB$BIND_CALLBACKS(this);
+        return new Callback[] { this.CGLIB$CALLBACK_0 };
+    }
+
+    public void setCallbacks(Callback[] paramArrayOfCallback) {
+        this.CGLIB$CALLBACK_0 = (MethodInterceptor)paramArrayOfCallback[0];
+    }
+
+    static  {
+        CGLIB$STATICHOOK1();
+    }
+}
