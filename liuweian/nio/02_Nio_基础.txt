@@ -1,0 +1,309 @@
+	在阻塞模式下，若从网络流中读取不到指定大小的数据量，阻塞IO就在那里阻塞着。比如，已知后面会有10个字节的数据发过来，但是我现在只收到8个字节，
+那么当前线程就在那傻傻地等到下一个字节的到来，对，就在那等着，啥事也不做，直到把这10个字节读取完，这才将阻塞放开通行。
+	在非阻塞模式下，若从网络流中读取不到指定大小的数据量，非阻塞IO就立即通行。比如，已知后面会有10个字节的数据发过来，但是我现在只收到8个字节，
+那么当前线程就读取这8个字节的数据，读完后就立即返回，等另外两个字节再来的时候再去读取。
+
+
+
+AbstractSelectableChannel extends SelectableChannel：默认为堵塞模式。
+
+
+
+
+Selector：SelectableChannel对象的多路复用器。可以多个SelectableChannel注册到Selector中。
+
+
+
+
+1、如何获取一个Selector实例对象。
+
+
+/**
+ * 打开（创建）一个Selector实例。
+ * 在window系统就是创建一个WindowsSelectorImpl实例。
+ */
+location：Selector
+public static Selector open() throws IOException {
+	return SelectorProvider.provider().openSelector();
+}
+
+/**
+ * 返回此Java虚拟机调用的系统范围的默认SelectorProvider。
+ */
+location：SelectorProvider
+public static SelectorProvider provider() {
+	synchronized (lock) {
+		if (provider != null) {
+			return provider;
+		}
+		
+		// 在windows系统默认使用：WindowsSelectorProvider
+  		// 在Linux系统默认使用：EPollSelectorProvider
+		// 在SunOS系统默认使用：DevPollSelectorProvider
+		return AccessController.doPrivileged(
+			new PrivilegedAction<SelectorProvider>() {
+				public SelectorProvider run() {
+						if (loadProviderFromProperty()) {
+							return provider;
+						}
+						
+						if (loadProviderAsService()) {
+							return provider;
+						}
+						
+						provider = sun.nio.ch.DefaultSelectorProvider.create();
+						return provider;
+					}
+				});
+	}
+}
+
+/**
+ * 创建Selector。
+ * 		在windows系统默认使用：WindowsSelectorProvider
+ * 		在Linux系统默认使用：EPollSelectorProvider
+ * 		在SunOS系统默认使用：DevPollSelectorProvider
+ */
+location：WindowsSelectorProvider
+public AbstractSelector openSelector() throws IOException {
+	return new WindowsSelectorImpl(this);
+}
+
+
+
+
+
+2、SelectableChannel的注册过程。
+
+/**
+ *
+ */
+location：SelectableChannel
+public final SelectionKey register(Selector sel, int ops) throws ClosedChannelException{
+	return register(sel, ops, null);
+}
+
+/**
+ *
+ */
+location：AbstractSelectableChannel
+public final SelectionKey register(Selector sel, int ops, Object att) throws ClosedChannelException {
+	synchronized (regLock) {
+		if (!isOpen()) {
+			throw new ClosedChannelException();
+		}
+		
+		if ((ops & ~validOps()) != 0) {
+			throw new IllegalArgumentException();
+		}
+		
+		if (blocking) {
+			throw new IllegalBlockingModeException();
+		}
+		
+		SelectionKey k = findKey(sel);
+		if (k != null) {
+			k.interestOps(ops);
+			k.attach(att);
+		}
+		
+		if (k == null) {
+			synchronized (keyLock) {
+				if (!isOpen()) {
+					throw new ClosedChannelException();
+				}
+				
+				// sel ==> [Abstract] SelectorImpl
+				k = ((AbstractSelector)sel).register(this, ops, att);
+				addKey(k);
+			}
+		}
+		return k;
+	}
+}
+
+/**
+ *
+ */
+location：SelectorImpl
+protected final SelectionKey register(AbstractSelectableChannel ch, int ops, Object attachment) {
+	if (!(ch instanceof SelChImpl)) {
+		throw new IllegalSelectorException();
+	}
+	
+	// 实例化一个SelectionKeyImpl。
+	SelectionKeyImpl k = new SelectionKeyImpl((SelChImpl)ch, this);
+	
+	k.attach(attachment);
+	
+	synchronized (publicKeys) {
+		implRegister(k);
+	}
+	
+	k.interestOps(ops);
+	return k;
+}
+
+/**
+ * WindowsSelectorImpl extends SelectorImpl
+ */
+location：WindowsSelectorImpl
+protected void implRegister(SelectionKeyImpl ski) {
+	synchronized (closeLock) {
+	
+		if (pollWrapper == null) {
+			throw new ClosedSelectrException();
+		}
+		
+		growIfNeeded();
+		channelArray[totalChannels] = ski;
+		ski.setIndex(totalChannels);
+		fdMap.put(ski);
+		
+		// protected HashSet<SelectionKey> keys;在SelectorImpl中定义的。
+		keys.add(ski);
+		pollWrapper.addEntry(totalChannels, ski);
+		totalChannels++;
+	}
+}
+
+
+
+
+
+
+3、获取Select
+
+/**
+ *
+ */
+location：SelectorImpl
+public int select() throws IOException {
+	return select(0);
+}
+
+
+/**
+ *
+ */
+location：SelectorImpl
+public int select(long timeout) throws IOException {
+	if (timeout < 0) {
+		throw new IllegalArgumentException("Negative timeout");
+	}
+	return lockAndDoSelect((timeout == 0) ? -1 : timeout);
+}
+
+
+/**
+ *
+ */
+location：SelectorImpl
+private int lockAndDoSelect(long timeout) throws IOException {
+	synchronized (this) {
+		if (!isOpen()) {
+			throw new ClosedSelectorException();
+		}
+		
+		synchronized (publicKeys) {
+			synchronized (publicSelectedKeys) {
+				return doSelect(timeout);
+			}
+		}
+	}
+}
+
+location：WindowsSelectorImpl
+protected int doSelect(long timeout) throws IOException {
+	if (channelArray == null) {
+		throw new ClosedSelectorException();
+	}
+	
+	this.timeout = timeout; 
+	processDeregisterQueue();
+	if (interruptTriggered) {
+		resetWakeupSocket();
+		return 0;
+	}
+	
+	adjustThreadsCount();
+	finishLock.reset(); 
+	
+	startLock.startThreads();
+	
+	try {
+		begin();
+		try {
+			subSelector.poll();
+		} catch (IOException e) {
+			finishLock.setException(e);
+		}
+		if (threads.size() > 0) {
+			finishLock.waitForHelperThreads();
+		}
+	  } finally {
+		  end();
+	  }
+	
+	finishLock.checkForException();
+	processDeregisterQueue();
+	int updated = updateSelectedKeys();
+	
+	resetWakeupSocket();
+	return updated;
+}
+
+
+
+
+
+
+
+
+
+3、设置为非堵塞IO
+
+
+/**
+ * 如果此通道已向一个或多个Selector注册，则尝试将其置于阻止模式将导致引发{@link IllegalBlockingModeException}。
+ * 可以随时调用此方法。新设置的模式，仅影响调用此方法返回后启动的I/O操作。对于某些实现，这可能要求阻塞，直到所有未完成的I/O操作完成。
+ * 如果调用这个方法是，已经有一个线程A调用了这个方法，这个方法会堵塞，直到线程A调用结束。
+ */
+location：SelectableChannel
+public abstract SelectableChannel configureBlocking(boolean block)throws IOException;
+
+location：AbstractSelectableChannel
+public final SelectableChannel configureBlocking(boolean block) throws IOException {
+	synchronized (regLock) {
+		if (!isOpen()) {
+			throw new ClosedChannelException();
+		}
+		
+		if (blocking == block) {
+			return this;
+		}
+		
+		if (block && haveValidKeys()) {
+			throw new IllegalBlockingModeException();
+		}
+		
+		implConfigureBlocking(block);
+		blocking = block;
+	}
+	
+	return this;
+}
+
+/**
+ *
+ */
+location：ServerSocketChannelImpl
+protected void implConfigureBlocking(boolean var1) throws IOException {
+	IOUtil.configureBlocking(this.fd, var1);
+}
+
+/**
+ *
+ */
+location：IOUtil
+public static native void configureBlocking(FileDescriptor fd, boolean blocking) throws IOException;

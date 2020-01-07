@@ -12,3 +12,12 @@
 		flush privileges;
 		
 	5、关闭mysql服务，net stop mysql 删除my-default.ini文件尾部添加：skip-grant-tables  在开启服务：net  start  mysql
+
+	
+	
+二、数据的存储。
+	表空间的页大小为16KB
+	
+	
+	1、Mysql中innodb和myisam的区别。
+		innodb区别于其他数据库引擎，主要是支持事务，和行锁。

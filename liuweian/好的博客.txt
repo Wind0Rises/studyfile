@@ -62,8 +62,13 @@ others:
 	unsafe解析：https://tech.meituan.com/2019/02/14/talk-about-java-magic-class-unsafe.html
 
 
+jdk源码：
+	http://hg.openjdk.java.net/jdk8u/jdk8u/jdk/file/0d27e60569f7/src/share/classes
+	http://hg.openjdk.java.net/jdk8u/jdk8u/jdk/file/0d27e60569f7/src/windows/classes/sun/nio/ch
 
 
+	
+	https://www.cnblogs.com/yulinfeng/p/8095326.html
 
 
 

@@ -6,6 +6,17 @@ Queue接口:
 	E poll()（[poul]:投票）：获取队列头元素，并从队列中删除。如果队列为空，返回null。
 	E remove()：获取队列头元素，并从队列中删除。如果队列为空时，抛出异常。
 	
+BlockingQueue接口：特有的方法
+	void put(E e) throws InterruptedException：向队列中插入一个元素，如果队列是满的，堵塞住，直到队列中有可用的空间。
+	E take() throws InterruptedException：获取队列头元素，并从队列中删除。如果队列为空，堵塞住，直到队列中有元素。
+	
+	E poll(long timeout, TimeUnit unit) throws InterruptedException：获取队列头元素，并从队列中删除。如果队列为空，堵塞住，直到队列中有元素或者到了给定的时间或者被打断。
+	boolean offer(E e, long timeout, TimeUnit unit) throws InterruptedException：向队列中插入一个元素，如果成功返回true，失败返回false，如果队列是一个有界队列，当队列满了以后，堵塞住，直到队列中有空闲的空间
+			或者到了给定的时间或者被打断。
+	boolean contains(Object o)：判断队列中是否包含给定的元素。
+	
+	
+	
 Deque接口：
 	boolean add(E e)：向双端队列的队尾添加一个元素，如果成功返回true，如果队列是一个有界队列，当队列满了以后，抛出异常。等价于addLast。
 	addFirst(E e)：向双端队列的队首添加一个元素，如果成功返回true，如果队列是一个有界队列，当队列满了以后，抛出异常。
@@ -38,7 +49,25 @@ Deque接口：
 	
 	boolean remove(Object o)：从双端队列中删除指定元素第一出现的元素，如果双端队列不包含元素，则它保持不变。如果有元素并且删除了则返回true。如果指定元素
 		与队列的类型不符，会抛出异常。如果元素为null，
-		
+	
+
+BlockingDeque：特有的方法；	
+	E take() throws InterruptedException：从双端队列中获取队首元素，并从队列中【删除】。如果队列为空，堵塞住。
+	E takeFirst() throws InterruptedException：从双端队列中获取队首元素，并从队列中【删除】。如果队列为空，堵塞住。
+	E takeLast() throws InterruptedException：从双端队列中获取队尾元素，并从队列中【删除】。如果队列为空，堵塞住。
+	
+	void put(E e) throws InterruptedException：向双端队列的队尾添加一个元素，当队列满了以后，堵塞住。
+	void putFirst(E e) throws InterruptedException：向双端队列的队首添加一个元素，当队列满了以后，堵塞住。
+	void putLast(E e) throws InterruptedException：向双端队列的队尾添加一个元素，当队列满了以后，堵塞住。
+	
+	E poll(long timeout, TimeUnit unit) throws InterruptedException：从双端队列中获取队首元素，并从队列中【删除】。如果队列为空，堵塞给定的时间。
+	E pollFirst(long timeout, TimeUnit unit) throws InterruptedException：从双端队列中获取队首元素，并从队列中【删除】。如果队列为空，堵塞给定的时间。
+	E pollLast(long timeout, TimeUnit unit) throws InterruptedException：从双端队列中获取队尾元素，并从队列中【删除】。如果队列为空，堵塞给定的时间。
+	
+	boolean offer(E e, long timeout, TimeUnit unit) throws InterruptedException：向双端队列的队尾添加一个元素，当队列满了以后，堵塞给定的时间。
+	boolean offerFirst(E e, long timeout, TimeUnit unit) throws InterruptedException：向双端队列的队首添加一个元素，当队列满了以后，堵塞给定的时间。
+	boolean offerLast(E e, long timeout, TimeUnit unit) throws InterruptedException：向双端队列的队尾添加一个元素，当队列满了以后，堵塞给定的时间。
+	
 		
 Stack：继承Vector，是线程安全的。
 	push(E item)：向栈顶添加元素。
@@ -46,3 +75,21 @@ Stack：继承Vector，是线程安全的。
 	E peek()：查看栈顶元素。
 	boolean empty()：判断这个栈是否为空。
 	int search(Object o)：
+
+
+
+	
+BlockingDeque:
+	LinkedBlockingDeque
+	
+	
+BlockingQueue：
+	ArrayBlockingQueue：读写锁是一把锁，内部是一把锁。底层是使用数组实现的。
+	LinkedBlockingQueue：读写锁时分开的，内部有两把锁。底层是使用链表实现的。
+	TransferQueue(接口)：
+		LinkedTransferQueue
+	PriorityBlockingQueue：
+	SynchronousQueue：
+	DelayQueue：
+	LinkedBlockingDeque（也间接实现了BlockingQueue）：
+	
