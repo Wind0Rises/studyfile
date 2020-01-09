@@ -1,4 +1,9 @@
-Scheduler：只是一个接口。
+1、如何区分两个Trigger是不是同一个？？？
+	通过给定的name和group构建一个TriggerKey，name是必须的，group如果没有传入，默认使用"DEFAULT"作为group。如果两个Trigger给定的name和group是一致的，那么构建
+出来的TriggerKey就是一个。具体比较过程可以看Triggerkey的equals()方法。
+	
+
+Scheduler：只是一个接口。真正的操作是通过内部的quartzScheduler实例完成的。
 	
  
 /**
@@ -109,11 +114,13 @@ public void validate() throws SchedulerException {
 /**
  * 计算出Quartz开始时间后的第一次执行时间。
  * Scheduler在第一次将Trigger添加到Scheduler时调用，以便Trigger根据任何关联的日历计算其第一次启动时间。
+ * nextFireTime：这个是成员属性。
  */
 location：CronTriggerImpl
 public Date computeFirstFireTime(org.quartz.Calendar calendar) {
 
 	// 获取开始时间（开始时间往以前推一秒）后的下一次执行时间。
+	// getStartTime()获取Trigger的开始时间，默认为创建的Trigger的时间，也可以指定。
 	nextFireTime = getFireTimeAfter(new Date(getStartTime().getTime() - 1000l));
 
 	// 判断Calendar是否包含给定的时间。
@@ -139,7 +146,9 @@ public Date getFireTimeAfter(Date afterTime) {
 		afterTime = new Date(getStartTime().getTime() - 1000l);
 	}
 
-	// date1.compareTo(date2)：比较两个时间的顺序。如果大于0：date1小于date2（date1时间更早）；大于0：date1大于date2（date2时间更早）
+	// date1.compareTo(date2)：比较两个时间的顺序（date1<date2 ? -1 : (date1 == date2 ? 0 : 1)）。
+	// 如果小于0：date1小于date2（date1时间更早，data2在未来）
+	// 如果大于0：date1大于date2（date2时间更早，data1在未来）
 	if (getEndTime() != null && (afterTime.compareTo(getEndTime()) >= 0)) {
 		return null;
 	}
@@ -670,6 +679,19 @@ public void storeTrigger(OperableTrigger newTrigger, boolean replaceExisting) th
 		grpMap.put(newTrigger.getKey(), tw);
 		triggersByKey.put(tw.key, tw);
 
+		
+		/**
+		 * Trigger的几种状态。public int state = STATE_WAITING;默认为STATE_WAITING（0）
+		 * STATE_WAITING = 0;
+		 * STATE_ACQUIRED = 1;
+		 * STATE_EXECUTING = 2;
+		 * STATE_COMPLETE = 3;
+		 * STATE_PAUSED = 4;
+		 * STATE_BLOCKED = 5;
+		 * STATE_PAUSED_BLOCKED = 6;
+		 * STATE_ERROR = 7;
+		 */
+		 
 		// 判断暂停TriggerGroup集合中是否存在该Trigger的Group。
 		if (pausedTriggerGroups.contains(newTrigger.getKey().getGroup()) || pausedJobGroups.contains(newTrigger.getJobKey().getGroup())) {
 		
@@ -761,6 +783,24 @@ private boolean removeTrigger(TriggerKey key, boolean removeOrphanedJob) {
 	return found;
 }
 
+/**
+ * 通知监听器，Job已经添加。调用监听的jobAdded(jobDetail【这个参数是JobDetail】)。
+ */
+location：QuartzScheduler
+public void notifySchedulerListenersJobAdded(JobDetail jobDetail) {
+	//  构建所有的监听器
+	List<SchedulerListener> schedListeners = buildSchedulerListenerList();
+
+	// 通知所有的监听器。
+	for(SchedulerListener sl: schedListeners) {
+		try {
+			sl.jobAdded(jobDetail);
+		} catch (Exception e) {
+			getLog().error("Error while notifying SchedulerListener of JobAdded.", e);
+		}
+	}
+}
+
 
 /**
  * 获取JobStore中Trigger对应的Job与给定的Job一致的Trigger。
@@ -804,7 +844,7 @@ public void notifySchedulerListenersJobDeleted(JobKey jobKey) {
 	// 调用监听器的jobDeleted操作。
 	for(SchedulerListener sl: schedListeners) {
 		try {
-			sl.jobDeleted操作。(jobKey);
+			sl.jobDeleted(jobKey);
 		} catch (Exception e) {
 			getLog().error("Error while notifying SchedulerListener of JobAdded.", e);
 		}
@@ -824,7 +864,7 @@ protected void notifySchedulerThread(long candidateNewNextFireTime) {
 
 
 /**
- * 通过QuartzSchedulerThread进行调用。阿
+ * 通过QuartzSchedulerThread进行调用。
  */
 location：SchedulerSignalerImpl
 public void signalSchedulingChange(long candidateNewNextFireTime) {
@@ -847,7 +887,8 @@ public void signalSchedulingChange(long candidateNewNextFireTime) {
 
 
 /**
- * 通知Scheduler监听器，当JobDetail被放入Scheduler中时，jobScheduled(..)被调用。
+ * 
+ * 通知Scheduler监听器，当JobDetail被放入Scheduler中时，jobScheduled(Trigger【这个参数是Trigger】)被调用。
  */
 public void notifySchedulerListenersSchduled(Trigger trigger) {
 	// 获取定时器中的SchedulerLinstener。

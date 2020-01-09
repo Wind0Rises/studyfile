@@ -1,0 +1,59 @@
+1、QuartzScheduler、Scheduler（StdScheduler）之间的关系？
+	Scheduler中维护着一个QuartzScheduler实例，几乎所有Scheduler的操作都是通过QuartzScheduler去进行操作的。【就像Controller和Service，Scheduler就是对应的接口，
+这个接口的具体的实现就是通过QuartzScheduler去完成的】
+
+
+
+2、Trigger和JobDetail之间的怎么关联的？
+	Trigger接口的抽象类AbstractTrigger中维护着jobName和jobGroup属性，在设置Trigger的属性时需要把这个两个属性。这个时候Trigger可以通过jobName去获取到对应的
+JobDetail。所有的JobDetail和Trigger都要设置到JobStore上。如果单独向定时器设置Trigger的时候，这个时候Trigger的jobName属性一定要设置，不然会报错。而向定时器
+设置JobDetail时，不需要考虑这么多。Trigger的JobName属性就很好的把JobDetail、Trigger联系起来了。
+	一个Trigger中只能对应一个JobDetail，但是一个JobDetail可以对应多个Trigger。
+
+	
+	
+3、Quartz中的线程池怎么理解，以SimpleThreadPool线程池为列？
+	SimpleThreadPool内部维护这个一个线程（WorkerThread线程：即工作线程）集合。当线程池初始化时，创建给定数目的线程并启动这些线程。工作线程内部维护一个Runnable
+对象，当工作线程启动时，会进入while(true)循环中，当内部Runnable为空时，会等待500ms，然后再检查Runnable是否为空，直到Runnable不为空时，调用Runnable的run()方法，
+调用结束后重新把内部的Runnable设为null。
+
+
+
+4、QuartzSchedulerThread这个线程是做什么的？？
+	这个线程相当于【定时器】的主线程，这个线程的启动以后，在run()方法中会通过一个循环（如果是正常启动以后，没有退出或者异常，这个这个循环就是一个死循环。如果
+定时器没有启动，会不断的暂停1000ms）不断的从JobStore中获取某个时间段的可以执行的触发器，同时通过获取到的触发器，得到与之对应的TriggerFiredResult，然后创建对应
+的JobRunShell并进行初始化，JobRunShell实现Runnable接口。QuartzSchedulerThread获取到Quartz的线程池，并把JobRunShell进行处理【详情看SimpleThreadPool.runInThread(
+Runnable runnable)方法】。线程会获取可用的线程执行JobRunShell。
+
+
+	
+5、向Scheduler添加一个Job都做了哪些事情？
+	首先对添加的JobDetail和Trigger进行校验，并计算Trigger第一次触发的时间。然后向JobStore中保存JobDetail和Trigger。最后通知监听器，最重要的是通知QuartzSchedulerThread
+在符合条件的情况下会调用QuartzSchedulerThread.signalSchedulingChange(..)方法。
+	
+		在添加JobDetails，会封装成JobWrapper，默认是不允许覆盖已经有的JobWrapper，
+		在添加Trigger时，会封装成TriggerWrapper，默认是不允许覆盖已经有的TriggerWrapper，
+	
+
+	
+6、QuartzSchedulerThread如何从JobStore中获取接下来要执行的Trigger。
+	* 以RAMJobStore为列：
+		RAMJobStore会把可用的Trigger放入TimeTrigger中[TreeSet数据结构]，然后循环遍历这个TimeTrigger。获取Trigger以后，首先判断Trigger是否已经错过了下一次执行时间，
+	根据Trigger是指的错过处理策略进行处理。如果进行了错过处理，重新把Trigger放入TimeTrigger，并执行下一次循环。然后判断下次执行时间是否在该批次内，如果不在，直接
+	退出循环。如果在批次内继续往下执行。在后判断Job是否可以同一时间可以执行多个。最后把符合条件的Trigger放入一个集合中，返回出去。
+	
+	
+	
+7、启动定时任务时，是如何进行定时执行的？？
+		当启动定时器时，QuartzSchedulerThread会跳出等待。首先获取线程池的可用线程。然后从JobStore获取可用的Trigger集合。如果Trigger集合存在，从集合获取第一个Triggre，
+	如果第一个Trigger的下一次执行的时间与当前时间差大于2ms，让QuartzSchedulerThread线程等待一段时间，
+	
+	
+	
+8、如何区分两个Trigger是不是同一个？？？
+	通过给定的name和group构建一个TriggerKey，name是必须的，group如果没有传入，默认使用"DEFAULT"作为group。如果两个Trigger给定的name和group是一致的，那么构建
+出来的TriggerKey就是一个。具体比较过程可以看Triggerkey的equals()方法。
+	
+
+
+

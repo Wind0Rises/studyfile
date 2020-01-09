@@ -1,3 +1,6 @@
+
+
+
 /**
  * 真正的工作线程，如果不是暂停状态，进入无限循环。
  *		如果QuartzSchedulerThread未启动：等待1s，并在次检查。【如果Quartz启动时，会调用sigLock的notifyAll()方法，跳过等待。】
@@ -104,7 +107,8 @@ public void run() {
 									now = System.currentTimeMillis();
 									timeUntilTrigger = triggerTime - now;
 									
-									// 如果没有到达触发时间，等到触发时间。  【【谁来唤醒他】】
+									// 如果没有到达触发时间，等到触发时间。  
+									// 【【谁来唤醒他】】：当添加Job完成是，会调用QuartzSchedulerThread.signalSchedulingChange(..)，这个时候有可能会唤醒。
 									if(timeUntilTrigger >= 1) {
 										sigLock.wait(timeUntilTrigger);
 									}
@@ -227,6 +231,11 @@ public void run() {
 	qsRsrcs = null;
 }
 
+
+
+##############################################################################################################################
+#########################################     从RAMJobStore获取将要执行Trigger   #############################################
+##############################################################################################################################
 /**
  * 获取接下来要执行的Trigger。
  * 主要是遍历timeTriggers.判断下次执行时间。
@@ -239,6 +248,7 @@ public List<OperableTrigger> acquireNextTriggers(long noLaterThan, int maxCount,
 		List<OperableTrigger> result = new ArrayList<OperableTrigger>();
 		Set<JobKey> acquiredJobKeysForNoConcurrentExec = new HashSet<JobKey>();
 		Set<TriggerWrapper> excludedTriggers = new HashSet<TriggerWrapper>();
+		
 		long batchEnd = noLaterThan;
 		
 		// 可执行Trigger为0，直接返回
@@ -288,7 +298,10 @@ public List<OperableTrigger> acquireNextTriggers(long noLaterThan, int maxCount,
 			
 			JobKey jobKey = tw.trigger.getJobKey();
 			JobDetail job = jobsByKey.get(tw.trigger.getJobKey()).jobDetail;
+			
+			// 判断Job是否被@DisallowConcurrentExecution注解注释，该注解标记为不能同时执行多个实例
 			if (job.isConcurrentExectionDisallowed()) {
+				
 				if (acquiredJobKeysForNoConcurrentExec.contains(jobKey)) {
 					excludedTriggers.add(tw);
 					continue;
@@ -341,7 +354,7 @@ protected boolean applyMisfire(TriggerWrapper tw) {
 		misfireTime -= getMisfireThreshold();
 	}
 	
-	// 获取给定时间的下一次执行时间。
+	// 获取给定Trigger的下一次执行时间。
 	Date tnft = tw.trigger.getNextFireTime();
 	
 	// 下次执行时间为null  或者  下次执行时间大于misfireTime  或者  给定的Trigger忽略错过执行。
@@ -361,7 +374,7 @@ protected boolean applyMisfire(TriggerWrapper tw) {
 	// 延迟处理。
 	tw.trigger.updateAfterMisfire(cal);
 
-	// 下次执行时间。
+	// 下次执行时间，如果线程执行时间为null，把Trigger状态修改为STATE_COMPLETE，并通知。
 	if (tw.trigger.getNextFireTime() == null) {
 	
 		// 修改Trigger的状态，
@@ -375,7 +388,7 @@ protected boolean applyMisfire(TriggerWrapper tw) {
 			timeTriggers.remove(tw);
 		}
 		
-	// 判断trigger前后的下一次执行时间是否一致。
+	// 判断trigger前后的下一次执行时间是否一致。如果一直返回false。
 	} else if (tnft.equals(tw.trigger.getNextFireTime())) {
 		return false;
 	}
@@ -384,12 +397,50 @@ protected boolean applyMisfire(TriggerWrapper tw) {
 }
 
 /**
- * 更新延迟处理。更具Trigger的具体延迟策略进行处理。
+ *
+ */
+location：SchedulerSignalerImpl
+public void notifyTriggerListenersMisfired(Trigger trigger) {
+	try {
+		// sched是QuartzScheduler类的实例。
+		sched.notifyTriggerListenersMisfired(trigger);
+	} catch (SchedulerException se) {
+		sched.getLog().error("Error notifying listeners of trigger misfire.", se);
+		sched.notifySchedulerListenersError("Error notifying listeners of trigger misfire.", se);
+	}
+}
+
+/**
+ * 获取Trigger监听器，并执行监听器的triggerMisfired操作。
+ */
+location：SchedulerSignalerImpl
+public void notifyTriggerListenersMisfired(Trigger trigger) throws SchedulerException { 
+	List<TriggerListener> triggerListeners = buildTriggerListenerList();
+
+	for(TriggerListener tl: triggerListeners) {
+		try {
+			if(!matchTriggerListener(tl, trigger.getKey())) {
+				continue;
+			}	
+			tl.triggerMisfired(trigger);
+		} catch (Exception e) {
+			SchedulerException se = new SchedulerException("TriggerListener '" + tl.getName() + "' threw exception: " + e.getMessage(), e);
+			throw se;
+		}
+	}
+} 
+
+/**
+ * 更新延迟处理。根据Trigger的具体延迟策略进行处理。
+ * 		MISFIRE_INSTRUCTION_IGNORE_MISFIRE_POLICY		----	直接忽略			
+ * 		MISFIRE_INSTRUCTION_DO_NOTHING      			----    什么是都不做，或者当前时间的下一次执行时间。		
+ * 		MISFIRE_INSTRUCTION_SMART_POLICY                ----    会跳转到MISFIRE_INSTRUCTION_DO_NOTHING		
+ *		MISFIRE_INSTRUCTION_FIRE_ONCE_NOW               ----    立即执行一次				
  */
 location：CronTriggerImpl
 public void updateAfterMisfire(org.quartz.Calendar cal) {
 	
-	// 默认为MISFIRE_INSTRUCTION_SMART_POLICY。
+	// 默认为MISFIRE_INSTRUCTION_SMART_POLICY = 0。
 	int instr = getMisfireInstruction();
 
 	// 忽略策略，如果出现延迟，直接忽略。
@@ -424,13 +475,16 @@ public void updateAfterMisfire(org.quartz.Calendar cal) {
 /**
  * 候选时间更早与内部推论的时间。
  * 首先Scheduler要发生改变了。
+ * 
+ * oldTime：Trigger集合中第一个Trigger的执行时间。
+ * clearSignal：如果是QuartzSchedulerThread的run方法调用，clearSignal为false。
  */
 location：QuartzSchedulerThread
 private boolean isCandidateNewTimeEarlierWithinReason(long oldTime, boolean clearSignal) {
 
 	synchronized(sigLock) {
 
-		// 判断Scheduler是否发生改变。
+		// 判断Scheduler是否发生改变。如果Scheduler发生改变，会把signaled设为true。
 		if (!isScheduleChanged()) {
 			// 如果没有改变直接返回
 			return false;
@@ -459,19 +513,43 @@ private boolean isCandidateNewTimeEarlierWithinReason(long oldTime, boolean clea
 	}
 }
 
+/**
+ *
+ */
+location：QuartzSchedulerThread
+private boolean releaseIfScheduleChangedSignificantly(List<OperableTrigger> triggers, long triggerTime) {
+	if (isCandidateNewTimeEarlierWithinReason(triggerTime, true)) {
+		for (OperableTrigger trigger : triggers) {
+			qsRsrcs.getJobStore().releaseAcquiredTrigger(trigger);
+		}
+		triggers.clear();
+		return true;
+	}
+	return false;
+}
 
+
+
+/**
+ * firedTriggers：符合条件的触发器，即将要触发。 
+ * 把Trigger等信息包装成TriggerFiredResult，并返回回去。
+ */
 location：RAMJobStore
 public List<TriggerFiredResult> triggersFired(List<OperableTrigger> firedTriggers) {
 	synchronized (lock) {
+	
 		List<TriggerFiredResult> results = new ArrayList<TriggerFiredResult>();
 
+		// 循环遍历OperableTrigger集合。
 		for (OperableTrigger trigger : firedTriggers) {
+			// 获取TriggerWrapper
 			TriggerWrapper tw = triggersByKey.get(trigger.getKey()); 
 			
 			if (tw == null || tw.trigger == null) {
 				continue;
 			}
 			
+			// 判读状态。
 			if (tw.state != TriggerWrapper.STATE_ACQUIRED) {
 				continue;
 			}
@@ -483,21 +561,29 @@ public List<TriggerFiredResult> triggersFired(List<OperableTrigger> firedTrigger
 					continue;
 				}
 			}
+			
+			// 获取上一次执行时间。
 			Date prevFireTime = trigger.getPreviousFireTime();
 			
+			// 【【timeTriggers中移除】】
 			timeTriggers.remove(tw);
 			
+			
+			// 【【更新Trigger下一次执行时间】】
 			tw.trigger.triggered(cal);
 			trigger.triggered(cal);
 			
+			// 把Trigger的状态重新设置为STATE_WAITING
 			tw.state = TriggerWrapper.STATE_WAITING;
 
 			// 实例化TriggerFiredBundle需要：Job、Trigger、下次执行使劲等等，把Trigger和Job和执行信息都封装到TriggerFiredBundle中。
-			TriggerFiredBundle bndle = new TriggerFiredBundle(retrieveJob(tw.jobKey), trigger, cal, false, new Date(), trigger.getPreviousFireTime(), prevFireTime,
-					trigger.getNextFireTime());
+			// retrieveJob(tw.jobKey)：从Job集合总获取对应的Job。
+			TriggerFiredBundle bndle = new TriggerFiredBundle(retrieveJob(tw.jobKey), trigger, cal, false, new Date(), 
+					trigger.getPreviousFireTime(), prevFireTime, trigger.getNextFireTime());
 
 			JobDetail job = bndle.getJobDetail();
 
+			// 判读同一个时间，是否可以执行多个。
 			if (job.isConcurrentExectionDisallowed()) {
 				ArrayList<TriggerWrapper> trigs = getTriggerWrappersForJob(job.getKey());
 				for (TriggerWrapper ttw : trigs) {
@@ -522,6 +608,18 @@ public List<TriggerFiredResult> triggersFired(List<OperableTrigger> firedTrigger
 	}
 }
 
+/**
+ * 更新Trigger下一次执行时间
+ */
+location：RAMJobStore
+public void triggered(org.quartz.Calendar calendar) {
+	previousFireTime = nextFireTime;
+	nextFireTime = getFireTimeAfter(nextFireTime);
+
+	while (nextFireTime != null && calendar != null && !calendar.isTimeIncluded(nextFireTime.getTime())) {
+		nextFireTime = getFireTimeAfter(nextFireTime);
+	}
+}
 
 
 ###################################################
@@ -697,18 +795,23 @@ public void run() {
 	}
 }
 
-
-JobRunShell方法
+/**
+ * 
+ */
+location：JobRunShell
 public void run() {
 
 	qs.addInternalSchedulerListener(this);
 	
 	try {
+		// 获取对应的Trigger和Job。
 		OperableTrigger trigger = (OperableTrigger) jec.getTrigger();
 		JobDetail jobDetail = jec.getJobDetail();
 
 		do {
 			JobExecutionException jobExEx = null;
+			
+			// 获取一个Job实例，就是保持到JobDetail中的Job。在初始化JobRunShell时，通过反射创建的。
 			Job job = jec.getJobInstance();
 
 			try {
@@ -718,9 +821,9 @@ public void run() {
 				break;
 			}
 
-			// notify job & trigger listeners...
 			
 			try {
+				// 通知监听器。
 				if (!notifyListenersBeginning(jec)) {
 					break;
 				}
@@ -745,9 +848,9 @@ public void run() {
 			long startTime = System.currentTimeMillis();
 			long endTime = startTime;
 			
-			//##############################################
-			// 执行Job
-			//##############################################
+			###############################################
+			# 					执行Job					  #
+			###############################################
 			try {
 				log.debug("Calling execute on job " + jobDetail.getKey());
 				job.execute(jec);
@@ -764,16 +867,17 @@ public void run() {
 				jobExEx = new JobExecutionException(se, false);
 			}
 
+			// 设置执行时间
 			jec.setJobRunTime(endTime - startTime);
 
-			// 通知所有的Job监听器,Job处理完成。  notify all job listeners
+			// 通知所有的Job监听器,Job处理完成。
 			if (!notifyJobListenersComplete(jec, jobExEx)) {
 				break;
 			}
 
 			CompletedExecutionInstruction instCode = CompletedExecutionInstruction.NOOP;
 
-			//  更新trigger, update the trigger
+			//  更新trigger
 			try {
 				instCode = trigger.executionComplete(jec, jobExEx);
 			} catch (Exception e) {
@@ -805,6 +909,7 @@ public void run() {
 			}
 
 			qs.notifyJobStoreJobComplete(trigger, jobDetail, instCode);
+			
 			break;
 		} while (true);
 	} finally {

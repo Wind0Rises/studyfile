@@ -1,9 +1,16 @@
-1、web.xml设置过滤器，DelegatingFilterProxy实现了Filter，在初始化DelegatingFilterProxy时，会根据web.xml中配置targetBeanName参数从applicationContext中加载对应的Filter。
+一、问题
+	1、DelegatingFilterProxy【delegate/ˈdelɪɡət/ :委托】起什么作用？？？
+			web.xml设置过滤器，实现了InitializingBean接口，在afterPropertiesSet()方法中调用了initFilterBean()方法。在initFilterBean()方法在会从applicationContext中
+		加载web.xml中配置的targetBeanName参数对应的beanname的Bean。一般这个bean是ShiroFilterFactoryBean类的内部类SpringShiroFilter，SpringShiroFilter是实现了Filter接口
+		的。
+			由于DelegatingFilterProxy是配置在web.xml中，并且DelegatingFilterProxy实现了Filter，当有请求请求应用时，都会被DelegatingFilterProxy进行拦截【真正拦截的url是
+		自己配置的，这里默认拦击所有请求】。
 
-2、spring-shiro.xml配置名称为shiroFilter的过滤器。
 
 
-1、web.xml设置过滤器
+	2、spring-shiro.xml配置名称为shiroFilter的过滤器。
+
+web.xml设置过滤器
 <filter>
 	<filter-name>shiroFilter</filter-name>
 	<filter-class>org.springframework.web.filter.DelegatingFilterProxy</filter-class>
@@ -21,6 +28,14 @@
 	<url-pattern>/*</url-pattern>
 </filter-mapping>
 
+
+shiro.xml配置
+<bean id="shiroFilter" class="org.apache.shiro.spring.web.ShiroFilterFactoryBean">
+
+
+######################################################################################################################################
+###################################################      初始化过程     ##############################################################
+######################################################################################################################################
 /**
  * 初始化过滤器Bean
  */
@@ -54,3 +69,150 @@ protected Filter initDelegate(WebApplicationContext wac) throws ServletException
 	}
 	return delegate;
 }
+
+
+
+######################################################################################################################################
+###################################################      处理请求过程     ############################################################
+######################################################################################################################################
+/**
+ * DelegatingFilterProxy配置在web.xml中的Filter域上，并且实现了Filter。
+ */
+location：DelegatingFilterProxy
+public void doFilter(ServletRequest request, ServletResponse response, FilterChain filterChain) throws ServletException, IOException {
+
+	// delegate：是shiro.xml中配置的，一般情况都是ShiroFilterFactoryBean的内部类SpringShiroFilter
+	Filter delegateToUse = this.delegate;
+	
+	if (delegateToUse == null) {
+		synchronized (this.delegateMonitor) {
+			delegateToUse = this.delegate;
+			if (delegateToUse == null) {
+				WebApplicationContext wac = findWebApplicationContext();
+				if (wac == null) {
+					throw new IllegalStateException("No WebApplicationContext found: " + "no ContextLoaderListener or DispatcherServlet registered?");
+				}
+				delegateToUse = initDelegate(wac);
+			}
+			this.delegate = delegateToUse;
+		}
+	}
+
+	invokeDelegate(delegateToUse, request, response, filterChain);
+	
+}
+
+/**
+ * DelegatingFilterProxy相当一个代理，DelegatingFilterProxy内部也维护者一个Filter。
+ * 为什么不在web.xml中配置shiro的过滤器，而是使用DelegatingFilterProxy做一个代理操作。
+ * 真正的Filter调用。
+ */
+location：DelegatingFilterProxy
+protected void invokeDelegate(Filter delegate, ServletRequest request, ServletResponse response, FilterChain filterChain) ServletException, IOException {
+	delegate.doFilter(request, response, filterChain);
+}
+
+/**
+ * 其是ShiroFilterFactoryBean.SpringShiroFilter的实例，继承了OncePerRequestFilter
+ */
+location：OncePerRequestFilter
+public final void doFilter(ServletRequest request, ServletResponse response, FilterChain filterChain) throws ServletException, IOException {
+
+	String alreadyFilteredAttributeName = getAlreadyFilteredAttributeName();
+	
+	if (request.getAttribute(alreadyFilteredAttributeName) != null) {
+		log.trace("Filter '{}' already executed.  Proceeding without invoking this filter.", getName());
+		filterChain.doFilter(request, response);
+	} else if (!isEnabled(request, response) || shouldNotFilter(request) ) {
+		log.debug("Filter '{}' is not enabled for the current request.  Proceeding without invoking this filter.", getName());
+		filterChain.doFilter(request, response);
+	} else {	
+		log.trace("Filter '{}' not yet executed.  Executing now.", getName());
+		request.setAttribute(alreadyFilteredAttributeName, Boolean.TRUE);
+		try {
+			doFilterInternal(request, response, filterChain);
+		} finally {
+			request.removeAttribute(alreadyFilteredAttributeName);
+		}
+	}
+}
+
+/**
+ * 其是ShiroFilterFactoryBean.SpringShiroFilter的实例，继承了OncePerRequestFilter
+ */
+location：AbstractShiroFilter
+protected void doFilterInternal(ServletRequest servletRequest, ServletResponse servletResponse, final FilterChain chain) throws ServletException, IOException {
+
+	Throwable t = null;
+
+	try {
+	
+		// 准备ServletRequest和准备ServletResponse
+		final ServletRequest request = prepareServletRequest(servletRequest, servletResponse, chain);
+		final ServletResponse response = prepareServletResponse(request, servletResponse, chain);
+		
+		
+		final Subject subject = createSubject(request, response);
+		subject.execute(new Callable() {
+			public Object call() throws Exception {
+				updateSessionLastAccessTime(request, response);
+				executeChain(request, response, chain);
+				return null;
+			}
+		});
+	} catch (ExecutionException ex) {
+		t = ex.getCause();
+	} catch (Throwable throwable) {
+		t = throwable;
+	}
+
+	if (t != null) {
+		if (t instanceof ServletException) {
+			throw (ServletException) t;
+		}
+		
+		if (t instanceof IOException) {
+			throw (IOException) t;
+		}
+		
+		String msg = "Filtered request failed.";
+		throw new ServletException(msg, t);
+	}
+}
+
+/**
+ * 准备ServletRequest
+ */
+location：AbstractShiroFilter
+protected ServletRequest prepareServletRequest(ServletRequest request, ServletResponse response, FilterChain chain) {
+	ServletRequest toUse = request;
+	
+	if (request instanceof HttpServletRequest) {
+		HttpServletRequest http = (HttpServletRequest) request;
+		toUse = wrapServletRequest(http);
+	}
+	return toUse;
+}
+
+/**
+ * 包装ServletRequest
+ */
+location：AbstractShiroFilter
+protected ServletRequest wrapServletRequest(HttpServletRequest orig) {
+	return new ShiroHttpServletRequest(orig, getServletContext(), isHttpSessions());
+}
+
+/**
+ * 
+ */
+location：AbstractShiroFilter
+protected WebSubject createSubject(ServletRequest request, ServletResponse response) {
+	return new WebSubject.Builder(getSecurityManager(), request, response).buildWebSubject();
+}
+
+
+
+
+
+
+

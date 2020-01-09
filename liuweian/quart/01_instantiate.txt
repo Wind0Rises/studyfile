@@ -725,7 +725,6 @@ private Scheduler instantiate() throws SchedulerException {
 	####################################################################################################################################################
 	# 						       					 设置线程池      						           							                       #
 	####################################################################################################################################################
-	
 	// 从配置文件中获取org.quartz.threadExecutor.class参数。
 	String threadExecutorClass = cfg.getStringProperty(PROP_THREAD_EXECUTOR_CLASS);
 	
@@ -861,7 +860,6 @@ private Scheduler instantiate() throws SchedulerException {
 		//############################################################################################################
 		// ThreadPool的初始化。非常非常重要，请仔细查看SimpleThreadPool类。请参考【具体类阅读  SimpleThreadPool】
 		//############################################################################################################
-		
 		// 初始化线程池。为线程池创建工作线程，并启动工作线程。
 		tp.initialize();
 		tpInited = true;
@@ -881,22 +879,25 @@ private Scheduler instantiate() throws SchedulerException {
 		// ###################################################################################################################
 		qs = new QuartzScheduler(rsrcs, idleWaitTime, dbFailureRetry);
 		qsInited = true;
+		
 
-		// 创建任务调度器
+		/**
+		 * 
+		 * 	下面是instantiate(..)方法
+		 *	protected Scheduler instantiate(QuartzSchedulerResources rsrcs, QuartzScheduler qs) {
+		 *		Scheduler scheduler = new StdScheduler(qs);
+		 *		return scheduler;
+		 *	}
+		 */
 		Scheduler scheduler = instantiate(rsrcs, qs);
-		【
-			protected Scheduler instantiate(QuartzSchedulerResources rsrcs, QuartzScheduler qs) {
-				Scheduler scheduler = new StdScheduler(qs);
-				return scheduler;
-			}
-		】
+		
 		
 		// 设置指定JobFactory（如果有的话）
 		if(jobFactory != null) {
 			qs.setJobFactory(jobFactory);
 		}
 
-		// Initialize plugins now that we have a Scheduler instance.
+		// 初始化插件。
 		for (int i = 0; i < plugins.length; i++) {
 			plugins[i].initialize(pluginNames[i], scheduler, loadHelper);
 		}
@@ -905,6 +906,7 @@ private Scheduler instantiate() throws SchedulerException {
 		for (int i = 0; i < jobListeners.length; i++) {
 			qs.getListenerManager().addJobListener(jobListeners[i], EverythingMatcher.allJobs());
 		}
+		
 		for (int i = 0; i < triggerListeners.length; i++) {
 			qs.getListenerManager().addTriggerListener(triggerListeners[i], EverythingMatcher.allTriggers());
 		}
@@ -915,14 +917,17 @@ private Scheduler instantiate() throws SchedulerException {
 			scheduler.getContext().put((String)key, val);
 		}
 
-		// 启动Job Store和runshell factory------fire up job store, and runshell factory
+		// 启动Job Store 和 runshell
 		js.setInstanceId(schedInstId);
 		js.setInstanceName(schedName);
 		js.setThreadPoolSize(tp.getPoolSize());
 		js.initialize(loadHelper, qs.getSchedulerSignaler());
 
-		jrsf.initialize(scheduler);		// JobRunShellFactory初始化配置		
-		qs.initialize();				// QuartzScheduler初始化
+		// jrsf = JobRunShellFactory初始化配置	
+		jrsf.initialize(scheduler);		
+
+		// QuartzScheduler初始化		
+		qs.initialize();				
 
 		getLog().info("Quartz scheduler '" + scheduler.getSchedulerName() + "' initialized from " + propSrc);
 		getLog().info("Quartz scheduler version: " + qs.getVersion());
@@ -936,7 +941,8 @@ private Scheduler instantiate() throws SchedulerException {
 		}
 
 		// 把Scheduler方法SchedulerRepository中
-		schedRep.bind(scheduler);			
+		schedRep.bind(scheduler);
+		
 		return scheduler;
 		
 	} catch(SchedulerException e) {
@@ -952,149 +958,9 @@ private Scheduler instantiate() throws SchedulerException {
 }
 
 
-1、如何理解QuartzScheduler、ThreadExecutor、ThreadPool的作用。
-
-2、如何理解QuartzSchedulerThread、QuartzScheduler
-
-3、QuartzScheduler中有：QuartzSchedulerResources、QuartzSchedulerThread（这个的作用）、SchedulerContext、JobFactory
-
-4、QuartzSchedulerResources：ThreadPool、JobStore、JobRunShellFactory、ThreadExecutor
-
-5、QuartzSchedulerThread是一个线程继承与Thread：其中有QuartzScheduler、QuartzSchedulerResources。QuartzSchedulerThread的作用是干什么？
-
-6、QuartzScheduler 中有QuartzShedulerThread,而且QuartzScheduleThread中有QuartzSchudler，为什么要这样设计，其他设计方案？
-
-7、QuartzScheduler初始化的时候会创建一个QuartzSchedulerThread实例，然后通过ThreadExecutor.execute(Thread QuartzSchedulerThread)方法，让Thread.start()
-
-
-Quartz.start()启动操作，把QuartzScheduler.start(); 
-QuartzScheduler的start()方法，注意QuartzScheduler不是线程，所以没有run方法。
-QuartzSchedulerThread的run()方法。
-
-
-
-
-
-/**
-
-location：QuartzScheduler
-public void start() throws SchedulerException {
-	// 判读%Quart%是否已经结束,或者是已经关闭
-	if (shuttingDown|| closed) {
-		throw new SchedulerException("The Scheduler cannot be restarted after shutdown() has been called.");
-	}
-
-	// QTZ-212 : calling new schedulerStarting() method on the listeners
-	// right after entering start()
-	notifySchedulerListenersStarting();
-
-	if (initialStart == null) {
-		initialStart = new Date();
-		this.resources.getJobStore().schedulerStarted();            
-		startPlugins();
-	} else {
-		resources.getJobStore().schedulerResumed();
-	}
-
-	schedThread.togglePause(false);
-
-	getLog().info("Scheduler " + resources.getUniqueIdentifier() + " started.");
-	
-	notifySchedulerListenersStarted();
-}
-
-
-
-/**
- * 初始化QuartzScheduler
- */
-location：QuartzScheduler
-public QuartzScheduler(QuartzSchedulerResources resources, long idleWaitTime, @Deprecated long dbRetryInterval) throws SchedulerException {
-	
-	this.resources = resources;
-	
-	// 从resources获取JobStore。
-	if (resources.getJobStore() instanceof JobListener) {
-		addInternalJobListener((JobListener)resources.getJobStore());
-	}
-
-	// 实例一个QuartzSchedulerThread对象通过QuartzScheduler和QuartzSchedulerResources。【具体类阅读QuartzSchedulerThread】
-	// QuartzSchedulerThread是负责执行注册在QuartzScheduler上的Triggers的线程。【【其是一个线程，run方法的操作很多。】】
-	this.schedThread = new QuartzSchedulerThread(this, resources);
-	
-	// 获取QuartzSchedulerResources中的ThreadExecutor。
-	schedThreadExecutor = resources.getThreadExecutor();
-	
-	// 启动QuartzSchedulerThread线程。
-	// execute() { 
-	//		thread.start(); 
-	// }
-	schedThreadExecutor.execute(this.schedThread);
-	
-	// 设置QuartzSchedulerThread线程的空闲等待时间。
-	if (idleWaitTime > 0) {
-		this.schedThread.setIdleWaitTime(idleWaitTime);
-	}
-
-	// QuartzScheduler中设置内部监听器ExecutingJobsManager
-	jobMgr = new ExecutingJobsManager();
-	addInternalJobListener(jobMgr);
-	
-	// QuartzScheduler中设置内部监听器ErrorLogger
-	errLogger = new ErrorLogger();
-	addInternalSchedulerListener(errLogger);
-
-	// JobStore实例使用的接口，用于将信号传递回QuartzScheduler。
-	signaler = new SchedulerSignalerImpl(this, this.schedThread);
-	
-	if(shouldRunUpdateCheck()) {
-		updateTimer = scheduleUpdateCheck();
-	} else {
-		updateTimer = null;
-	}
-	
-	getLog().info("Quartz Scheduler v." + getVersion() + " created.");
-}
-
-/**
- * QuartzSchedulerThread继承Thread。
- */
-location：QuartzSchedulerThread
-QuartzSchedulerThread(QuartzScheduler qs, QuartzSchedulerResources qsRsrcs) {
-	this(qs, qsRsrcs, qsRsrcs.getMakeSchedulerThreadDaemon(), Thread.NORM_PRIORITY);
-}
-
-/**
- * 初始化QuartzSchedulerThread过程。
- */
-QuartzSchedulerThread(QuartzScheduler qs, QuartzSchedulerResources qsRsrcs, boolean setDaemon, int threadPrio) {
-	super(qs.getSchedulerThreadGroup(), qsRsrcs.getThreadName());
-	this.qs = qs;
-	this.qsRsrcs = qsRsrcs;
-	this.setDaemon(setDaemon);
-	
-	if(qsRsrcs.isThreadsInheritInitializersClassLoadContext()) {
-		log.info("QuartzSchedulerThread Inheriting ContextClassLoader of thread: " + Thread.currentThread().getName());
-		this.setContextClassLoader(Thread.currentThread().getContextClassLoader());
-	}
-
-	this.setPriority(threadPrio);
-	paused = true;
-	halted = new AtomicBoolean(false);
-}
-
-
-/**
- *
- *
- */
-location：QuartzSchedulerThread
-public void run() {
-
-	【【【 请看文件02_instantiate_QuartzSchedulerThread的run方法.txt 】】】
-}
-
-
+#######################################################################################################################################
+##############################################        线程池初始化           ##########################################################
+#######################################################################################################################################
 /**
  * 初始化线程池，创建工作线程，并启动工作线程。
  */
@@ -1289,156 +1155,191 @@ protected void makeAvailable(WorkerThread wt) {
 	}
 }
 
-
-
-
-
-
-
-
-
-
-
-// ########################  QuartzScheduler  ############################
-
-// QuartzScheduler的构造函数。
+#######################################################################################################################################
+##############################################        实例化QuartzScheduler      ######################################################
+#######################################################################################################################################
+/**
+ * 初始化QuartzScheduler
+ */
+location：QuartzScheduler
 public QuartzScheduler(QuartzSchedulerResources resources, long idleWaitTime, @Deprecated long dbRetryInterval) throws SchedulerException {
-
-	// 把SchedulerFactory初始化的QuartzSchedulerResources赋给QuartzScheduler的QuartzSchedulerResources
+	
 	this.resources = resources;
 	
-	// 判断JobStore是否是JobListener的子类
+	// 从resources获取JobStore。并向QuartzScheduler中添加监听器。
 	if (resources.getJobStore() instanceof JobListener) {
 		addInternalJobListener((JobListener)resources.getJobStore());
 	}
 
-	// 实例一个QuartzSchedulerThread对象通过QuartzScheduler和QuartzSchedulerResources
+	// 实例一个QuartzSchedulerThread对象通过QuartzScheduler和QuartzSchedulerResources。【具体类阅读QuartzSchedulerThread】
+	// QuartzSchedulerThread是负责执行注册在QuartzScheduler上的Triggers的线程。【【其是一个线程，run方法的操作很多。】】
 	this.schedThread = new QuartzSchedulerThread(this, resources);
 	
-	// 获取QuartzSchedulerResources中的ThreadExecutor
-	ThreadExecutor schedThreadExecutor = resources.getThreadExecutor();
+	// 获取QuartzSchedulerResources中的ThreadExecutor。
+	schedThreadExecutor = resources.getThreadExecutor();
 	
-	// 把QuartzSchedulerThread启动起来，下面是QuartzSchedulerThread的run方法。
+	/**
+	 * 从resources中获取线程执行框架，并启动QuartzSchedulerThread线程。
+	 * QuartzSchedulerThread线程比较复杂，其run方法已经单独列出来了，请查看02_instantiate_QuartzSchedulerThread的run方法.txt。
+	 *
+	 * 下面是schedThreadExecutor的execute方法
+	 * 	execute() { 
+	 *		thread.start(); 
+	 * 	}
+	 */
 	schedThreadExecutor.execute(this.schedThread);
 	
+	// 设置QuartzSchedulerThread线程的空闲等待时间。
 	if (idleWaitTime > 0) {
 		this.schedThread.setIdleWaitTime(idleWaitTime);
 	}
 
-	// 添加JobListener监听
+	// QuartzScheduler中设置内部监听器ExecutingJobsManager
 	jobMgr = new ExecutingJobsManager();
 	addInternalJobListener(jobMgr);
 	
-	// 添加schedulerListener监听
+	// QuartzScheduler中设置内部监听器ErrorLogger
 	errLogger = new ErrorLogger();
 	addInternalSchedulerListener(errLogger);
 
+	// JobStore实例使用的接口，用于将信号传递回QuartzScheduler。
 	signaler = new SchedulerSignalerImpl(this, this.schedThread);
 	
-	if(shouldRunUpdateCheck()) 
+	if(shouldRunUpdateCheck()) {
 		updateTimer = scheduleUpdateCheck();
-	else
+	} else {
 		updateTimer = null;
+	}
 	
 	getLog().info("Quartz Scheduler v." + getVersion() + " created.");
 }
 
-
-QuartzScheduler的
-public void start() throws SchedulerException {
-
-	if (shuttingDown|| closed) {
-		throw new SchedulerException("The Scheduler cannot be restarted after shutdown() has been called.");
+/**
+ * 添加给定的监听器到QuartzScheduler。
+ */
+location：QuartzScheduler
+public void addInternalJobListener(JobListener jobListener) {
+	if (jobListener.getName() == null || jobListener.getName().length() == 0) {
+		throw new IllegalArgumentException("JobListener name cannot be empty.");
 	}
-
-	// QTZ-212 : calling new schedulerStarting() method on the listeners
-	// right after entering start()
-	notifySchedulerListenersStarting();
-
-	if (initialStart == null) {
-		initialStart = new Date();
-		this.resources.getJobStore().schedulerStarted();            
-		startPlugins();
-	} else {
-		resources.getJobStore().schedulerResumed();
-	}
-
-	schedThread.togglePause(false);
-
-	getLog().info("Scheduler " + resources.getUniqueIdentifier() + " started.");
 	
-	notifySchedulerListenersStarted();
+	// private HashMap<String, JobListener> internalJobListeners = new HashMap<String, JobListener>(10);
+	synchronized (internalJobListeners) {
+		internalJobListeners.put(jobListener.getName(), jobListener);
+	}
 }
 
 
-
-public void start() throws SchedulerException {
-	
-	// 判断Quartz是否停止或者关闭，如果停止或者关闭抛出异常，Quartz是没有重启操作的。
-	if (shuttingDown|| closed) {
-		throw new SchedulerException("The Scheduler cannot be restarted after shutdown() has been called.");
-	}
-
-	// QTZ-212 : calling new schedulerStarting() method on the listeners
-	// right after entering start()
-	notifySchedulerListenersStarting();
-
-	if (initialStart == null) {
-		initialStart = new Date();
-		this.resources.getJobStore().schedulerStarted();            
-		startPlugins();
-	} else {
-		resources.getJobStore().schedulerResumed();
-	}
-
-	schedThread.togglePause(false);
-
-	getLog().info(
-			"Scheduler " + resources.getUniqueIdentifier() + " started.");
-	
-	notifySchedulerListenersStarted();
+/**
+ * QuartzSchedulerThread继承Thread。
+ */
+location：QuartzSchedulerThread
+QuartzSchedulerThread(QuartzScheduler qs, QuartzSchedulerResources qsRsrcs) {
+	this(qs, qsRsrcs, qsRsrcs.getMakeSchedulerThreadDaemon(), Thread.NORM_PRIORITY);
 }
 
-void togglePause(boolean pause) {
-	synchronized (sigLock) {
-		paused = pause;
+/**
+ * 初始化QuartzSchedulerThread过程。
+ */
+location：QuartzSchedulerThread
+QuartzSchedulerThread(QuartzScheduler qs, QuartzSchedulerResources qsRsrcs, boolean setDaemon, int threadPrio) {
+	super(qs.getSchedulerThreadGroup(), qsRsrcs.getThreadName());
+	this.qs = qs;
+	this.qsRsrcs = qsRsrcs;
+	this.setDaemon(setDaemon);
+	
+	if(qsRsrcs.isThreadsInheritInitializersClassLoadContext()) {
+		log.info("QuartzSchedulerThread Inheriting ContextClassLoader of thread: " + Thread.currentThread().getName());
+		this.setContextClassLoader(Thread.currentThread().getContextClassLoader());
+	}
 
-		if (paused) {
-			signalSchedulingChange(0);
-		} else {
-			sigLock.notifyAll();
+	this.setPriority(threadPrio);
+	paused = true;
+	halted = new AtomicBoolean(false);
+}
+
+
+/**
+ * QuartzSchedulerThread的线程。
+ */
+location：QuartzSchedulerThread
+public void run() {
+	【【【 请看文件02_instantiate_QuartzSchedulerThread的run方法.txt 】】】
+}
+
+
+#######################################################################################################################################
+##############################################      初始QuartzScheduler      ##########################################################
+#######################################################################################################################################
+/**
+ * 初始化QuartzScheduler
+ */
+location：QuartzScheduler
+public void initialize() throws SchedulerException {
+        
+	try {
+		bind();
+	} catch (Exception re) {
+		throw new SchedulerException("Unable to bind scheduler to RMI Registry.", re);
+	}
+	
+	if (resources.getJMXExport()) {
+		try {
+			registerJMX();
+		} catch (Exception e) {
+			throw new SchedulerException("Unable to register scheduler with MBeanServer.", e);
 		}
 	}
+	
+	getLog().info("Scheduler meta-data: " + (new SchedulerMetaData(getSchedulerName(), getSchedulerInstanceId(), getClass(), boundRemotely, runningSince() != null, 
+					isInStandbyMode(), isShutdown(), runningSince(),  numJobsExecuted(), getJobStoreClass(), supportsPersistence(), isClustered(), getThreadPoolClass(), 
+					getThreadPoolSize(), getVersion())).toString());
 }
 
 
-
-public void run(Runnable newRunnable) {
-	synchronized(lock) {
-		if(runnable != null) {
-			throw new IllegalStateException("Already running a Runnable!");
-		}
-
-		runnable = newRunnable;
-		lock.notifyAll();
+/**
+ *  将调度程序绑定到RMI注册表。
+ */
+location：QuartzScheduler
+private void bind() throws RemoteException {
+	String host = resources.getRMIRegistryHost();
+	
+	if (host == null || host.length() == 0) {
+		return;
 	}
+
+	RemotableQuartzScheduler exportable = null;
+
+	if(resources.getRMIServerPort() > 0) {
+		exportable = (RemotableQuartzScheduler) UnicastRemoteObject.exportObject(this, resources.getRMIServerPort());
+	} else {
+		exportable = (RemotableQuartzScheduler) UnicastRemoteObject.exportObject(this);
+	}
+
+	Registry registry = null;
+
+	if (resources.getRMICreateRegistryStrategy().equals(QuartzSchedulerResources.CREATE_REGISTRY_AS_NEEDED)) {
+		try {
+			registry = LocateRegistry.getRegistry(resources.getRMIRegistryPort());
+			registry.list();
+		} catch (Exception e) {
+			registry = LocateRegistry.createRegistry(resources.getRMIRegistryPort());
+		}
+	} else if (resources.getRMICreateRegistryStrategy().equals(QuartzSchedulerResources.CREATE_REGISTRY_ALWAYS)) {
+		try {
+			registry = LocateRegistry.createRegistry(resources.getRMIRegistryPort());
+		} catch (Exception e) {
+			registry = LocateRegistry.getRegistry(resources.getRMIRegistryPort());
+		}
+	} else {
+		registry = LocateRegistry.getRegistry(resources.getRMIRegistryHost(), resources.getRMIRegistryPort());
+	}
+
+	String bindName = resources.getRMIBindName();
+	
+	registry.rebind(bindName, exportable);
+	
+	boundRemotely = true;
+
+	getLog().info("Scheduler bound to RMI registry under name '" + bindName + "'");
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
- A <code>Scheduler</code> maintains a registry of <code>{@link org.quartz.JobDetail}</code>s  and <code>{@link Trigger}</code>s. Once registered, the <code>Scheduler</code> is responsible for executing <code>Job</code> s when their associated <code>Trigger</code> s fire (when their scheduled time arrives).
- 
-Scheduler：与调度程序交互的主要API，提供很多操作调度任务的方法，比如：start()方法；shutdown()方法；scheduleJob方法....。Scheduler中维护一个QuartzScheduler实例，Scheduler中几乎所有的操作都是通过QuartzScheduler完成的，所以QuartzScheduler注释说其间接的实现了Scheduler。   
-
-
-维护一个JobDetail和Trigger的注册表，一旦注册以后，Scheduler负责执行相关的Job当他们预定时间到达时。

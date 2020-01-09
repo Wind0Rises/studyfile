@@ -2,10 +2,7 @@ package com.liu.quart;
 
 import java.text.ParseException;
 
-import org.quartz.CronExpression;
-import org.quartz.Scheduler;
-import org.quartz.SchedulerException;
-import org.quartz.SchedulerFactory;
+import org.quartz.*;
 import org.quartz.impl.JobDetailImpl;
 import org.quartz.impl.StdSchedulerFactory;
 import org.quartz.impl.triggers.CronTriggerImpl;
@@ -30,6 +27,11 @@ public class CronTriggerTest {
 		
 		// 02-定义Trigger
 		CronTriggerImpl cronTriggerImpl = new CronTriggerImpl();
+
+		// 使用TriggerBuilder创建Trigger测试。
+		// TriggerBuilder<Trigger> triggerBuilder = TriggerBuilder.newTrigger();
+		// CronTriggerImpl cronTriggerImpl2 = (CronTriggerImpl) triggerBuilder.build();
+
 		CronExpression cronExpression = new CronExpression("0/10 * * * * ?");
 		cronTriggerImpl.setName("Cron_Name");
 		cronTriggerImpl.setCronExpression(cronExpression);
