@@ -19,7 +19,7 @@
 
         <org.apache.shiro>1.4.1</org.apache.shiro>
         <!--<org.springframework.version>5.2.0.RELEASE</org.springframework.version>-->
-        <org.springframework.version>4.3.12.RELEASE</org.springframework.version>
+        <org.springframework.version>5.2.3.RELEASE</org.springframework.version>
 
         <ch.qos.logback>1.2.3</ch.qos.logback>
 
