@@ -1,9 +1,60 @@
+DispatcherServlet 	extends 	FrameworkServlet
+FrameworkServlet 	extends 	HttpServletBean				implements 		ApplicationContextAware
+HttpServletBean 	extends 	HttpServlet 				implements 		EnvironmentAware
+HttpServlet 		extends 	GenericServlet 				implements 		java.io.Serializable
+GenericServlet     implements   Servlet, ServletConfig, java.io.Serializable
+
+
+1、初始化流程？
+	因为DispatcherServlet是实现了javax.Servletl类；在初始化Servlet时，会调用对应的init(ServletConfig config)方法时，会调用GenericServlet的init(..)方法。
+然后继续调用HttpServletBean类的init()方法；在init()方法内部又继续调用了initServletBean()方法。
+	
+
 1、问题？
 	Spring的ApplicationContext和Servlet中的ApplicationContext是一个吗？？
 
+/**
+ * Servlet的初始化方法。
+ */
+location：GenericServlet
+public void init(ServletConfig config) throws ServletException {
+	this.config = config;
+	this.init();
+}
 
 
-// 初始化SpringMVC开始。该类实现【ApplicationContextAware】和继承【HttpServletBean】
+/**
+ * 初始化过程。
+ */
+location：HttpServletBean
+public final void init() throws ServletException {
+	if (logger.isDebugEnabled()) {
+		logger.debug("Initializing servlet '" + getServletName() + "'");
+	}
+
+	try {
+		PropertyValues pvs = new ServletConfigPropertyValues(getServletConfig(), this.requiredProperties);
+		BeanWrapper bw = PropertyAccessorFactory.forBeanPropertyAccess(this);
+		ResourceLoader resourceLoader = new ServletContextResourceLoader(getServletContext());
+		bw.registerCustomEditor(Resource.class, new ResourceEditor(resourceLoader, this.environment));
+		initBeanWrapper(bw);
+		bw.setPropertyValues(pvs, true);
+	}
+	catch (BeansException ex) {
+		logger.error("Failed to set bean properties on servlet '" + getServletName() + "'", ex);
+		throw ex;
+	}
+
+	initServletBean();
+
+	if (logger.isDebugEnabled()) {
+		logger.debug("Servlet '" + getServletName() + "' configured successfully");
+	}
+}
+
+/**
+ * 初始化SpringMVC开始。该类实现【ApplicationContextAware】和继承【HttpServletBean】
+ */
 location：FrameworkServlet
 protected final void initServletBean() throws ServletException {
 	getServletContext().log("Initializing Spring FrameworkServlet '" + getServletName() + "'");
@@ -32,9 +83,12 @@ protected final void initServletBean() throws ServletException {
 }
 
 
-// 初始化并发布此servlet的WebApplicationContext。
+/**
+ * 初始化并发布此servlet的WebApplicationContext。
+ */
 location: FrameworkServlet
 protected WebApplicationContext initWebApplicationContext() {
+
 	// 获取ApplicationContext
 	WebApplicationContext rootContext = WebApplicationContextUtils.getWebApplicationContext(getServletContext());
 	
@@ -46,7 +100,7 @@ protected WebApplicationContext initWebApplicationContext() {
 		
 		if (wac instanceof ConfigurableWebApplicationContext) {
 			ConfigurableWebApplicationContext cwac = (ConfigurableWebApplicationContext) wac;
-			ddddd
+			
 			if (!cwac.isActive()) {				
 				if (cwac.getParent() == null) {
 					cwac.setParent(rootContext);
@@ -82,7 +136,9 @@ protected WebApplicationContext initWebApplicationContext() {
 	return wac;
 }
 
-
+/**
+ * 获取或者创建一个WebApplicationContext
+ */
 location：FrameworkServlet
 protected WebApplicationContext findWebApplicationContext() {
 	String attrName = getContextAttribute();
@@ -96,13 +152,17 @@ protected WebApplicationContext findWebApplicationContext() {
 	return wac;
 }
 
-// 创建一个WebApplicationContext实例。
+/**
+ * 创建一个WebApplicationContext实例。
+ */
 location：FrameworkServlet
 protected WebApplicationContext createWebApplicationContext(WebApplicationContext parent) {
 	return createWebApplicationContext((ApplicationContext) parent);
 }
 
-// 具体创建一个WebApplicationContext的过程。
+/**
+ * 具体创建一个WebApplicationContext的过程。
+ */
 location：FrameworkServlet
 protected WebApplicationContext createWebApplicationContext(ApplicationContext parent) {
 
@@ -122,8 +182,10 @@ protected WebApplicationContext createWebApplicationContext(ApplicationContext p
 
 	// 为WebApplicationContext设置环境信息。
 	wac.setEnvironment(getEnvironment());
+	
 	// 为父属性。
 	wac.setParent(parent);
+	
 	// 设置ConfigLocation这个值是Web.xml配饰Spring mvc时候的ConfigLocation的值。要加载的配置文件。
 	wac.setConfigLocation(getContextConfigLocation());
 
@@ -133,6 +195,9 @@ protected WebApplicationContext createWebApplicationContext(ApplicationContext p
 	return wac;
 }
 
+/**
+ * 获取Context的类信息。
+ */
 location：FrameworkServlet
 public Class<?> getContextClass() {
 	// private Class<?> contextClass = DEFAULT_CONTEXT_CLASS;
@@ -140,7 +205,10 @@ public Class<?> getContextClass() {
 	return this.contextClass;
 }
 
-
+/**
+ * 配置刷新WebApplicationContext
+ */
+location：FrameworkServlet
 protected void configureAndRefreshWebApplicationContext(ConfigurableWebApplicationContext wac) {
 	// 判断WebApplicationContext生产的id是否正确。如果没有设置ID设置Id
 	if (ObjectUtils.identityToString(wac).equals(wac.getId())) {
@@ -172,7 +240,10 @@ protected void configureAndRefreshWebApplicationContext(ConfigurableWebApplicati
 	wac.refresh();
 }
 
-
+/**
+ * 添加ApplicationContextInitializer
+ */
+location：
 protected void applyInitializers(ConfigurableApplicationContext wac) {
 	String globalClassNames = getServletContext().getInitParameter(ContextLoader.GLOBAL_INITIALIZER_CLASSES_PARAM);
 	if (globalClassNames != null) {
@@ -188,11 +259,11 @@ protected void applyInitializers(ConfigurableApplicationContext wac) {
 	}
 
 	AnnotationAwareOrderComparator.sort(this.contextInitializers);
+	
 	for (ApplicationContextInitializer<ConfigurableApplicationContext> initializer : this.contextInitializers) {
 		initializer.initialize(wac);
 	}
 }
-
 
 
 
@@ -204,25 +275,33 @@ protected void applyInitializers(ConfigurableApplicationContext wac) {
 
 【SourceFilteringListener】：注意是在执行这个监听器时候做的。
 
-
+/**
+ *
+ */
 location：SourceFilteringListener
 protected void onApplicationEventInternal(ApplicationEvent event) {
 	if (this.delegate == null) {
 		throw new IllegalStateException( "Must specify a delegate object or override the onApplicationEventInternal method");
 	}
-	// delegate = GenericApplicationListenerAdapter
+	
 	this.delegate.onApplicationEvent(event);
 }
 
 
+/**
+ *
+ */
 location：GenericApplicationListenerAdapter
 public void onApplicationEvent(ApplicationEvent event) {
-	// delegate = FrameworkServlet
+	// ApplicationListener<ApplicationEvent> delegate：其是一个监听器。
 	this.delegate.onApplicationEvent(event);
 }
 
+
+/**
+ *
+ */
 location：FrameworkServlet
-// FrameworkServlet内部类。
 private class ContextRefreshListener implements ApplicationListener<ContextRefreshedEvent> {
 	@Override
 	public void onApplicationEvent(ContextRefreshedEvent event) {
@@ -230,22 +309,26 @@ private class ContextRefreshListener implements ApplicationListener<ContextRefre
 	}
 }
 
+/**
+ *
+ */
 location：FrameworkServlet
 public void onApplicationEvent(ContextRefreshedEvent event) {
 	this.refreshEventReceived = true;
 	onRefresh(event.getApplicationContext());
 }
-		||
-		||
-		\/
-		
-// #########################   初始化操作开始  ##########################
+
+/**
+ *
+ */
 location：DispatcherServlet
 protected void onRefresh(ApplicationContext context) {
 	initStrategies(context);
 }
 
-
+/**
+ * strategy[/ˈstrætədʒi/ ]:战略，策略
+ */
 location：DispatcherServlet
 protected void initStrategies(ApplicationContext context) {
 	initMultipartResolver(context);

@@ -1,0 +1,4 @@
+1、filterChainDefinitions是什么时候起作用的？filter做了哪些事情？？
+
+
+2、shiro的整个流程是什么样的？？？

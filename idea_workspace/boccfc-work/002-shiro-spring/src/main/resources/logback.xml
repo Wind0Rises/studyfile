@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--debug="true" : 打印logback内部状态（默认当logback运行出错时才会打印内部状态 ），配置该属性后打印条件如下（同时满足）： 
+    			   1、找到配置文件 2、配置文件是一个格式正确的xml文件 也可编程实现打印内部状态，例如： LoggerContext lc = (LoggerContext) 
+                   LoggerFactory.getILoggerFactory(); StatusPrinter.print(lc);
+	scan="true" ： 自动扫描该配置文件，若有修改则重新加载该配置文件 
+  	scanPeriod="30 seconds" : 配置自动扫面时间间隔（单位可以是：milliseconds, seconds, minutes 
+    			or hours，默认为：milliseconds）， 默认为1分钟，scan="true"时该配置才会生效 -->
+  
+<configuration debug="false" scan="true" packagingData="true">
+
+    <!-- 设置 logger context 名称,一旦设置不可改变，默认为default -->
+    <contextName>myAppName</contextName>
+    
+    <!-- 类似键值对，通过${name}可以获取到value -->
+    <!-- <property name="SYS_LOG_DIR" value="${user.dir}/home/log/oa" /> -->
+   <!--  <property name="SYS_LOG_DIR" value="../log" /> -->
+    <property name="SYS_LOG_DIR" value="D:\\myproject\\log" />
+	<property name="LOG_FILE" value="project_log" /> 
+	
+	
+	<!-- ############################################## -->
+	<!-- #              控制台 输出配置                                                # -->
+	<!-- ############################################## -->
+    <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{yyyy-MM-dd} %d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+        </encoder>
+    </appender>
+    
+    <!-- ############################################## -->
+	<!-- #     按时间和文件大小控住日志文件滚动                                     # -->
+	<!-- ############################################## -->
+    <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender"> 
+    	<!-- 编码格式 -->
+    	<encoding>UTF-8</encoding>
+    	
+    	<!-- <file>d:\\myproject\\log\\</file> -->
+    	
+    	<prudent>true</prudent>
+    	<!-- 日志文件 -->
+		<rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+			<FileNamePattern>${SYS_LOG_DIR}/${LOG_FILE}_%d{yyyyMMdd}_%i.log</FileNamePattern>
+			<maxHistory>30</maxHistory>
+			
+			<timeBasedFileNamingAndTriggeringPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
+           		<maxFileSize>20MB</maxFileSize> 
+           	</timeBasedFileNamingAndTriggeringPolicy>
+			
+		</rollingPolicy>
+		
+		
+<!-- #############################  单个文件大小切换  ############################## -->
+    	<!-- 按时间和文件大小切换日志文件 -->
+  <!-- <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy"> -->
+        	<!-- 保存的文件名%d{yyyyMMdd}和%i要注意 -->
+        	<!-- <FileNamePattern>${SYS_LOG_DIR}/${LOG_FILE}_%d{yyyyMMdd}_%i.log</FileNamePattern> -->
+        	<!-- <prudent>true</prudent> -->
+        	<!-- 单个文件多大是进行切换 -->
+	       	<!-- <maxFileSize>20MB</maxFileSize> --> 
+	       	<!-- 文件保存的天数 -->
+           	<!-- <maxHistory>60</maxHistory> -->
+           	<!-- 总日志文件的最大上限 -->
+       <!-- <totalSizeCap>20GB</totalSizeCap>
+           	
+           	<timeBasedFileNamingAndTriggeringPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
+           		<maxFileSize>20MB</maxFileSize> 
+           	</timeBasedFileNamingAndTriggeringPolicy>
+        </rollingPolicy> -->
+<!-- #############################  单个文件大小切换  ############################## -->
+        
+		<!-- 对记录事件进行格式化。如果不写将不会向文件中写入日志内容 -->
+        <encoder>
+          <pattern>%d{yyyy-MM-dd} %d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+        </encoder>
+    </appender>
+    
+    <!-- 至多只能配置一个root -->
+    <root level="debug">
+        <appender-ref ref="STDOUT" />
+        <!--<appender-ref ref="FILE" />-->
+    </root>
+    
+    <!-- 日志级别若没显示定义，则继承最近的父logger的日志级别.如果个别日志输出频繁，可以提高日志的级别。 -->
+    <logger name="org.apache.commons" level="WARN">
+    	<appender-ref ref="FILE" />
+    </logger>
+    <logger name="org.apache.zookeeper" level="WARN">
+    	<appender-ref ref="FILE" />
+    </logger>
+    <logger name="org.springframework.web" level="WARN">
+    	<appender-ref ref="FILE" />
+    </logger>
+</configuration>

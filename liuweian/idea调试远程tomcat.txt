@@ -1,0 +1,4 @@
+在tomcat的bin目录下有一个catalina.sh文件，修改该文件的JAVA_OPTS参数，在JAVA_OPTS这参数结尾加载-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=5005
+内容，然后重启tomcat。5005是调试地址。
+
+

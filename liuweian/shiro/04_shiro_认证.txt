@@ -1,0 +1,582 @@
+
+
+
+##################################################################################################################################################
+##################################################################################################################################################
+##################################################################################################################################################
+ 
+FormAuthenticationFilter  extends  AuthenticatingFilter  AuthenticationFilter  extends  AccessControlFilter  extends  PathMatchingFilter  extends  AdviceFilter  extends  AdviceFilter  extends  OncePerRequestFilter
+
+
+/**
+ * 这个是FormAuthenticationFilter实例。
+ */
+location：OncePerRequestFilter
+public final void doFilter(ServletRequest request, ServletResponse response, FilterChain filterChain) throws ServletException, IOException {
+	String alreadyFilteredAttributeName = getAlreadyFilteredAttributeName();
+	if ( request.getAttribute(alreadyFilteredAttributeName) != null ) {
+		log.trace("Filter '{}' already executed.  Proceeding without invoking this filter.", getName());
+		filterChain.doFilter(request, response);
+	} else if (!isEnabled(request, response) || shouldNotFilter(request) ) {
+		log.debug("Filter '{}' is not enabled for the current request.  Proceeding without invoking this filter.", getName());
+		filterChain.doFilter(request, response);
+	} else {
+		log.trace("Filter '{}' not yet executed.  Executing now.", getName());
+		request.setAttribute(alreadyFilteredAttributeName, Boolean.TRUE);
+
+		try {
+			doFilterInternal(request, response, filterChain);
+		} finally {
+			request.removeAttribute(alreadyFilteredAttributeName);
+		}
+	}
+}
+
+/**
+ * 这个是FormAuthenticationFilter实例。
+ */
+location：AdviceFilter
+public void doFilterInternal(ServletRequest request, ServletResponse response, FilterChain chain) throws ServletException, IOException {
+
+	Exception exception = null;
+
+	try {
+
+		boolean continueChain = preHandle(request, response);
+		
+		if (log.isTraceEnabled()) {
+			log.trace("Invoked preHandle method.  Continuing chain?: [" + continueChain + "]");
+		}
+
+		if (continueChain) {
+			executeChain(request, response, chain);
+		}
+
+		postHandle(request, response);
+		
+		if (log.isTraceEnabled()) {
+			log.trace("Successfully invoked postHandle method");
+		}
+
+	} catch (Exception e) {
+		exception = e;
+	} finally {
+		cleanup(request, response, exception);
+	}
+}
+
+/**
+ * 过滤器的基类，将仅处理指定的路径并允许所有其他路径通过。
+ * 这个是FormAuthenticationFilter实例。
+ */
+location：AdviceFilter
+protected boolean preHandle(ServletRequest request, ServletResponse response) throws Exception {
+
+	if (this.appliedPaths == null || this.appliedPaths.isEmpty()) {
+		if (log.isTraceEnabled()) {
+			log.trace("appliedPaths property is null or empty.  This Filter will passthrough immediately.");
+		}
+		return true;
+	}
+
+	for (String path : this.appliedPaths.keySet()) {
+		// 判断请求的url和配置的url是否一致。
+		if (pathsMatch(path, request)) {
+			log.trace("Current requestURI matches pattern '{}'.  Determining filter chain execution...", path);
+			Object config = this.appliedPaths.get(path);
+			return isFilterChainContinued(request, response, path, config);
+		}
+	}
+
+	return true;
+
+}
+
+/**
+ * 过滤器的基类，将仅处理指定的路径并允许所有其他路径通过。
+ * 这个是FormAuthenticationFilter实例。
+ */
+location：PathMatchingFilter
+private boolean isFilterChainContinued(ServletRequest request, ServletResponse response, String path, Object pathConfig) throws Exception {
+
+	// 判断此过滤器是应该执行还是让请求进入下一个链元素。默认为true，要执行该过滤器。
+	if (isEnabled(request, response, path, pathConfig)) {
+		if (log.isTraceEnabled()) {
+			log.trace("Filter '{}' is enabled for the current request under path '{}' with config [{}].  " + "Delegating to subclass implementation for 'onPreHandle' check.", new Object[]{getName(), path, pathConfig});
+		}
+		return onPreHandle(request, response, pathConfig);
+	}
+
+	if (log.isTraceEnabled()) {
+		log.trace("Filter '{}' is disabled for the current request under path '{}' with config [{}].  " + "The next element in the FilterChain will be called immediately.",new Object[]{getName(), path, pathConfig});
+	}
+	
+	return true;
+}
+
+/**
+ * 这个是FormAuthenticationFilter实例。
+ */
+location：AccessControlFilter
+public boolean onPreHandle(ServletRequest request, ServletResponse response, Object mappedValue) throws Exception {
+	// isAccessAllowed(..)：判断是否允许通过。  
+	return isAccessAllowed(request, response, mappedValue) || onAccessDenied(request, response, mappedValue);
+}
+
+/**
+ * 判断Subject是否已经认证  或者 （不是登录请求  并且  判断是否是允许路径）
+ *
+ * 这个是FormAuthenticationFilter实例。
+ * AhthenticatingFilter extends AuthenticationFilter
+ */
+location：AhthenticatingFilter
+protected boolean isAccessAllowed(ServletRequest request, ServletResponse response, Object mappedValue) {
+	return super.isAccessAllowed(request, response, mappedValue) || (!isLoginRequest(request, response) && isPermissive(mappedValue));
+}
+
+/**
+ * 判断Subject是否已经认证。
+ *
+ * 这个是FormAuthenticationFilter实例。
+ * AhthenticatingFilter extends AuthenticationFilter
+ */
+location：AuthenticationFilter
+protected boolean isAccessAllowed(ServletRequest request, ServletResponse response, Object mappedValue) {
+	Subject subject = getSubject(request, response);
+	return subject.isAuthenticated();
+}
+
+/**
+ * 判断是否是登录请求。
+ */
+location：AccessControlFilter
+protected boolean isLoginRequest(ServletRequest request, ServletResponse response) {
+	return pathsMatch(getLoginUrl(), request);
+}
+
+/**
+ * 判断是否是允许路径。
+ */
+location：AccessControlFilter
+protected boolean isPermissive(Object mappedValue) {
+	if(mappedValue != null) {
+		String[] values = (String[]) mappedValue;
+		return Arrays.binarySearch(values, PERMISSIVE) >= 0;
+	}
+	return false;
+}
+
+/**
+ * 
+ */
+location：AccessControlFilter
+protected boolean onAccessDenied(ServletRequest request, ServletResponse response, Object mappedValue) throws Exception {
+	return onAccessDenied(request, response);
+}
+
+
+
+################################################################################################################################
+############################################     ###########################################################
+################################################################################################################################
+/**
+ * 
+ */
+location：FormAuthenticationFilter
+protected boolean onAccessDenied(ServletRequest request, ServletResponse response) throws Exception {
+	// 判断是否是登录页面。
+	if (isLoginRequest(request, response)) {
+		
+		// 如果request是HttpServletRequest实例，并且是POST请求，就返回true。
+		if (isLoginSubmission(request, response)) {
+		
+			if (log.isTraceEnabled()) {
+				log.trace("Login submission detected.  Attempting to execute login.");
+			}
+			
+			// 执行登录操作。
+			return executeLogin(request, response);
+			
+		} else {
+			if (log.isTraceEnabled()) {
+				log.trace("Login page view.");
+			}
+			return true;
+		}
+	} else {
+		if (log.isTraceEnabled()) {
+			log.trace("Attempting to access a path which requires authentication.  Forwarding to the " + "Authentication url [" + getLoginUrl() + "]");
+		}
+		
+		// 保存request信息，并跳转到登录页面。
+		saveRequestAndRedirectToLogin(request, response);
+		return false;
+	}
+}
+
+
+/**
+ * 执行登录操作。
+ */
+location：AuthenticatingFilter
+protected boolean executeLogin(ServletRequest request, ServletResponse response) throws Exception {
+	// 通过request和response创建AuthenticationToken。这里以UsernamePasswordToken为例。
+	AuthenticationToken token = createToken(request, response);
+	
+	if (token == null) {
+		String msg = "createToken method implementation returned null. A valid non-null AuthenticationToken " + "must be created in order to execute a login attempt.";
+		throw new IllegalStateException(msg);
+	}
+	
+	
+	try {
+		// 获取或者创建Subject。
+		Subject subject = getSubject(request, response);
+		
+		subject.login(token);
+		
+		return onLoginSuccess(token, subject, request, response);
+	} catch (AuthenticationException e) {
+		return onLoginFailure(token, e, request, response);
+	}
+}
+
+/**
+ * 获取username和password【【这规定的请求参数名[默认情况]必须为：username和password】】
+ */
+location：FormAuthenticationFilter
+protected AuthenticationToken createToken(ServletRequest request, ServletResponse response) {
+	String username = getUsername(request);
+	String password = getPassword(request);
+	return createToken(username, password, request, response);
+}
+
+/**
+ * 获取rememberMe和请求地址。【【这规定的请求参数名[默认情况]必须为：rememberMe】】
+ */
+location：AuthenticatingFilter
+protected AuthenticationToken createToken(String username, String password, ServletRequest request, ServletResponse response) {
+	boolean rememberMe = isRememberMe(request);
+	String host = getHost(request);
+	return createToken(username, password, rememberMe, host);
+}
+
+/**
+ * 构建UsernamePasswordToken
+ */
+location：AuthenticatingFilter
+protected AuthenticationToken createToken(String username, String password,  boolean rememberMe, String host) {
+	return new UsernamePasswordToken(username, password, rememberMe, host);
+}
+
+################################################################################################################################
+
+	1、清理
+	
+	2、安全管理器登录：
+		
+	
+################################################################################################################################
+/**
+ * 执行登录操作。
+ * WebDelegatingSubject extends DelegatingSubject。其是WebDelegatingSubject实例。
+ */
+location：DelegatingSubject
+public void login(AuthenticationToken token) throws AuthenticationException {
+
+	clearRunAsIdentitiesInternal();
+	
+	// 登录处理，进行认证过程，如果认证成功，进行rememberMe处理。
+	Subject subject = securityManager.login(this, token);
+
+	PrincipalCollection principals;
+
+	String host = null;
+
+	if (subject instanceof DelegatingSubject) {
+		DelegatingSubject delegating = (DelegatingSubject) subject;
+		
+		// 从subject中获取principals
+		principals = delegating.principals;
+		host = delegating.host;
+	} else {
+		principals = subject.getPrincipals();
+	}
+
+	if (principals == null || principals.isEmpty()) {
+		String msg = "Principals returned from securityManager.login( token ) returned a null or " + "empty value.  This value must be non null and populated with one or more elements.";
+		throw new IllegalStateException(msg);
+	}
+	
+	this.principals = principals;
+	this.authenticated = true;
+	
+	if (token instanceof HostAuthenticationToken) {
+		host = ((HostAuthenticationToken) token).getHost();
+	}
+	
+	if (host != null) {
+		this.host = host;
+	}
+	
+	Session session = subject.getSession(false);
+	
+	if (session != null) {
+		this.session = decorate(session);
+	} else {
+		this.session = null;
+	}
+}
+
+/**
+ * 
+ */
+location：DefaultSecurityManager
+public Subject login(Subject subject, AuthenticationToken token) throws AuthenticationException {
+	AuthenticationInfo info;
+	try {
+	
+		// 进行认证过程。
+		info = authenticate(token);
+	} catch (AuthenticationException ae) {
+	
+		try {
+			onFailedLogin(token, ae, subject);
+		} catch (Exception e) {
+			if (log.isInfoEnabled()) {
+				log.info("onFailedLogin method threw an " + "exception.  Logging and propagating original AuthenticationException.", e);
+			}
+		}
+		throw ae;
+		
+	}
+
+	// 创建Subject
+	Subject loggedIn = createSubject(token, info, subject);
+
+	onSuccessfulLogin(token, info, loggedIn);
+
+	return loggedIn;
+}
+
+/**
+ * 
+ */
+location：AuthenticatingSecurityManager
+public AuthenticationInfo authenticate(AuthenticationToken token) throws AuthenticationException {
+	return this.authenticator.authenticate(token);
+}
+
+/**
+ * ModularRealmAuthenticator extends  AbstractAuthenticator
+ */
+location：AbstractAuthenticator
+public final AuthenticationInfo authenticate(AuthenticationToken token) throws AuthenticationException {
+
+	if (token == null) {
+		throw new IllegalArgumentException("Method argument (authentication token) cannot be null.");
+	}
+
+	log.trace("Authentication attempt received for token [{}]", token);
+
+	AuthenticationInfo info;
+	
+	try {
+		
+		// 进行认证处理过程。
+		info = doAuthenticate(token);
+		
+		if (info == null) {
+			String msg = "No account information found for authentication token [" + token + "] by this " + "Authenticator instance.  Please check that it is configured correctly.";
+			throw new AuthenticationException(msg);
+		}
+	} catch (Throwable t) {
+		AuthenticationException ae = null;
+		if (t instanceof AuthenticationException) {
+			ae = (AuthenticationException) t;
+		}
+		if (ae == null) {
+			String msg = "Authentication failed for token submission [" + token + "].  Possible unexpected " + "error? (Typical or expected login exceptions should extend from AuthenticationException).";
+			ae = new AuthenticationException(msg, t);
+			if (log.isWarnEnabled()) {
+				log.warn(msg, t);
+			}
+		}
+		
+		try {
+			notifyFailure(token, ae);
+		} catch (Throwable t2) {
+			if (log.isWarnEnabled()) {
+				String msg = "Unable to send notification for failed authentication attempt - listener error?.  " + "Please check your AuthenticationListener implementation(s).  Logging sending exception " + "and propagating original AuthenticationException instead...";
+				log.warn(msg, t2);
+			}
+		}
+		
+		throw ae;
+	}
+
+	log.debug("Authentication successful for token [{}].  Returned account [{}]", token, info);
+
+	notifySuccess(token, info);
+
+	return info;
+}
+
+/**
+ * 做认证处理。进行单realm和多realm进行不同的处理。
+ */
+location：ModularRealmAuthenticator
+protected AuthenticationInfo doAuthenticate(AuthenticationToken authenticationToken) throws AuthenticationException {
+	// 判断Realm配置，必须要有Realm。
+	assertRealmsConfigured();
+	Collection<Realm> realms = getRealms();
+	
+	// 单realm和多realm进行不同的处理。
+	if (realms.size() == 1) {
+		return doSingleRealmAuthentication(realms.iterator().next(), authenticationToken);
+	} else {
+		return doMultiRealmAuthentication(realms, authenticationToken);
+	}
+}
+
+/**
+ * 进行单realm认证过程。
+ */
+location：ModularRealmAuthenticator
+protected AuthenticationInfo doSingleRealmAuthentication(Realm realm, AuthenticationToken token) {
+
+	if (!realm.supports(token)) {
+		String msg = "Realm [" + realm + "] does not support authentication token [" + token + "].  Please ensure that the appropriate Realm implementation is " + "configured correctly or that the realm accepts AuthenticationTokens of this type.";
+		throw new UnsupportedTokenException(msg);
+	}
+	
+	// 获取认证信息。如果认证成立了就返回认证信息。
+	AuthenticationInfo info = realm.getAuthenticationInfo(token);
+	
+	if (info == null) {
+		String msg = "Realm [" + realm + "] was unable to find account data for the " + "submitted AuthenticationToken [" + token + "].";
+		throw new UnknownAccountException(msg);
+	}
+	
+	return info;
+}
+
+/**
+ * 
+ */
+location：AuthenticatingRealm
+public final AuthenticationInfo getAuthenticationInfo(AuthenticationToken token) throws AuthenticationException {
+	// 从缓存中获取认证信息。
+	AuthenticationInfo info = getCachedAuthenticationInfo(token);
+	
+	if (info == null) {
+	
+		// 【【调用Realm的doGetAuthenticationInfo()过程，进行认证的过程。】】
+		info = doGetAuthenticationInfo(token);
+		
+		
+		log.debug("Looked up AuthenticationInfo [{}] from doGetAuthenticationInfo", info);
+		if (token != null && info != null) {
+			cacheAuthenticationInfoIfPossible(token, info);
+		}
+		
+	} else {
+		log.debug("Using cached authentication info [{}] to perform credentials matching.", info);
+	}
+
+	if (info != null) {
+		assertCredentialsMatch(token, info);
+	} else {
+		log.debug("No AuthenticationInfo found for submitted AuthenticationToken [{}].  Returning null.", token);
+	}
+
+	// 如果走到这里，说明已经认证成功了。
+	return info;
+}
+
+/**
+ * 通过凭证匹配器[CredentialsMatcher]验证凭证。如果以账号密码登录，通俗的说就是验证数据库的登录密码与用户上送的密码是否一致。
+ */
+location：AuthenticatingRealm
+protected void assertCredentialsMatch(AuthenticationToken token, AuthenticationInfo info) throws AuthenticationException {
+	// 获取凭证匹配器。这里以HashedCredentialsMatcher为例。
+	CredentialsMatcher cm = getCredentialsMatcher();
+	
+	if (cm != null) {
+		// 如果凭证不匹配就报错。
+		if (!cm.doCredentialsMatch(token, info)) {
+			String msg = "Submitted credentials for token [" + token + "] did not match the expected credentials.";
+			throw new IncorrectCredentialsException(msg);
+		}
+	} else {
+		throw new AuthenticationException("A CredentialsMatcher must be configured in order to verify " + "credentials during authentication.  If you do not wish for credentials to be examined, you " + "can configure an " + AllowAllCredentialsMatcher.class.getName() + " instance.");
+	}
+}
+
+/**
+ * 这里就是验证凭证的地方。不具体分析了。
+ */
+location：HashedCredentialsMatcher
+public boolean doCredentialsMatch(AuthenticationToken token, AuthenticationInfo info) {
+	Object tokenHashedCredentials = hashProvidedCredentials(token, info);
+	Object accountCredentials = getCredentials(info);
+	return equals(tokenHashedCredentials, accountCredentials);
+}
+
+/**
+ * 通知认证监听器。
+ */
+location：AbstractAuthenticator
+protected void notifySuccess(AuthenticationToken token, AuthenticationInfo info) {
+	for (AuthenticationListener listener : this.listeners) {
+		listener.onSuccess(token, info);
+	}
+}
+
+/**
+ * 创建Subject
+ */
+location：DefaultSecurityManager
+protected Subject createSubject(AuthenticationToken token, AuthenticationInfo info, Subject existing) {
+	SubjectContext context = createSubjectContext();
+	context.setAuthenticated(true);
+	context.setAuthenticationToken(token);
+	context.setAuthenticationInfo(info);
+	context.setSecurityManager(this);
+	if (existing != null) {
+		context.setSubject(existing);
+	}
+	return createSubject(context);
+}
+
+/**
+ * 登录成功处理。
+ */
+location：DefaultSecurityManager
+protected void onSuccessfulLogin(AuthenticationToken token, AuthenticationInfo info, Subject subject) {
+	rememberMeSuccessfulLogin(token, info, subject);
+}
+
+/**
+ * rememberMe处理。
+ */
+location：DefaultSecurityManager
+protected void rememberMeSuccessfulLogin(AuthenticationToken token, AuthenticationInfo info, Subject subject) {
+	// rememberMe的处理。
+	RememberMeManager rmm = getRememberMeManager();
+	
+	if (rmm != null) {
+		try {
+			rmm.onSuccessfulLogin(subject, token, info);
+		} catch (Exception e) {
+			if (log.isWarnEnabled()) {
+				String msg = "Delegate RememberMeManager instance of type [" + rmm.getClass().getName() + "] threw an exception during onSuccessfulLogin.  RememberMe services will not be " + "performed for account [" + info + "].";
+				log.warn(msg, e);
+			}
+		}
+	} else {
+		if (log.isTraceEnabled()) {
+			log.trace("This " + getClass().getName() + " instance does not have a " + "[" + RememberMeManager.class.getName() + "] instance configured.  RememberMe services " + "will not be performed for account [" + info + "].");
+		}
+	}
+}

@@ -68,6 +68,10 @@ jdk源码：
 
 
 	
+spring mvc：
+	https://my.oschina.net/zjllovecode/blog/1543872   ViewResolver
+	
+	
 	https://www.cnblogs.com/yulinfeng/p/8095326.html
 
 

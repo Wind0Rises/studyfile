@@ -1,0 +1,51 @@
+
+首先要导入标签库。
+
+
+
+jsp装为servlet的过程？？？
+
+
+
+把一个index.jsp  --->  index_jsp.java   --->  index_jsp.class
+
+
+
+/**
+ * 
+ */
+location：SecureTag
+public int doStartTag() throws JspException {
+
+	verifyAttributes();
+	
+	return onDoStartTag();
+}
+
+/**
+ * 是HasPermissionTag实例。
+ */
+location：PermissionTag
+public int onDoStartTag() throws JspException {
+	// 获取jsp中的标签的name。
+	String p = getName();
+
+	// 判断是否要显示。
+	boolean show = showTagBody(p);
+	
+	if (show) {
+		return TagSupport.EVAL_BODY_INCLUDE;
+	} else {
+		return TagSupport.SKIP_BODY;
+	}
+}
+
+
+/**
+ * 判断是否有权限执行。
+ */
+location：HasPermissionTag
+protected boolean showTagBody(String p) {
+	// 从这里和使用注解的流程就一直了。
+	return isPermitted(p);
+}

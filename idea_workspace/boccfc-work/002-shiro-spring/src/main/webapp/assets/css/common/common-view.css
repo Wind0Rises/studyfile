@@ -1,0 +1,41 @@
+#view_black {
+	float: right;
+	margin-right: 30px;
+}
+
+/*
+	view.jsp公共css设置
+*/
+
+
+@media screen and(min-width: 0px) and (max-width: 768px) {
+	#viewMain {
+		overflow-y: scroll;
+		overflow-x: hidden;
+		height: 460px;
+	}
+}
+
+@media screen and (min-width: 768px) and (max-width: 992px) {
+	#viewMain {
+		height: 460px;
+		overflow-y: scroll;
+		overflow-x: hidden;
+	}
+}
+
+@media screen and (min-width: 992px) and (max-width: 1200px) {
+	#viewMain {
+		overflow-y: scroll;
+		overflow-x: hidden;
+		height: 460px;
+	}
+}
+
+@media screen and (min-width: 1200px) and (max-width: 12000px) {
+	#viewMain {
+		overflow-y: scroll;
+		overflow-x: hidden;
+		height: 460px;
+	}
+}

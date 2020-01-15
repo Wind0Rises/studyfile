@@ -1,0 +1,35 @@
+#imageContainer{
+	height: 280px;
+}
+
+#leftImageContainer{
+	height: 280px;
+}
+
+#imageContent{
+	height: 200px;
+	border: red solid 3px;
+}
+
+#imageContent img{
+	float: left;
+	margin-left: 20px;
+}
+
+#imageContent div{
+	float: left;
+	width: 80px;
+	margin-left: 10px;
+	margin-top: 150px;
+}
+
+#exampleInputFile{
+	padding-top: 28px;
+	float: left;
+}
+
+#uploadBtn{
+	margin-top: 22px;
+	float: left;
+	width: 80px;
+}

@@ -1,0 +1,416 @@
+
+##################################################################################################################################################
+##################################################################################################################################################
+##################################################################################################################################################
+
+拦截器：
+	RoleAnnotationMethodInterceptor：           	---           @RequiresRoles				---      RoleAnnotationHandler
+	PermissionAnnotationMethodInterceptor：         ---           @RequiresPermissions          ---      PermissionAnnotationHandler
+	AuthenticatedAnnotationMethodInterceptor：      ---           @RequiresAuthentication		---      AuthenticatedAnnotationHandler
+	UserAnnotationMethodInterceptor：               ---           @RequiresUser                 ---      UserAnnotationHandler
+	GuestAnnotationMethodInterceptor：              ---           @RequiresGuest                ---      GuestAnnotationHandler
+
+	AnnotationsAuthorizingMethodInterceptor（这个基础extends  AuthorizingMethodInterceptor）			这是中的，包含上面五个。
+
+	
+	AuthorizingAnnotationMethodInterceptor
+	
+	注解							  功能
+@RequiresGuest					只有游客可以访问（未登录时subject.getPrincipal()==null，接口可访问；而用户登录后subject.getPrincipal()！=null，接口不可访问）
+@RequiresAuthentication			需要登录才能访问
+@RequiresUser					已登录的用户或“记住我”的用户能访问
+@RequiresRoles					已登录的用户需具有指定的角色才能访问
+@RequiresPermissions			已登录的用户需具有指定的权限才能访问
+	
+	
+AopAllianceAnnotationsAuthorizingMethodInterceptor
+        extends AnnotationsAuthorizingMethodInterceptor
+			extends AuthorizingMethodInterceptor 
+				extends MethodInterceptorSupport implements MethodInterceptor
+
+	
+/**
+ * methodInvocation：是一个代理类，这个代理类是Controller类中的某一个方法。
+ */
+location：AopAllianceAnnotationsAuthorizingMethodInterceptor
+public Object invoke(MethodInvocation methodInvocation) throws Throwable {
+	org.apache.shiro.aop.MethodInvocation mi = createMethodInvocation(methodInvocation);
+	return super.invoke(mi);
+}
+
+
+/**
+ *
+ */
+location：AuthorizingMethodInterceptor
+public Object invoke(MethodInvocation methodInvocation) throws Throwable {
+	// 
+	assertAuthorized(methodInvocation);
+	return methodInvocation.proceed();
+}
+
+
+/**
+ * 获取给定注解对应的拦截器，然后调用拦截器处理方法。
+ */
+location：AnnotationsAuthorizingMethodInterceptor
+protected void assertAuthorized(MethodInvocation methodInvocation) throws AuthorizationException {
+	// 获取所有的拦截器：RoleAnnotationMethodInterceptor、PermissionAnnotationMethodInterceptor等等
+	Collection<AuthorizingAnnotationMethodInterceptor> aamis = getMethodInterceptors();
+	
+	if (aamis != null && !aamis.isEmpty()) {
+		for (AuthorizingAnnotationMethodInterceptor aami : aamis) {
+		
+			// 如果支持这个拦截器返回true。获取方法的
+			if (aami.supports(methodInvocation)) {
+				
+				// 执行具体的拦截内容
+				aami.assertAuthorized(methodInvocation);
+			}
+		}
+	}
+}
+
+/**
+ *
+ */
+location：AnnotationMethodInterceptor
+public boolean supports(MethodInvocation mi) {
+	return getAnnotation(mi) != null;
+}
+
+
+/**
+ * 返回此拦截器指定的方法调用处理的Annotation。
+ */
+location：AnnotationMethodInterceptor
+protected Annotation getAnnotation(MethodInvocation mi) {
+	return getResolver().getAnnotation(mi, getHandler().getAnnotationClass());
+}
+
+
+
+
+/**
+ * 以@RequiresPermissions为例。
+ * 其是PermissionAnnotationMethodInterceptor实例，PermissionAnnotationMethodInterceptor extends AuthorizingAnnotationMethodInterceptor 
+ * 														extends AnnotationMethodInterceptor
+ */
+location：AuthorizingAnnotationMethodInterceptor
+public void assertAuthorized(MethodInvocation mi) throws AuthorizationException {
+	try {
+		// 获取对应的拦截器，并调用具体的Handler的assertAuthorized方法。
+		((AuthorizingAnnotationHandler) getHandler()).assertAuthorized(getAnnotation(mi));
+	} catch(AuthorizationException ae) {
+		if (ae.getCause() == null) ae.initCause(new AuthorizationException("Not authorized to invoke method: " + mi.getMethod()));
+		throw ae;
+	}         
+}
+
+
+/**
+ *
+ */
+location：PermissionAnnotationHandler
+public void assertAuthorized(Annotation a) throws AuthorizationException {
+	
+	// 判断是否是RequiresPermissions注解。
+	if (!(a instanceof RequiresPermissions)) {
+		return;
+	}
+
+	// 强转
+	RequiresPermissions rpAnnotation = (RequiresPermissions) a;
+	
+	// 获取注解的参数值
+	String[] perms = getAnnotationValue(a);
+	
+	// 获取Subject。
+	Subject subject = getSubject();
+
+	if (perms.length == 1) {
+		subject.checkPermission(perms[0]);
+		return;
+	}
+	if (Logical.AND.equals(rpAnnotation.logical())) {
+		getSubject().checkPermissions(perms);
+		return;
+	}
+	
+	if (Logical.OR.equals(rpAnnotation.logical())) {
+		boolean hasAtLeastOnePermission = false;
+		for (String permission : perms) {
+			if (getSubject().isPermitted(permission)) {
+				hasAtLeastOnePermission = true;
+			}
+		}
+		
+		if (!hasAtLeastOnePermission) getSubject().checkPermission(perms[0]);
+		
+	}
+}
+
+/**
+ * 其是WebDelegatingSubject实例。WebDelegatingSubject继承DelegatingSubject
+ */
+location：DelegatingSubject
+public void checkPermission(String permission) throws AuthorizationException {
+	assertAuthzCheckPossible();
+	securityManager.checkPermission(getPrincipals(), permission);
+}
+
+/**
+ * 其是DefaultWebSecurityManager实例。
+ */
+location：AuthorizingSecurityManager
+public void checkPermission(PrincipalCollection principals, String permission) throws AuthorizationException {
+	this.authorizer.checkPermission(principals, permission);
+}
+
+/**
+ * 其是DefaultWebSecurityManager实例。
+ */
+location：ModularRealmAuthorizer
+public void checkPermission(PrincipalCollection principals, String permission) throws AuthorizationException {
+	// 检查realm
+	assertRealmsConfigured();
+	
+	if (!isPermitted(principals, permission)) {
+		throw new UnauthorizedException("Subject does not have permission [" + permission + "]");
+	}
+}
+
+/**
+ * 其是DefaultWebSecurityManager实例。
+ */
+location：ModularRealmAuthorizer
+public boolean isPermitted(PrincipalCollection principals, String permission) {
+	// 检查realm
+	assertRealmsConfigured();
+	
+	// 遍历realm
+	for (Realm realm : getRealms()) {
+		
+		if (!(realm instanceof Authorizer)) continue;
+		
+		// 调用realm的isPermitted方法。
+		if (((Authorizer) realm).isPermitted(principals, permission)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+/**
+ * 
+ */
+location：AuthorizingRealm
+public boolean isPermitted(PrincipalCollection principals, String permission) {
+	Permission p = getPermissionResolver().resolvePermission(permission);
+	return isPermitted(principals, p);
+}
+
+/**
+ * permissionResolver默认为WildcardPermissionResolver。
+ */
+location：AuthorizingRealm
+public PermissionResolver getPermissionResolver() {
+	return permissionResolver;
+}
+
+/**
+ * 创建WildcardPermissionResolver对象。
+ */
+location：WildcardPermissionResolver
+public Permission resolvePermission(String permissionString) {
+	return new WildcardPermission(permissionString, caseSensitive);
+}
+
+/**
+ * WildcardPermissionResolver的构造函数
+ */
+location：WildcardPermissionResolver
+public WildcardPermission(String wildcardString, boolean caseSensitive) {
+	setParts(wildcardString, caseSensitive);
+}
+
+/**
+ * 设置parts。wildcardString：为资源的权限修饰符
+ */
+location：WildcardPermissionResolver
+protected void setParts(String wildcardString, boolean caseSensitive) {
+	wildcardString = StringUtils.clean(wildcardString);
+
+	if (wildcardString == null || wildcardString.isEmpty()) {
+		throw new IllegalArgumentException("Wildcard string cannot be null or empty. Make sure permission strings are properly formatted.");
+	}
+
+	// 是否要装换为小写。
+	if (!caseSensitive) {
+		wildcardString = wildcardString.toLowerCase();
+	}
+
+	// PART_DIVIDER_TOKEN = ":"
+	// 使用":"分割字符串。
+	List<String> parts = CollectionUtils.asList(wildcardString.split(PART_DIVIDER_TOKEN));
+
+	this.parts = new ArrayList<Set<String>>();
+	
+	// 遍历分割的字符串。
+	for (String part : parts) {
+		// SUBPART_DIVIDER_TOKEN = ","
+		// 使用","分割字符串。
+		Set<String> subparts = CollectionUtils.asSet(part.split(SUBPART_DIVIDER_TOKEN));
+
+		if (subparts.isEmpty()) {
+			throw new IllegalArgumentException("Wildcard string cannot contain parts with only dividers. Make sure permission strings are properly formatted.");
+		}
+		this.parts.add(subparts);
+	}
+
+	if (this.parts.isEmpty()) {
+		throw new IllegalArgumentException("Wildcard string cannot contain only dividers. Make sure permission strings are properly formatted.");
+	}
+}
+
+/**
+ * 获取主体的授权信息，并进行校验。
+ */
+location：AuthorizingRealm
+public boolean isPermitted(PrincipalCollection principals, Permission permission) {
+	// 获取的主体的授权信息。自定义Realm的doGetAuthorizationInfo(..)方法
+	AuthorizationInfo info = getAuthorizationInfo(principals);
+
+	// 判断主体的授权信息是否包含有资源的授权信息。
+	return isPermitted(permission, info);
+}
+
+/**
+ * 获取主体的授权信息。
+ */
+location：AuthorizingRealm
+protected AuthorizationInfo getAuthorizationInfo(PrincipalCollection principals) {
+
+	if (principals == null) {
+		return null;
+	}
+
+	AuthorizationInfo info = null;
+
+	if (log.isTraceEnabled()) {
+		log.trace("Retrieving AuthorizationInfo for principals [" + principals + "]");
+	}
+
+	// 从缓存中获取。
+	Cache<Object, AuthorizationInfo> cache = getAvailableAuthorizationCache();
+	
+	if (cache != null) {
+		if (log.isTraceEnabled()) {
+			log.trace("Attempting to retrieve the AuthorizationInfo from cache.");
+		}
+		
+		// key就是principals
+		Object key = getAuthorizationCacheKey(principals);
+		info = cache.get(key);
+		if (log.isTraceEnabled()) {
+			if (info == null) {
+				log.trace("No AuthorizationInfo found in cache for principals [" + principals + "]");
+			} else {
+				log.trace("AuthorizationInfo found in cache for principals [" + principals + "]");
+			}
+		}
+	}
+
+	// 如果缓存没有获取到。
+	if (info == null) {
+	
+		// 【【【调用自定义Realm的doGetAuthorizationInfo方法】】】
+		info = doGetAuthorizationInfo(principals);
+		if (info != null && cache != null) {
+			if (log.isTraceEnabled()) {
+				log.trace("Caching authorization info for principals: [" + principals + "].");
+			}
+			
+			// 加入缓存。
+			Object key = getAuthorizationCacheKey(principals);
+			cache.put(key, info);
+		}
+	}
+
+	return info;
+}
+
+/**
+ * 其是自定义Realm的实例
+ * 获取主体的授权信息。
+ */
+location：AuthorizingRealm
+protected boolean isPermitted(Permission permission, AuthorizationInfo info) {
+	// 获取主体的授权信息集合
+	Collection<Permission> perms = getPermissions(info);
+	
+	// 
+	if (perms != null && !perms.isEmpty()) {
+		for (Permission perm : perms) {
+			if (perm.implies(permission)) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+/**
+ * p：p为资源的权限辨识符。
+ * 这个实例就是主体的某一个权限辨识符。
+ */
+location：WildcardPermission
+public boolean implies(Permission p) {
+	// 判断p是否是WildcardPermission实例。
+	if (!(p instanceof WildcardPermission)) {
+		return false;
+	}
+
+	// 强转。
+	WildcardPermission wp = (WildcardPermission) p;
+
+	// 获取资源的权限标识符。
+	List<Set<String>> otherParts = wp.getParts();
+
+	int i = 0;
+	
+	for (Set<String> otherPart : otherParts) {
+		// getParts()：获取该主体的该权限辨识符的内容。
+		if (getParts().size() - 1 < i) {
+			return true;
+		} else {
+			// 获取主体的授权信息特定级别的授权信息。
+			Set<String> part = getParts().get(i);
+			
+			// WILDCARD_TOKEN = "*"
+			if (!part.contains(WILDCARD_TOKEN) && !part.containsAll(otherPart)) {
+				return false;
+			}
+			i++;
+		}
+	}
+
+	for (; i < getParts().size(); i++) {
+		Set<String> part = getParts().get(i);
+		// 不包含*
+		if (!part.contains(WILDCARD_TOKEN)) {
+			return false;
+		}
+	}
+
+	return true;
+}
+
+
+
+
+
+
+
+
+

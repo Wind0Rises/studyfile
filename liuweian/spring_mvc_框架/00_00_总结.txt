@@ -1,0 +1,58 @@
+
+
+学习一下@InitBinder注解。@ModelAttribute
+
+
+一、MVC一个完整的请求？？
+	* 用户发起一个请求，被DispatcherServlet捕获。因为在web.xml配置DispatcherServlet，并且DispatcherServlet本身就是一个Servlet，所以符合web.xml配置的拦截
+	条件都是会被拦截的。
+	
+	* 判断是否是MultipartResolver请求。
+	
+	* 通过遍历HandlerMapping（RequestMappingHandlerMapping、BeanNameUrlHandlerMapping、SimpleUrlHandlerMapping一般都是RequestMappingHandlerMapping）获取
+	给定request对应的HandlerExecutionChain。这个HandlerExecution中包含着handler和HandlerIntercepter。
+	
+	* 通过给定Handler【在初始化时会把所有的HandlerAdapter放入handlerAdapters集合中，然后遍历集合获取支持给定handler的HandlerAdapter】获取对应的HandlerAdapter。
+	
+	* 执行HandlerAdapter的handler方法。在HandlerAdapter的handler方法中会执行我们自己的业务逻辑，并返回对应的ModelAndView。这个时候返回的ModelAndView是没有view
+	内容的。
+	
+	如何调用自己的业务的？？通过构建一个ServletInvocableHandlerMethod类的实例，调用过程会通过ServletInvocableHandlerMethod实例进行。
+	
+	
+	* 通过ViewResolver解析viewName，获取对应的View对象。ViewResolver可以配置多个，可以使用ContentNegotiatingViewResolver配置多个。
+	
+	* 通过View的sender响应结果给客户端，把数据渲染到视图里。
+
+
+	
+二、HandlerMapping是什么时候构建出来的和@RequestMapping之间的联系？？
+	这里的操作都是通过RequestMappingHandlerMapping这个类进行操作的。这个类实现了InitializingBean接口。
+
+	
+	
+三、多视图解析器时，如何进行判别。
+	配置ContentNegotiatingViewResolver实例，
+
+	
+	
+四、解析一下ModelAndView。
+	其内部保存着一个ModelMap对象实例，用户保存响应数据的，ModelMap继承LinkedHashMap。
+	有一个private Object view；对象，用于保存View对象的。
+	还有一个HttpStatus的实例对象，用于保存HTTP的状态的。
+	
+	
+	
+五、常见的几种HandlerMapping，HandlerMapping的作用是什么？
+	RequestMappingHandlerMapping、BeanNameUrlHandlerMapping、SimpleUrlHandlerMapping。
+	可以通过HandlerMapping获取给定【请求】的对应的HandlerAdapter(可能是一个HandlerExecutionChain，HandlerExecutionChain中包含着HandlerAdapter对象)。
+	
+	
+	
+六、常见的几种HandlerAdapter，HandlerAdapter的作用是什么？
+	RequestMappingHandlerAdapter、HttpRequestHandlerAdapter、SimpleControllerHandlerAdapter。
+	HandlerAdapter可以请求对应的Handler(即你写的Controller里的具体方法)，并返回一个ModelAndView对象。
+
+
+
+

@@ -1,18 +1,78 @@
+1、初始化做了哪些事情？？
+	
+
+
+location：DispatcherServlet
+protected void initStrategies(ApplicationContext context) {
+	// MultipartResolver用于文件上传的。文件处理。
+	initMultipartResolver(context);
+	
+	// 国际化处理。
+	initLocaleResolver(context);
+	
+	// 个性化主题处理。
+	initThemeResolver(context);
+	
+	// HandlerMapping。包含静态资源的映射，<mvc:resources>
+	initHandlerMappings(context);
+	
+	// 映射器适配器。
+	initHandlerAdapters(context);
+	
+	// 异常处理。
+	initHandlerExceptionResolvers(context);
+	
+	
+	initRequestToViewNameTranslator(context);
+	
+	// 视图处理。
+	initViewResolvers(context);
+	initFlashMapManager(context);
+}
+
+#############################################################  DispatcherServlet.properties  ##################################################################
+org.springframework.web.servlet.LocaleResolver=org.springframework.web.servlet.i18n.AcceptHeaderLocaleResolver
+org.springframework.web.servlet.ThemeResolver=org.springframework.web.servlet.theme.FixedThemeResolver
+org.springframework.web.servlet.HandlerMapping=org.springframework.web.servlet.handler.BeanNameUrlHandlerMapping,\
+	org.springframework.web.servlet.mvc.annotation.DefaultAnnotationHandlerMapping
+org.springframework.web.servlet.HandlerAdapter=org.springframework.web.servlet.mvc.HttpRequestHandlerAdapter,\
+	org.springframework.web.servlet.mvc.SimpleControllerHandlerAdapter,\
+	org.springframework.web.servlet.mvc.annotation.AnnotationMethodHandlerAdapter
+org.springframework.web.servlet.HandlerExceptionResolver=org.springframework.web.servlet.mvc.annotation.AnnotationMethodHandlerExceptionResolver,\
+	org.springframework.web.servlet.mvc.annotation.ResponseStatusExceptionResolver,\
+	org.springframework.web.servlet.mvc.support.DefaultHandlerExceptionResolver
+org.springframework.web.servlet.RequestToViewNameTranslator=org.springframework.web.servlet.view.DefaultRequestToViewNameTranslator
+org.springframework.web.servlet.ViewResolver=org.springframework.web.servlet.view.InternalResourceViewResolver
+org.springframework.web.servlet.FlashMapManager=org.springframework.web.servlet.support.SessionFlashMapManager
+############################################################################################################################################################
+
+
 ################################################################################################################################################
 #######################################################################    第一步   ############################################################
 ################################################################################################################################################
 初始化第一步：初始化MultipartResolver。用于文件上传的接口。
-		Multipart：['mʌlti:pɑ:t]；Resolver[rɪ'zɒlvə]
+		Multipart：['mʌlti:pɑ:t]：多部件的；
+		Resolver[rɪ'zɒlvə]：解决，决定；
 
 
-// 初始化此类使用的MultipartResolver。如果没有在BeanFactory中为此命名空间定义具有给定名称的bean，则不提供多部分处理。
+/**
+ * MultipartResolver：用于处理文件请求的。
+ * 		boolean isMultipart(HttpServletRequest request)：判断是否是Multipart类型的请求。
+ *		MultipartHttpServletRequest resolveMultipart(HttpServletRequest request)：解析HTTP请求，并封装成MultipartHttpServletRequest请求。
+ * 		cleanupMultipart(MultipartHttpServletRequest request)：
+ * 
+ * 初始化DispatcherServlet使用的MultipartResolver。如果没有在BeanFactory中没有获取给定名称的bean，则DispatcherServlet中的multipartResolver为null。
+ */
 location：DispatcherServlet
 private void initMultipartResolver(ApplicationContext context) {
 	try {
+	
+		// 从Context获取multipartResolver为名称，并且MultipartResolver类型的bean。
 		this.multipartResolver = context.getBean(MULTIPART_RESOLVER_BEAN_NAME, MultipartResolver.class);
 		if (logger.isDebugEnabled()) {
 			logger.debug("Using MultipartResolver [" + this.multipartResolver + "]");
 		}
+		
 	} catch (NoSuchBeanDefinitionException ex) { 
 		// 默认没有multipart resolver.
 		this.multipartResolver = null;
@@ -26,7 +86,9 @@ private void initMultipartResolver(ApplicationContext context) {
 ################################################################################################################################################
 #######################################################################    第二步   ############################################################
 ################################################################################################################################################
-初始化第二步：初始化LocaleResolver。国际化处理。
+/**
+ * 初始化第二步：初始化LocaleResolver。国际化处理。如果没有配置，默认使用
+ */
 private void initLocaleResolver(ApplicationContext context) {
 	try {
 		this.localeResolver = context.getBean(LOCALE_RESOLVER_BEAN_NAME, LocaleResolver.class);
@@ -42,6 +104,10 @@ private void initLocaleResolver(ApplicationContext context) {
 	}
 }
 
+/**
+ * 获取默认的策略。
+ */
+location：DispatcherServlet
 protected <T> T getDefaultStrategy(ApplicationContext context, Class<T> strategyInterface) {
 	List<T> strategies = getDefaultStrategies(context, strategyInterface);
 	if (strategies.size() != 1) {
@@ -50,11 +116,42 @@ protected <T> T getDefaultStrategy(ApplicationContext context, Class<T> strategy
 	return strategies.get(0);
 }
 
+/**
+ * 获取默认的策略。线程配置文件中获取对应的配置，然后加载配置，默认使用AcceptHeaderLocaleResolver。
+ */
+location：DispatcherServlet
+protected <T> List<T> getDefaultStrategies(ApplicationContext context, Class<T> strategyInterface) {
+	String key = strategyInterface.getName();
+	String value = defaultStrategies.getProperty(key);
+	
+	if (value != null) {
+		String[] classNames = StringUtils.commaDelimitedListToStringArray(value);
+		List<T> strategies = new ArrayList<T>(classNames.length);
+		for (String className : classNames) {
+			try {
+				Class<?> clazz = ClassUtils.forName(className, DispatcherServlet.class.getClassLoader());
+				Object strategy = createDefaultStrategy(context, clazz);
+				strategies.add((T) strategy);
+			} catch (ClassNotFoundException ex) {
+				throw new BeanInitializationException("Could not find DispatcherServlet's default strategy class [" + className + "] for interface [" + key + "]", ex);
+			}
+			catch (LinkageError err) {
+				throw new BeanInitializationException("Error loading DispatcherServlet's default strategy class [" + className + "] for interface [" + key + "]: problem with class file or dependent class", err);
+			}
+		}
+		return strategies;
+	} else {
+		return new LinkedList<T>();
+	}
+}
 
 ################################################################################################################################################
 #######################################################################    第三步   ############################################################
 ################################################################################################################################################
-初始化第三步：初始化ThemeResolver。个性化主题
+/**
+ * 个性化主题
+ * 初始化第三步：初始化ThemeResolver。默认使用FixedThemeResolver
+ */ 
 private void initThemeResolver(ApplicationContext context) {
 	try {
 		this.themeResolver = context.getBean(THEME_RESOLVER_BEAN_NAME, ThemeResolver.class);
@@ -86,7 +183,6 @@ private void initHandlerMappings(ApplicationContext context) {
 		Map<String, HandlerMapping> matchingBeans = BeanFactoryUtils.beansOfTypeIncludingAncestors(context, HandlerMapping.class, true, false);
 		
 		if (!matchingBeans.isEmpty()) {
-		
 			this.handlerMappings = new ArrayList<HandlerMapping>(matchingBeans.values());
 			// 我们按顺序排列HandlerMappings。
 			AnnotationAwareOrderComparator.sort(this.handlerMappings);
@@ -111,70 +207,6 @@ private void initHandlerMappings(ApplicationContext context) {
 		}
 	}
 }
-
-
-location：DispatcherServlet
-protected <T> List<T> getDefaultStrategies(ApplicationContext context, Class<T> strategyInterface) {
-
-	String key = strategyInterface.getName();
-	
-	// 默认BeanNameUrlHandlerMapping和DefaultAnnotationHandlerMapping。Properties defaultStrategies这个值在加载DispatcherServlet类是就已经初始化值了，通过加载DispatcherServlet.properties文件为defaultStrategies赋值。
-	String value = defaultStrategies.getProperty(key);
-	
-	// org.springframework.web.servlet.HandlerMapping=org.springframework.web.servlet.handler.BeanNameUrlHandlerMapping,\
-	//                                                org.springframework.web.servlet.mvc.annotation.DefaultAnnotationHandlerMapping
-	if (value != null) {
-		String[] classNames = StringUtils.commaDelimitedListToStringArray(value);
-		List<T> strategies = new ArrayList<T>(classNames.length);
-		for (String className : classNames) {
-			try {
-				// 获取对应Clas对象。
-				Class<?> clazz = ClassUtils.forName(className, DispatcherServlet.class.getClassLoader());
-				
-				// 
-				Object strategy = createDefaultStrategy(context, clazz);
-				strategies.add((T) strategy);
-			} catch (ClassNotFoundException ex) {
-				throw new BeanInitializationException("Could not find DispatcherServlet's default strategy class [" + className + "] for interface [" + key + "]", ex);
-			} catch (LinkageError err) {
-				throw new BeanInitializationException("Error loading DispatcherServlet's default strategy class [" + className + "] for interface [" + key + "]: problem with class file or dependent class", err);
-			}
-		}
-		return strategies;
-	} else {
-		return new LinkedList<T>();
-	}
-}
-
-
-在加载DispatcherServlet类时，
-static {
-	try {
-		// 从属性文件加载默认策略实现。DEFAULT_STRATEGIES_PATH=DispatcherServlet.properties
-		ClassPathResource resource = new ClassPathResource(DEFAULT_STRATEGIES_PATH, DispatcherServlet.class);
-		defaultStrategies = PropertiesLoaderUtils.loadProperties(resource);
-	}
-	catch (IOException ex) {
-		throw new IllegalStateException("Could not load '" + DEFAULT_STRATEGIES_PATH + "': " + ex.getMessage());
-	}
-}
-
-
-
-DispatcherServlet.properties的内容如下
-org.springframework.web.servlet.LocaleResolver=org.springframework.web.servlet.i18n.AcceptHeaderLocaleResolver
-org.springframework.web.servlet.ThemeResolver=org.springframework.web.servlet.theme.FixedThemeResolver
-org.springframework.web.servlet.HandlerMapping=org.springframework.web.servlet.handler.BeanNameUrlHandlerMapping,\
-	org.springframework.web.servlet.mvc.annotation.DefaultAnnotationHandlerMapping
-org.springframework.web.servlet.HandlerAdapter=org.springframework.web.servlet.mvc.HttpRequestHandlerAdapter,\
-	org.springframework.web.servlet.mvc.SimpleControllerHandlerAdapter,\
-	org.springframework.web.servlet.mvc.annotation.AnnotationMethodHandlerAdapter
-org.springframework.web.servlet.HandlerExceptionResolver=org.springframework.web.servlet.mvc.annotation.AnnotationMethodHandlerExceptionResolver,\
-	org.springframework.web.servlet.mvc.annotation.ResponseStatusExceptionResolver,\
-	org.springframework.web.servlet.mvc.support.DefaultHandlerExceptionResolver
-org.springframework.web.servlet.RequestToViewNameTranslator=org.springframework.web.servlet.view.DefaultRequestToViewNameTranslator
-org.springframework.web.servlet.ViewResolver=org.springframework.web.servlet.view.InternalResourceViewResolver
-org.springframework.web.servlet.FlashMapManager=org.springframework.web.servlet.support.SessionFlashMapManager
 
 
 // 创建HandlerMapping。
@@ -599,3 +631,133 @@ protected void registerHandler(String urlPath, Object handler) throws BeansExcep
 		}
 	}
 }
+
+################################################################################################################################################
+#######################################################################    第五步   ############################################################
+################################################################################################################################################
+private void initHandlerAdapters(ApplicationContext context) {
+	this.handlerAdapters = null;
+
+	if (this.detectAllHandlerAdapters) {
+		Map<String, HandlerAdapter> matchingBeans = BeanFactoryUtils.beansOfTypeIncludingAncestors(context, HandlerAdapter.class, true, false);
+		if (!matchingBeans.isEmpty()) {
+			this.handlerAdapters = new ArrayList<HandlerAdapter>(matchingBeans.values());
+			AnnotationAwareOrderComparator.sort(this.handlerAdapters);
+		}
+	} else {
+		try {
+			HandlerAdapter ha = context.getBean(HANDLER_ADAPTER_BEAN_NAME, HandlerAdapter.class);
+			this.handlerAdapters = Collections.singletonList(ha);
+		} catch (NoSuchBeanDefinitionException ex) {
+			// 
+		}
+	}
+
+	// 默认创建HttpRequestHandlerAdapter、SimpleControllerHandlerAdapter
+	if (this.handlerAdapters == null) {
+		this.handlerAdapters = getDefaultStrategies(context, HandlerAdapter.class);
+		if (logger.isDebugEnabled()) {
+			logger.debug("No HandlerAdapters found in servlet '" + getServletName() + "': using default");
+		}
+	}
+}
+
+################################################################################################################################################
+#######################################################################    第六步   ############################################################
+################################################################################################################################################
+private void initHandlerExceptionResolvers(ApplicationContext context) {
+	this.handlerExceptionResolvers = null;
+
+	if (this.detectAllHandlerExceptionResolvers) {
+		Map<String, HandlerExceptionResolver> matchingBeans = BeanFactoryUtils.beansOfTypeIncludingAncestors(context, HandlerExceptionResolver.class, true, false);
+		if (!matchingBeans.isEmpty()) {
+			this.handlerExceptionResolvers = new ArrayList<HandlerExceptionResolver>(matchingBeans.values());
+			AnnotationAwareOrderComparator.sort(this.handlerExceptionResolvers);
+		}
+	} else {
+		try {
+			HandlerExceptionResolver her = context.getBean(HANDLER_EXCEPTION_RESOLVER_BEAN_NAME, HandlerExceptionResolver.class);
+			this.handlerExceptionResolvers = Collections.singletonList(her);
+		} catch (NoSuchBeanDefinitionException ex) {
+			// Ignore, no HandlerExceptionResolver is fine too.
+		}
+	}
+
+	// 创建默认的异常处理AnnotationMethodHandlerExceptionResolver、ResponseStatusExceptionResolver、DefaultHandlerExceptionResolver。
+	if (this.handlerExceptionResolvers == null) {
+		this.handlerExceptionResolvers = getDefaultStrategies(context, HandlerExceptionResolver.class);
+		if (logger.isDebugEnabled()) {
+			logger.debug("No HandlerExceptionResolvers found in servlet '" + getServletName() + "': using default");
+		}
+	}
+}
+
+
+################################################################################################################################################
+#######################################################################    第七步   ############################################################
+################################################################################################################################################
+private void initRequestToViewNameTranslator(ApplicationContext context) {
+	try {
+		this.viewNameTranslator = context.getBean(REQUEST_TO_VIEW_NAME_TRANSLATOR_BEAN_NAME, RequestToViewNameTranslator.class);
+		if (logger.isDebugEnabled()) {
+			logger.debug("Using RequestToViewNameTranslator [" + this.viewNameTranslator + "]");
+		}
+	} catch (NoSuchBeanDefinitionException ex) {
+		this.viewNameTranslator = getDefaultStrategy(context, RequestToViewNameTranslator.class);
+		if (logger.isDebugEnabled()) {
+			logger.debug("Unable to locate RequestToViewNameTranslator with name '" + REQUEST_TO_VIEW_NAME_TRANSLATOR_BEAN_NAME + "': using default [" + this.viewNameTranslator + "]");
+		}
+	}
+}
+
+################################################################################################################################################
+#######################################################################    第八步   ############################################################
+################################################################################################################################################
+
+DefaultRequestToViewNameTranslator
+private void initViewResolvers(ApplicationContext context) {
+	this.viewResolvers = null;
+
+	if (this.detectAllViewResolvers) {
+		Map<String, ViewResolver> matchingBeans = BeanFactoryUtils.beansOfTypeIncludingAncestors(context, ViewResolver.class, true, false);
+		if (!matchingBeans.isEmpty()) {
+			this.viewResolvers = new ArrayList<ViewResolver>(matchingBeans.values());
+			AnnotationAwareOrderComparator.sort(this.viewResolvers);
+		}
+	} else {
+		try {
+			ViewResolver vr = context.getBean(VIEW_RESOLVER_BEAN_NAME, ViewResolver.class);
+			this.viewResolvers = Collections.singletonList(vr);
+		}
+		catch (NoSuchBeanDefinitionException ex) {
+			// 
+		}
+	}
+
+	// 创建默认的DefaultRequestToViewNameTranslator。
+	if (this.viewResolvers == null) {
+		this.viewResolvers = getDefaultStrategies(context, ViewResolver.class);
+		if (logger.isDebugEnabled()) {
+			logger.debug("No ViewResolvers found in servlet '" + getServletName() + "': using default");
+		}
+	}
+}
+
+
+################################################################################################################################################
+#######################################################################    第九步   ############################################################
+################################################################################################################################################
+private void initFlashMapManager(ApplicationContext context) {
+	try {
+		this.flashMapManager = context.getBean(FLASH_MAP_MANAGER_BEAN_NAME, FlashMapManager.class);
+		if (logger.isDebugEnabled()) {
+			logger.debug("Using FlashMapManager [" + this.flashMapManager + "]");
+		}
+	} catch (NoSuchBeanDefinitionException ex) { 
+		this.flashMapManager = getDefaultStrategy(context, FlashMapManager.class);
+		if (logger.isDebugEnabled()) {
+			logger.debug("Unable to locate FlashMapManager with name '" + FLASH_MAP_MANAGER_BEAN_NAME + "': using default [" + this.flashMapManager + "]");
+		}
+	}
+}
+

@@ -155,6 +155,7 @@ protected void doFilterInternal(ServletRequest servletRequest, ServletResponse s
 		
 		
 		final Subject subject = createSubject(request, response);
+		
 		subject.execute(new Callable() {
 			public Object call() throws Exception {
 				updateSessionLastAccessTime(request, response);
@@ -210,12 +211,13 @@ protected ServletRequest wrapServletRequest(HttpServletRequest orig) {
 location：AbstractShiroFilter
 protected WebSubject createSubject(ServletRequest request, ServletResponse response) {
 	// getSecurityManager()：获取的就是在shiro.xml配置的SecurityManager。
+	// 构建一个WebSubject对象。
 	return new WebSubject.Builder(getSecurityManager(), request, response).buildWebSubject();
 }
 
 
 /**
- * WebSubject
+ * WebSubject，创建一个Builder实例。
  */
 location：WebSubject
 public Builder(SecurityManager securityManager, ServletRequest request, ServletResponse response) {
@@ -223,6 +225,7 @@ public Builder(SecurityManager securityManager, ServletRequest request, ServletR
 	if (request == null) {
 		throw new IllegalArgumentException("ServletRequest argument cannot be null.");
 	}
+	
 	if (response == null) {
 		throw new IllegalArgumentException("ServletResponse argument cannot be null.");
 	}
@@ -231,7 +234,227 @@ public Builder(SecurityManager securityManager, ServletRequest request, ServletR
 }
 
 
+/**
+ * 创建WebSubject对象。
+ */
+location：WebSubject.Builder
+public WebSubject buildWebSubject() {
+
+	// 构建一个Subject对象。
+	Subject subject = super.buildSubject();
+	
+	if (!(subject instanceof WebSubject)) {
+		String msg = "Subject implementation returned from the SecurityManager was not a " + WebSubject.class.getName() + " implementation.  
+			Please ensure a Web-enabled SecurityManager " +"has been configured and made available to this builder.";
+		throw new IllegalStateException(msg);
+	}
+	return (WebSubject) subject;
+}
+
+/**
+ * 通过securityManager创建Subject对象。
+ */
+location：Subject.Builder
+public Subject buildSubject() {
+	// subjectContext为DefaultSubjectContext()。
+	return this.securityManager.createSubject(this.subjectContext);
+}
 
 
+/**
+ * 
+ */
+location：DefaultSecurityManager
+public Subject createSubject(SubjectContext subjectContext) {
+	SubjectContext context = copy(subjectContext);
+
+	// 确定SubjectContext中有SecurityManager，如果没有进行添加操作。
+	context = ensureSecurityManager(context);
+
+	// 获取session。
+	context = resolveSession(context);
+
+	// 获取PrincipalCollection。
+	context = resolvePrincipals(context);
+
+	// 创建Subject对象。
+	Subject subject = doCreateSubject(context);
+
+	save(subject);
+
+	return subject;
+}
+
+/**
+ * 确定SubjectContext中有SecurityManager，如果没有进行添加操作。
+ */
+location：DefaultSecurityManager
+protected SubjectContext ensureSecurityManager(SubjectContext context) {
+	if (context.resolveSecurityManager() != null) {
+		log.trace("Context already contains a SecurityManager instance.  Returning.");
+		return context;
+	}
+	log.trace("No SecurityManager found in context.  Adding self reference.");
+	context.setSecurityManager(this);
+	return context;
+}
+
+/**
+ * 向SubjectContext中设置Session
+ */
+location：DefaultSecurityManager
+protected SubjectContext resolveSession(SubjectContext context) {
+	// 从SubjectContext中获取Session。
+	if (context.resolveSession() != null) {
+		log.debug("Context already contains a session.  Returning.");
+		return context;
+	}
+	try {
+		// 获取Session从SessionsSecurityManager中。注意这个Session是org.apache.shiro.session.Session。
+		Session session = resolveContextSession(context);
+		if (session != null) {
+			context.setSession(session);
+		}
+	} catch (InvalidSessionException e) {
+		log.debug("Resolved SubjectContext context session is invalid.  Ignoring and creating an anonymous " + "(session-less) Subject instance.", e);
+	}
+	return context;
+}
+
+/**
+ * 获取Session
+ */
+location：DefaultSecurityManager
+protected Session resolveContextSession(SubjectContext context) throws InvalidSessionException {
+	SessionKey key = getSessionKey(context);
+	if (key != null) {
+		return getSession(key);
+	}
+	return null;
+}
+
+/**
+ * 通过Session管理器获取Session
+ */
+location：SessionsSecurityManager
+public Session getSession(SessionKey key) throws SessionException {
+	return this.sessionManager.getSession(key);
+}
+
+/**
+ * 获取Session
+ */
+location：DefaultSecurityManager
+protected SubjectContext resolvePrincipals(SubjectContext context) {
+
+	// principal/ˈprɪnsəpl/：主要的。
+	// 获取PrincipalCollection。
+	PrincipalCollection principals = context.resolvePrincipals();
+
+	if (isEmpty(principals)) {
+		log.trace("No identity (PrincipalCollection) found in the context.  Looking for a remembered identity.");
+		
+		principals = getRememberedIdentity(context);
+
+		if (!isEmpty(principals)) {
+			log.debug("Found remembered PrincipalCollection.  Adding to the context to be used " +  "for subject construction by the SubjectFactory.");
+
+			context.setPrincipals(principals);
+		} else {
+			log.trace("No remembered identity found.  Returning original context.");
+		}
+	}
+
+	return context;
+}
+
+/**
+ * 获取PrincipalCollection，分别从AuthenticationInfo -->  Subject  -->  Session  中获取。
+ */
+location：DefaultSubjectContext
+public PrincipalCollection resolvePrincipals() {
+	PrincipalCollection principals = getPrincipals();
+
+	if (isEmpty(principals)) {
+		AuthenticationInfo info = getAuthenticationInfo();
+		if (info != null) {
+			principals = info.getPrincipals();
+		}
+	}
+
+	if (isEmpty(principals)) {
+		Subject subject = getSubject();
+		if (subject != null) {
+			principals = subject.getPrincipals();
+		}
+	}
+
+	if (isEmpty(principals)) {
+		Session session = resolveSession();
+		if (session != null) {
+			principals = (PrincipalCollection) session.getAttribute(PRINCIPALS_SESSION_KEY);
+		}
+	}
+
+	return principals;
+}
+
+/**
+ * 从RememberMeManager中获取PrincipalCollection。
+ */
+location：DefaultSecurityManager
+protected PrincipalCollection getRememberedIdentity(SubjectContext subjectContext) {
+	RememberMeManager rmm = getRememberMeManager();
+	if (rmm != null) {
+		try {
+			return rmm.getRememberedPrincipals(subjectContext);
+		} catch (Exception e) {
+			if (log.isWarnEnabled()) {
+				String msg = "Delegate RememberMeManager instance of type [" + rmm.getClass().getName() +
+						"] threw an exception during getRememberedPrincipals().";
+				log.warn(msg, e);
+			}
+		}
+	}
+	return null;
+}
+
+/**
+ * 构建一个Subject对象。
+ */
+location：DefaultSecurityManager
+protected Subject doCreateSubject(SubjectContext context) {
+	return getSubjectFactory().createSubject(context);
+}
 
 
+public Subject createSubject(SubjectContext context) {
+	boolean isNotBasedOnWebSubject = context.getSubject() != null && !(context.getSubject() instanceof WebSubject);
+	
+	if (!(context instanceof WebSubjectContext) || isNotBasedOnWebSubject) {
+		return super.createSubject(context);
+	}
+	
+	// 强转为WebSubjectContext。
+	WebSubjectContext wsc = (WebSubjectContext) context;
+	
+	SecurityManager securityManager = wsc.resolveSecurityManager();
+	Session session = wsc.resolveSession();
+	boolean sessionEnabled = wsc.isSessionCreationEnabled();
+	PrincipalCollection principals = wsc.resolvePrincipals();
+	boolean authenticated = wsc.resolveAuthenticated();
+	String host = wsc.resolveHost();
+	ServletRequest request = wsc.resolveServletRequest();
+	ServletResponse response = wsc.resolveServletResponse();
+
+	// 构建一个WebDelegatingSubject对象。
+	return new WebDelegatingSubject(principals, authenticated, host, session, sessionEnabled, request, response, securityManager);
+}
+
+/**
+ * 保存Subject对象。
+ */
+location：DefaultSecurityManager
+protected void save(Subject subject) {
+	this.subjectDAO.save(subject);
+}

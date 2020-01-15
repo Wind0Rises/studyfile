@@ -1,0 +1,102 @@
+#search{
+	margin-left: 30px;
+}
+
+td{
+	text-align: center;
+}
+
+#directory td{
+	font-weight: 700;
+	font-size: 1.1em;
+}
+
+.status1{
+	color: white;
+    background: green;
+    border: solid green 1px;
+    text-align: center;
+    line-height: 28px;
+    height: 30px;
+    width: 60px;
+    border-radius: 8px;
+    font-size: 15px;
+    font-weight: 700;
+    margin-left: 17px;
+}
+
+.status0{
+	color: white;
+    background: red;
+    border: solid red 1px;
+    text-align: center;
+    line-height: 28px;
+    height: 30px;
+    width: 60px;
+    border-radius: 8px;
+    font-size: 15px;
+    font-weight: 700;
+    margin-left: 17px;
+}
+
+.status2{
+	color: white;
+    background: #8D95C6;
+    border: solid #8D95C6 1px;
+    text-align: center;
+    line-height: 28px;
+    height: 30px;
+    width: 60px;
+    border-radius: 8px;
+    font-size: 15px;
+    font-weight: 700;
+    margin-left: 17px;
+}
+
+#addBut{
+	margin-left: 200px;
+	background: #467ca2;
+	color: white;
+	font-size: 15px;
+	font-weigth: 900px;
+}
+
+.status3{
+	color: white;
+    background: #0000E3;
+    border: solid #8D95C6 1px;
+    text-align: center;
+    line-height: 28px;
+    height: 30px;
+    width: 60px;
+    border-radius: 8px;
+    font-size: 15px;
+    font-weight: 700;
+    margin-left: 17px;
+}
+
+#addBut1{
+	margin-left: 150px;
+	background: #467ca2;
+	color: white;
+	font-size: 15px;
+	font-weigth: 900px;
+}
+
+#noneData{
+	width: 100%;
+	text-align: center;
+	display: none;
+}
+
+#noneData img{
+	width: 30%;
+}
+
+.remove-date-input{
+	background: #E0E0E0;
+}
+
+.form-group-margin-left{
+	margin-left: 10px;
+}
