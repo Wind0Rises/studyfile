@@ -1,0 +1,31 @@
+、tomcat的容器模型。
+
+一、Tomcat的类加载器。
+	1、tomcat的类加载器的模型：
+				Bootstrap ClassLoader									jdk\jre\lib\resources.jar、rt.jar、sunrsasign.jar、jsse.jar、jce.jar、charsets.jar、jfr.jar、jdk\jre\classes
+						||
+				Extension ClassLoader			默认ExtClassLoader 		jdk\jre\lib\ext
+						||
+				Application ClassLoader			默认AppClassLoader
+						||	
+				common ClassLoader ---> 加载的类：
+						||
+				---------------------------
+			   ||						  ||
+		server ClassLoader			shared ClassLoadler
+		
+	* Common ClassLoader：加载的是common.loader配置的路径，默认为"${catalina.base}/lib","${catalina.base}/lib/*.jar","${catalina.home}/lib", "${catalina.home}
+	/lib/*.jar"。 当没有配置时，或者对应的值为空时，默认使用加载Bootstrap这个类的ClassLoader，也就是使用AppClassLoader。
+	* Server ClassLoader：加载的是server.loader配置的路径，如果没有设置，默认使用CommonClassLoader。
+	* shared ClassLoader：加载的是shared.loader配置的路径，如果没有设置，默认使用CommonClassLoader。
+			
+	2、tomcat自定义ClassLoader原因？？
+		* 实现应用与应用之间的隔离，应用A的Servlet只能访问应用A的WEB-INF/classes目录及其子目录下的类，而不能访问其他应用的类。
+		* 提供自动重载的功能，即当WEB-INF/classes目录或者WEB-INF/lib目录发生改变时，Web应用会重新载入这些类。
+		
+		
+二、如何理解tomcat的server.xml，tomcat是如何解析server.xml的？？
+
+
+
+三、CoyoteAdapter这干什么的。

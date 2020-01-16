@@ -1,3 +1,9 @@
+
+
+/**
+ * Tomcat的启动类。
+ */
+location：Bootstrap
 public static void main(String args[]) {
 
 	// private static Bootstrap daemon = null;
@@ -64,8 +70,9 @@ public static void main(String args[]) {
 
 
 /**
- * 创建ClassLoader，并加载各种类。然后创建Catalina实例对象，并调用Catalina的setParentClassLoader方法。
- * 这个方法也就是一个初始化过程。
+ * 创建common、server（catalinaLoader）、shared的类加载器。
+ * 然后通过ClassLoader创建Catalina实例对象，并通过反射调用Catalina的setParentClassLoader方法，设置父类的类加载器（ClassLoader）。
+ * 并把创建的Catalina的实例赋值给Bootstrap的catalinaDaemon属性。
  */
 location：Bootstrap
 public void init() throws Exception {
@@ -73,7 +80,7 @@ public void init() throws Exception {
 	// 创建ClassLoader。
 	initClassLoaders();
 
-	// 把ClassLoader设置给线程。
+	// 把catalinaLoader（server.loader）设置给线程。
 	Thread.currentThread().setContextClassLoader(catalinaLoader);
 
 	// classLoader加载对应的文件。
@@ -83,17 +90,17 @@ public void init() throws Exception {
 		log.debug("Loading startup class");
 	}
 	
-	// 获取Catalina实例对象。
+	// 使用catalinaLoader去创建Catalina实例对象。
 	Class<?> startupClass = catalinaLoader.loadClass("org.apache.catalina.startup.Catalina");
 	Object startupInstance = startupClass.getConstructor().newInstance();
 
-	// Set the shared extensions class loader
 	if (log.isDebugEnabled()) {
 		log.debug("Setting startup class properties");
 	}
 	
 	String methodName = "setParentClassLoader";
 	
+	// 加载ClassLoader
 	Class<?> paramTypes[] = new Class[1];
 	paramTypes[0] = Class.forName("java.lang.ClassLoader");
 	
@@ -101,6 +108,7 @@ public void init() throws Exception {
 	paramValues[0] = sharedLoader;
 	
 	// 调用Catalina.setParentClassLoader()方法。
+	// 设置Catalina的父类加载器。
 	Method method = startupInstance.getClass().getMethod(methodName, paramTypes);
 	method.invoke(startupInstance, paramValues);
 
@@ -120,10 +128,10 @@ private void initClassLoaders() {
 			commonLoader=this.getClass().getClassLoader();
 		}
 		
-		// 创建一个类加载器。更具server.loader配置信息。
+		// 创建一个Server类加载器。根据server.loader配置信息。
 		catalinaLoader = createClassLoader("server", commonLoader);
 		
-		// 创建一个类加载器。更具shared.loader配置信息。
+		// 创建一个Shared类加载器。根据shared.loader配置信息。
 		sharedLoader = createClassLoader("shared", commonLoader);
 	} catch (Throwable t) {
 		handleThrowable(t);
@@ -133,12 +141,17 @@ private void initClassLoaders() {
 }
 
 /**
- * 从配置信息中，获取common.loader对应的属性值，更具属性值创建Repository，并创建一个ClassLoader。
+ * 从配置信息中，获取给定名称的.loader对应的属性值，
+ * 根据属性值创建Repository，并创建一个ClassLoader。
  */
 location：Bootstrap
 private ClassLoader createClassLoader(String name, ClassLoader parent) throws Exception {
 
-	// 从配置信息中获取common.loader信息，主要是加载jar的位置。
+	// 在启动tomcat是，Bootstrap类的静态代码块会去确定catalina.home、catalina.base，如果系统没有指定，默认都是tomcat的根目录。
+	// 在初始化CatalinaProperties类是，在其的静态代码块会去加载对应的配置文件，加载顺序为：首先从系统变量catalina.config获取文件位置，然后去加载
+	// 如果没有就加载conf/catalina.properties；如果没有加载/org/apache/catalina/startup/catalina.properties文件。
+	
+	// 从配置信息中获取"name".loader信息，主要是加载jar的位置。
 	String value = CatalinaProperties.getProperty(name + ".loader");
 	if ((value == null) || (value.equals(""))) {
 		return parent;
@@ -275,17 +288,20 @@ private static void loadProperties() {
 
 
 
-
-
-
-
-
-
 #############################################################################################################################################
 #####################################################             Start                ######################################################
 #############################################################################################################################################
+启动过程的：下面是Bootstrap的main方法的start步骤的代码。
+	daemon.setAwait(true);
+	daemon.load(args);
+	daemon.start();
+	if (null == daemon.getServer()) {
+		System.exit(1);
+	}
+
 
 /**
+ * catalinaDaemon是Catalina的实例。
  * 通过反射，设置Catalina的await属性为传入的值。这个await为true。
  */
 location：Bootstrap 
@@ -321,6 +337,7 @@ private void load(String[] arguments) throws Exception {
 		param[0] = arguments;
 	}
 	Method method = catalinaDaemon.getClass().getMethod(methodName, paramTypes);
+	
 	if (log.isDebugEnabled()) {
 		log.debug("Calling startup class " + method);
 	}
@@ -329,7 +346,7 @@ private void load(String[] arguments) throws Exception {
 }
 
 /**
- *
+ * Catalina的加载过程。
  */
 location：Catalina
 public void load(String args[]) {
@@ -343,7 +360,7 @@ public void load(String args[]) {
 }
 
 /**
- *
+ * 具体的加载流程。
  */
 location：Catalina
 public void load() {
@@ -359,7 +376,8 @@ public void load() {
 	// 初始化文件夹，（temp临时文件夹）
 	initDirs();
 
-	// Before digester - it may be needed
+	// 向系统变量中添加一些附件的参数。
+	// catalina.useNaming：true；java.naming.factory.url.pkgs：org.apache.naming；java.naming.factory.initial：org.apache.naming.java.javaURLContextFactory
 	initNaming();
 
 	// Digester通过匹配一系列元素嵌套模式来执行XML的输入流，以执行在解析开始之前添加的Rule。
@@ -369,9 +387,13 @@ public void load() {
 	InputStream inputStream = null;
 	File file = null;
 	
+	
+	/**
+	 * 获取server.xml文件。
+	 * 首先加载项目根目录下conf/server.xml文件；如果没有就加载calssPath目录下conf/server.xml；如果没有就加载calssPath目录下server-embed.xml
+	 */
 	try {
 		try {
-			// 获取conf/server.xml文件。
 			file = configFile();
 			inputStream = new FileInputStream(file);
 			inputSource = new InputSource(file.toURI().toURL().toString());
@@ -417,10 +439,11 @@ public void load() {
 
 		try {
 			inputSource.setByteStream(inputStream);
-			// 刷新，
+			
+			// 把this压入digester中的stack中。
 			digester.push(this);
 			
-			// 解析Xml。
+			// 解析server.xml。
 			digester.parse(inputSource);
 		} catch (SAXParseException spe) {
 			log.warn("Catalina.start using " + getConfigFile() + ": " + spe.getMessage());
@@ -463,6 +486,10 @@ public void load() {
 	}
 }
 
+/**
+ * 向系统变量中添加一些附件的参数。
+ */
+location：Catalina
 protected void initNaming() {
 	if (!useNaming) {
 		log.info( "Catalina naming disabled");
@@ -491,16 +518,19 @@ protected void initNaming() {
 
 
 /**
- *
+ * 创建Digester对象，并为各个节点设置对应的规则。针对server.xml。
+ * 这里并没有解析。
  */
 location：
 protected Digester createStartDigester() {
 	long t1=System.currentTimeMillis();
 	
 	Digester digester = new Digester();
-	// 判读是否严重解析器。
+	
+	// 设置验证解析辨识。必须在解析之前设置。
 	digester.setValidating(false);
-	// 是否要规则校验。警告缺少的属性和元素。
+	
+	// 设置规则验证辨识。必须在解析之前设置。。
 	digester.setRulesValidation(true);
 	
 	Map<Class<?>, List<String>> fakeAttributes = new HashMap<>();
@@ -513,75 +543,129 @@ protected Digester createStartDigester() {
 	contextAttrs.add("source");
 	fakeAttributes.put(StandardContext.class, contextAttrs);
 	
-	// 设置假属性。
+	
+	################################################
+	#######  附录一：server.xml文件  ###############
+	################################################
+	
+	server.xml大致结构
+	Server
+		Listener
+		GlobalNamingResources
+			Resource
+		Service
+			Executor
+			Connector
+			Engine
+				Cluster
+				Realm
+				Host
+				Context
+					Valve
+	
+	// 设置假的属性。
+	// Object.class ：className
+	// StandardContext.class：source
 	digester.setFakeAttributes(fakeAttributes);
 	
 	// 在加载用于实例化新对象的类时，我们是否要使用Context ClassLoader？ 默认值为false。
+	// 这个线程的ContextClassLoader是：serverClassloader（CatalinaClassLoader）【只是自己定义的ClassLoader的名称，用于更便捷的阅读源码】
 	digester.setUseContextClassLoader(true);
 
-	// addObjectCreate：为指定的参数添加一个“对象创建”规则。rule指定节点的筛选规则，class设置映射对象。SAX解析时，遇到rule指定的节节点，会创建一个class实例放入堆栈中。
-	// 		digester.addObectCreate("database/user","com.model.UserBean")：解析遇到user节点时，会创建一个UserBean实例并放入堆栈中。
+	// addObjectCreate：为指定的节点添加一个"创建对象"规则。AX解析时，遇到指定的节节点，会创建一个class实例放入堆栈中。第三各参数，不设置时，直接使用第二
+	//		参数创建对象，如果有第三个参数，会从attributes从获取名称为第三个参数对应的值作为class。
+	// 			digester.addObectCreate("database/user","com.model.UserBean")：解析遇到user节点时，会创建一个UserBean实例并放入堆栈中。
 
-	// addSetProperties(String rule)：设置节点的属性设置规则。当解析遇到符合rule的节点时，根据属性列表中的属性值对，使用Java反射机制使用标准的JavaBean方法设置栈顶对象实例。
-	//		比如：digester.addSetProperties("database/user")：解析遇到user节点时，会获取键值对 userName=guest,password=guest，获得栈顶的UserBean对象，设置实例的userName、password属性；
+	// addSetProperties(String rule)：设置给定节点的属性设置规则。当解析遇到给定节点时，根据属性列表中的属性值对，使用Java反射机制使用标准的JavaBean方法
+	//		设置栈顶对象实例。
+	//			比如：digester.addSetProperties("database/user")：解析遇到user节点时，会获取键值对 userName=guest,password=guest，获得栈顶的UserBean对象，
+	//			设置实例的userName、password属性；
 	
-	// addSetNext(String rule,String methodName)：设置当前rule节点与父节点的调用规则，当遇到rule节点时，调用堆栈中的次栈顶元素调用methodName方法。将栈顶元素作为次顶元素指定方法的输入参数。
-	// 		比如:digester.addSetNext("database/user","addUser")：调用database实例的addUser，user为参数
+	// addSetNext(String rule,String methodName)：设置给定节点与父节点的调用规则，当遇到给定节点时，调用堆栈中的次栈顶元素调用methodName方法。将栈顶元素
+	//		作为次顶元素指定方法的输入参数。
+	// 			比如:digester.addSetNext("database/user","addUser")：调用database实例的addUser，user为参数
 		
+	
 	digester.addObjectCreate("Server", "org.apache.catalina.core.StandardServer", "className");
 	digester.addSetProperties("Server");
 	// 第二参数：要调用的方法名，第三个参数：方法的参数类型。
-	digester.addSetNext("Server", "setServer", "org.apache.catalina.Server");
+	digester.addSetNext("Server", "setServer", "org.apache.catalina.Server");    		
+	// 会调用Server.setServer方法，参数都是第三个参数的实例对象
 
+	
 	digester.addObjectCreate("Server/GlobalNamingResources", "org.apache.catalina.deploy.NamingResourcesImpl");
 	digester.addSetProperties("Server/GlobalNamingResources");
-	digester.addSetNext("Server/GlobalNamingResources", "setGlobalNamingResources", "org.apache.catalina.deploy.NamingResourcesImpl");
+	digester.addSetNext("Server/GlobalNamingResources", "setGlobalNamingResources", "org.apache.catalina.deploy.NamingResourcesImpl"); 	
+	// 会调用NamingResourcesImpl.setGlobalNamingResources方法，参数都是第三个参数的实例对象
 
+	
 	digester.addObjectCreate("Server/Listener", null, "className");
 	digester.addSetProperties("Server/Listener");
+	digester.addSetNext("Server/Listener", "addLifecycleListener", "org.apache.catalina.LifecycleListener");    
+	// 会调用LifecycleListener.addLifecycleListener方法，参数都是第三个参数的实例对象
 	// VersionLoggerListener、AprLifecycleListener、JreMemoryLeakPreventionListener、GlobalResourcesLifecycleListener、ThreadLocalLeakPreventionListener。
-	digester.addSetNext("Server/Listener", "addLifecycleListener", "org.apache.catalina.LifecycleListener");    // 被调用
-
+	
+	
 	digester.addObjectCreate("Server/Service", "org.apache.catalina.core.StandardService", "className");
 	digester.addSetProperties("Server/Service");
 	digester.addSetNext("Server/Service", "addService", "org.apache.catalina.Service");
-
+	// 会调用Service.addService方法，参数都是第三个参数的实例对象
+	
+	
 	digester.addObjectCreate("Server/Service/Listener", null, "className");
 	digester.addSetProperties("Server/Service/Listener");
 	digester.addSetNext("Server/Service/Listener", "addLifecycleListener", "org.apache.catalina.LifecycleListener");
+	// 会调用LifecycleListener.addLifecycleListener方法，参数都是第三个参数的实例对象
+	
 
 	digester.addObjectCreate("Server/Service/Executor", "org.apache.catalina.core.StandardThreadExecutor", "className");
 	digester.addSetProperties("Server/Service/Executor");
-
 	digester.addSetNext("Server/Service/Executor", "addExecutor", "org.apache.catalina.Executor");
+	// 会调用Executor.addExecutor方法，参数都是第三个参数的实例对象
+	
 
+	// 直接把某个Rule设置到digester
 	digester.addRule("Server/Service/Connector", new ConnectorCreateRule());
 	digester.addRule("Server/Service/Connector", new SetAllPropertiesRule(new String[]{"executor", "sslImplementationName"}));
 	digester.addSetNext("Server/Service/Connector", "addConnector", "org.apache.catalina.connector.Connector");
+	// 会调用Connector.addConnector方法，参数都是第三个参数的实例对象
+	
 
 	digester.addObjectCreate("Server/Service/Connector/SSLHostConfig", "org.apache.tomcat.util.net.SSLHostConfig");
 	digester.addSetProperties("Server/Service/Connector/SSLHostConfig");
 	digester.addSetNext("Server/Service/Connector/SSLHostConfig", "addSslHostConfig", "org.apache.tomcat.util.net.SSLHostConfig");
+	// 会调用SSLHostConfig.SSLHostConfig方法，参数都是第三个参数的实例对象
+	
 
 	digester.addRule("Server/Service/Connector/SSLHostConfig/Certificate", new CertificateCreateRule());
 	digester.addRule("Server/Service/Connector/SSLHostConfig/Certificate", new SetAllPropertiesRule(new String[]{"type"}));
 	digester.addSetNext("Server/Service/Connector/SSLHostConfig/Certificate", "addCertificate", "org.apache.tomcat.util.net.SSLHostConfigCertificate");
-
+	// 会调用SSLHostConfigCertificate.addCertificate方法，参数都是第三个参数的实例对象
+	
+	
 	digester.addObjectCreate("Server/Service/Connector/SSLHostConfig/OpenSSLConf", "org.apache.tomcat.util.net.openssl.OpenSSLConf");
 	digester.addSetProperties("Server/Service/Connector/SSLHostConfig/OpenSSLConf");
 	digester.addSetNext("Server/Service/Connector/SSLHostConfig/OpenSSLConf", "setOpenSslConf", "org.apache.tomcat.util.net.openssl.OpenSSLConf");
+	// 会调用OpenSSLConf.setOpenSslConf方法，参数都是第三个参数的实例对象
+	
 
 	digester.addObjectCreate("Server/Service/Connector/SSLHostConfig/OpenSSLConf/OpenSSLConfCmd", "org.apache.tomcat.util.net.openssl.OpenSSLConfCmd");
 	digester.addSetProperties("Server/Service/Connector/SSLHostConfig/OpenSSLConf/OpenSSLConfCmd");
 	digester.addSetNext("Server/Service/Connector/SSLHostConfig/OpenSSLConf/OpenSSLConfCmd", "addCmd", "org.apache.tomcat.util.net.openssl.OpenSSLConfCmd");
+	// 会调用OpenSSLConfCmd.addCmd方法，参数都是第三个参数的实例对象
+	
 
 	digester.addObjectCreate("Server/Service/Connector/Listener", null, "className");
 	digester.addSetProperties("Server/Service/Connector/Listener");
 	digester.addSetNext("Server/Service/Connector/Listener", "addLifecycleListener", "org.apache.catalina.LifecycleListener");
+	// 会调用LifecycleListener.addLifecycleListener方法，参数都是第三个参数的实例对象
+	
 
 	digester.addObjectCreate("Server/Service/Connector/UpgradeProtocol", null, "className");
 	digester.addSetProperties("Server/Service/Connector/UpgradeProtocol");
 	digester.addSetNext("Server/Service/Connector/UpgradeProtocol", "addUpgradeProtocol", "org.apache.coyote.UpgradeProtocol");
+	// 会调用UpgradeProtocol.addUpgradeProtocol方法，参数都是第三个参数的实例对象
+	
 
 	digester.addRuleSet(new NamingRuleSet("Server/GlobalNamingResources/"));
 	digester.addRuleSet(new EngineRuleSet("Server/Service/"));
@@ -589,9 +673,9 @@ protected Digester createStartDigester() {
 	digester.addRuleSet(new ContextRuleSet("Server/Service/Engine/Host/"));
 	addClusterRuleSet(digester, "Server/Service/Engine/Host/Cluster/");
 	digester.addRuleSet(new NamingRuleSet("Server/Service/Engine/Host/Context/"));
-
-
 	digester.addRule("Server/Service/Engine", new SetParentClassLoaderRule(parentClassLoader));
+	
+
 	addClusterRuleSet(digester, "Server/Service/Engine/Cluster/");
 
 	long t2=System.currentTimeMillis();
@@ -601,12 +685,22 @@ protected Digester createStartDigester() {
 	return (digester);
 }
 
+
+#####################################################################################################################################
+#			创建ObjectCreateRule、SetPropertiesRule、SetNextRule并把所有的Rule放入Rules。											#
+#####################################################################################################################################
+
 ############################################################## 创建对象规则  ########################################################
+
 /**
  * 添加对象创建规则。
+ *
+ * ObjectCreateRule继承Rule对象。
+ * 		Rule的方法：begin(String namespace, String name, Attributes attributes)、end(String namespace, String name)、finish()方法。
  */
 location：Digester
 public void addObjectCreate(String pattern, String className, String attributeName) {
+	// 创建一个ObjectCreateRule对象。
 	addRule(pattern, new ObjectCreateRule(className, attributeName));
 }
 
@@ -615,7 +709,10 @@ public void addObjectCreate(String pattern, String className, String attributeNa
  */
 location：Digester
 public void addRule(String pattern, Rule rule) {
+	// 向rule设置Digester。
 	rule.setDigester(this);
+	
+	// 向Rules添加rule。
 	getRules().add(pattern, rule);
 }
 
@@ -624,12 +721,10 @@ public void addRule(String pattern, Rule rule) {
  */
 location：Digester
 public Rules getRules() {
-
 	if (this.rules == null) {
 		this.rules = new RulesBase();
 		this.rules.setDigester(this);
-	}
-	
+	}	
 	return (this.rules);
 }
 
@@ -639,18 +734,24 @@ public Rules getRules() {
  */
 location：RulesBase
 public void add(String pattern, Rule rule) {
+	// 判读pattern。
 	int patternLength = pattern.length();
 	if (patternLength>1 && pattern.endsWith("/")) {
 		pattern = pattern.substring(0, patternLength-1);
 	}
 
+	// 从缓存中获取pattern对应的rule。
 	List<Rule> list = cache.get(pattern);
+	
+	// 如果缓存没有，以pattern为key，List<Rule>为值，存入map。
 	if (list == null) {
 		list = new ArrayList<>();
 		cache.put(pattern, list);
 	}
 	
 	list.add(rule);
+	
+	// 添加rule。
 	rules.add(rule);
 	
 	if (this.digester != null) {
@@ -688,7 +789,7 @@ public void begin(String namespace, String name, Attributes attributes) throws E
 	Class<?> clazz = digester.getClassLoader().loadClass(realClassName);
 	Object instance = clazz.getConstructor().newInstance();
 	
-	// 把创建的实例，放入Digester中的ArrayStack<Object> stack属性中，放入栈顶。
+	// 把创建的实例，放入Digester中的ArrayStack<Object> stack属性中，放入栈顶。这个元素会在ObjectCreateRule.end(..)方法从栈中弹出。
 	digester.push(instance);
 }
 
@@ -697,7 +798,7 @@ public void begin(String namespace, String name, Attributes attributes) throws E
  */
 location：ObjectCreateRule（继承Rule）
 public void end(String namespace, String name) throws Exception {
-	// Digester中的ArrayStack<Object> stack属性中的栈，从栈顶弹出。
+	// Digester中的ArrayStack<Object> stack属性中的栈，把在ObjectCreateRule的begin(..)方法中创建的实例对象从栈顶弹出。
 	Object top = digester.pop();
 	
 	if (digester.log.isDebugEnabled()) {
@@ -707,6 +808,9 @@ public void end(String namespace, String name) throws Exception {
 }
 
 ############################################################## 创建对象规则  ########################################################
+
+SetPropertiesRule只有begin(String namespace, String theName, Attributes attributes):方法。
+
 /**
  * 添加规则。
  */
@@ -716,11 +820,12 @@ public void addSetProperties(String pattern) {
 }
 
 /**
- * 设置属性规则。
+ * 操作元素之前的操作。
  */
 location：SetPropertiesRule
 public void begin(String namespace, String theName, Attributes attributes) throws Exception {
 
+	// 获取Digester中的stack成员变量的栈顶元素。
 	Object top = digester.peek();
 	
 	if (digester.log.isDebugEnabled()) {
@@ -745,6 +850,7 @@ public void begin(String namespace, String theName, Attributes attributes) throw
 		// isFakeAttribute：判断是否为伪属性。
 		// setProperty：设置属性。
 		// getRulesValidation：是否规则校验。
+		
 		if (!digester.isFakeAttribute(top, name) && !IntrospectionUtils.setProperty(top, name, value) && digester.getRulesValidation()) {
 			digester.log.warn("[SetPropertiesRule]{" + digester.match + "} Setting property '" + name + "' to '" + value + "' did not find a matching property.");
 		}
@@ -753,6 +859,9 @@ public void begin(String namespace, String theName, Attributes attributes) throw
 
 
 ##############################################################  set Next规则  ########################################################
+
+SetNextRule只有end(String namespace, String name)
+
 /**
  * 添加规则。
  */
@@ -763,7 +872,8 @@ public void addSetNext(String pattern, String methodName, String paramType) {
 
 
 /**
- *
+ * SetNextRule的方法。
+ * 元素结束时的操作。
  */
 location：SetNextRule
 public void end(String namespace, String name) throws Exception { 
@@ -786,7 +896,7 @@ public void end(String namespace, String name) throws Exception {
 }
 
 /**
- * 调用设置的set Next规则的方法。注意MbeansDescriptorsDigesterSource中有很多addOperation操作。这个是初始化GlobalResourcesLifecycleListener时的操作。
+ * 调用设置的SetRule规则的方法。注意MbeansDescriptorsDigesterSource中有很多addOperation操作。这个是初始化GlobalResourcesLifecycleListener时的操作。
  */
 location：IntrospectionUtils
 public static Object callMethod1(Object target, String methodN, Object param1, String typeParam1, ClassLoader cl) throws Exception {
@@ -823,12 +933,299 @@ public static Object callMethod1(Object target, String methodN, Object param1, S
 }
 
 
+##############################################################  一些Rule集合配置  ########################################################
+/**
+ *
+ */
+location：Digester
+public void addRuleSet(RuleSet ruleSet) {
 
+	String oldNamespaceURI = getRuleNamespaceURI();
+	String newNamespaceURI = ruleSet.getNamespaceURI();
+	if (log.isDebugEnabled()) {
+		if (newNamespaceURI == null) {
+			log.debug("addRuleSet() with no namespace URI");
+		} else {
+			log.debug("addRuleSet() with namespace URI " + newNamespaceURI);
+		}
+	}
+	setRuleNamespaceURI(newNamespaceURI);
+	
+	// 主要是这个方法，RuleSet的addRuleInstances都会有很多ObjectCreateRule、SetPropertiesRule、SetNextRule
+	ruleSet.addRuleInstances(this);
+	
+	setRuleNamespaceURI(oldNamespaceURI);
+
+}
+
+
+
+#########################################################################################################################################
+#########################################           解析server.cml  		#############################################################
+#########################################################################################################################################
+/**
+ * Digester：/daɪˈdʒestə(r)/ 摘要。
+ */
+location：Digester
+public Object parse(InputSource input) throws IOException, SAXException {
+	// 配置
+	configure();
+	
+	// 这个为SAXParseImp.JAXPSAXParser
+	getXMLReader().parse(input);
+	return (root);
+
+}
+
+/**
+ * 设置log和saxLog.
+ */
+location：Digester
+protected void configure() {
+	if (configured) {
+		return;
+	}
+	log = LogFactory.getLog("org.apache.tomcat.util.digester.Digester");
+	saxLog = LogFactory.getLog("org.apache.tomcat.util.digester.Digester.sax");
+
+	configured = true;
+}
+
+/**
+ * 获取XMLReader。
+ */
+location：Digester
+public XMLReader getXMLReader() throws SAXException {
+	// 如果没有reader，
+	if (reader == null) {
+		reader = getParser().getXMLReader();
+	}
+
+	reader.setDTDHandler(this);
+	reader.setContentHandler(this);
+
+	if (entityResolver == null) {
+		reader.setEntityResolver(this);
+	} else {
+		reader.setEntityResolver(entityResolver);
+	}
+
+	reader.setProperty("http://xml.org/sax/properties/lexical-handler", this);
+
+	reader.setErrorHandler(this);
+	return reader;
+}
+
+/**
+ * 获取SAXParser，如果没有就创建。
+ */
+location：Digester
+public SAXParser getParser() {
+	if (parser != null) {
+		return (parser);
+	}
+
+	try {
+		// 创建SAXParser。这是是SAXParserImpl实例。
+		parser = getFactory().newSAXParser();
+	} catch (Exception e) {
+		log.error("Digester.getParser: ", e);
+		return (null);
+	}
+	
+	return (parser);
+}
+
+/**
+ * 创建SAXParserFactory对象。
+ */
+location：Digester
+public SAXParserFactory getFactory() throws SAXNotRecognizedException, SAXNotSupportedException, ParserConfigurationException {
+
+	if (factory == null) {
+		factory = SAXParserFactory.newInstance();
+
+		factory.setNamespaceAware(namespaceAware);
+		if (namespaceAware) {
+			factory.setFeature("http://xml.org/sax/features/namespace-prefixes", true);
+		}
+
+		factory.setValidating(validating);
+		if (validating) {
+			factory.setFeature("http://xml.org/sax/features/validation", true);
+			factory.setFeature("http://apache.org/xml/features/validation/schema", true);
+		}
+	}
+	return (factory);
+}
+
+
+		##################################################################
+		##	 		解析的过程最后都是调用Digester的startElement		##
+		##################################################################	
+/**
+ *
+ */
+location：			
+public void startElement(String namespaceURI, String localName, String qName, Attributes list) throws SAXException {
+	boolean debug = log.isDebugEnabled();
+
+	if (saxLog.isDebugEnabled()) {
+		saxLog.debug("startElement(" + namespaceURI + "," + localName + "," + qName + ")");
+	}
+
+	list = updateAttributes(list);
+
+	bodyTexts.push(bodyText);
+	bodyText = new StringBuilder();
+
+	String name = localName;
+	if ((name == null) || (name.length() < 1)) {
+		name = qName;
+	}
+
+	StringBuilder sb = new StringBuilder(match);
+	
+	if (match.length() > 0) {
+		sb.append('/');
+	}
+	sb.append(name);
+	match = sb.toString();
+	if (debug) {
+		log.debug("  New match='" + match + "'");
+	}
+
+	// 获取命名空间和match对应的Rule。
+	List<Rule> rules = getRules().match(namespaceURI, match);
+	
+	// matches这个也是一个栈。
+	matches.push(rules);
+	
+	if ((rules != null) && (rules.size() > 0)) {
+		for (int i = 0; i < rules.size(); i++) {
+			try {
+				Rule rule = rules.get(i);
+				if (debug) {
+					log.debug("  Fire begin() for " + rule);
+				}
+				rule.begin(namespaceURI, name, list);
+			} catch (Exception e) {
+				log.error("Begin event threw exception", e);
+				throw createSAXException(e);
+			} catch (Error e) {
+				log.error("Begin event threw error", e);
+				throw e;
+			}
+		}
+	} else {
+		if (debug) {
+			log.debug("  No rules found matching '" + match + "'.");
+		}
+	}
+}
+
+/**
+ * 元素结束操作。
+ */
+location：Digester
+public void endElement(String namespaceURI, String localName, String qName) throws SAXException {
+
+	boolean debug = log.isDebugEnabled();
+
+	if (debug) {
+		if (saxLog.isDebugEnabled()) {
+			saxLog.debug("endElement(" + namespaceURI + "," + localName + "," + qName + ")");
+		}
+		log.debug("  match='" + match + "'");
+		log.debug("  bodyText='" + bodyText + "'");
+	}
+
+	bodyText = updateBodyText(bodyText);
+
+	String name = localName;
+	if ((name == null) || (name.length() < 1)) {
+		name = qName;
+	}
+
+	List<Rule> rules = matches.pop();
+	if ((rules != null) && (rules.size() > 0)) {
+		String bodyText = this.bodyText.toString();
+		for (int i = 0; i < rules.size(); i++) {
+			try {
+				Rule rule = rules.get(i);
+				if (debug) {
+					log.debug("  Fire body() for " + rule);
+				}
+				rule.body(namespaceURI, name, bodyText);
+			} catch (Exception e) {
+				log.error("Body event threw exception", e);
+				throw createSAXException(e);
+			} catch (Error e) {
+				log.error("Body event threw error", e);
+				throw e;
+			}
+		}
+	} else {
+		if (debug) {
+			log.debug("  No rules found matching '" + match + "'.");
+		}
+		if (rulesValidation) {
+			log.warn("  No rules found matching '" + match + "'.");
+		}
+	}
+
+	bodyText = bodyTexts.pop();
+
+	if (rules != null) {
+		for (int i = 0; i < rules.size(); i++) {
+			int j = (rules.size() - i) - 1;
+			try {
+				Rule rule = rules.get(j);
+				if (debug) {
+					log.debug("  Fire end() for " + rule);
+				}
+				rule.end(namespaceURI, name);
+			} catch (Exception e) {
+				log.error("End event threw exception", e);
+				throw createSAXException(e);
+			} catch (Error e) {
+				log.error("End event threw error", e);
+				throw e;
+			}
+		}
+	}
+
+	int slash = match.lastIndexOf('/');
+	if (slash >= 0) {
+		match = match.substring(0, slash);
+	} else {
+		match = "";
+	}
+
+}
+
+
+
+
+
+
+
+
+
+
+################################################################################################################################################
+############################################    		    Server初始化操作		############################################################
+################################################################################################################################################
+
+NEW --> INITIALIZING --> INITIALIZED --> STARTING_PREP --> STARTING  --> 
 
 
 /**
- * NEW --> INITIALIZING --> INITIALIZED --> STARTING_PREP --> STARTING  --> 
- */ 
+ * tomcat的所有组件都会继承这个方法以便管理组件的生命周期。
+ *
+ * 初始化组件的状态都是NEW。
+ */
+location：LifecycleBase 
 public final synchronized void init() throws LifecycleException {
 	
 	if (!state.equals(LifecycleState.NEW)) {
@@ -889,27 +1286,34 @@ private synchronized void setStateInternal(LifecycleState state, Object data, bo
 location：LifeCycleBase
 protected void fireLifecycleEvent(String type, Object data) {
 	LifecycleEvent event = new LifecycleEvent(this, type, data);
+	
+	// lifecycleListeners中除了NamingContextListener是在StandardServer的构造函数中指定的，其余的都是在server.xml中配置的。
+	// NamingContextListener、VersionLoggerListener、AprLifecycleListener、JreMemoryLeakPreventionListener
+	// GlobalResourcesLifecycleListener、ThreadLocalLeakPreventionListener
 	for (LifecycleListener listener : lifecycleListeners) {
 		listener.lifecycleEvent(event);
 	}
 }
 
 
-public StandardServer() {
 
-	super();
+Server
+	Listener
+	GlobalNamingResources
+		Resource
+	Service
+		Executor
+		Connector
+		Engine
+			Cluster
+			Realm
+			Host
+			Context
+				Valve
 
-	globalNamingResources = new NamingResourcesImpl();
-	globalNamingResources.setContainer(this);
 
-	if (isUseNaming()) {
-		namingContextListener = new NamingContextListener();
-		addLifecycleListener(namingContextListener);
-	} else {
-		namingContextListener = null;
-	}
-}
 
+##########################################################    Server初始化    ##########################################
 /**
  * 初始化Server。
  */
@@ -918,8 +1322,11 @@ protected void initInternal() throws LifecycleException {
 
 	super.initInternal();
 
+	// 注册全局的字符串缓存。
+	// 尽管缓存是全局的，但如果JVM中存在多个服务器，则相同的缓存将以多个名称注册。
 	onameStringCache = register(new StringCache(), "type=StringCache");
 
+	// 注册MBeanFactory
 	MBeanFactory factory = new MBeanFactory();
 	factory.setContainer(this);
 	onameMBeanFactory = register(factory, "type=MBeanFactory");
@@ -927,9 +1334,15 @@ protected void initInternal() throws LifecycleException {
 	// globalNamingResources进行初始化。NamingResourcesImpl
 	globalNamingResources.init();
 
+	// 使用common和shared类加载器的JAR去扩展验证器
 	if (getCatalina() != null) {
+		
+		// 获取Catalina的父ClassLoader。
 		ClassLoader cl = getCatalina().getParentClassLoader();
 		
+		// 遍历类加载器层次结构。 在系统类加载器处停止。
+		// 这将添加共享（如果存在）和通用类加载器
+		// Catalina的父ClassLoader不为null，
 		while (cl != null && cl != ClassLoader.getSystemClassLoader()) {
 			if (cl instanceof URLClassLoader) {
 				URL[] urls = ((URLClassLoader) cl).getURLs();
@@ -952,20 +1365,79 @@ protected void initInternal() throws LifecycleException {
 		}
 	}
 	
-	// StandardService进行初始化操作。
-	// Service	-->  可以有多个？
-	// 		Executor
-	// 		Connector
-	//		Engine
-	// 			Engine
-	// 				Host
-	//					Context
-	//						Wrapper
+	// 初始化Service。
 	for (int i = 0; i < services.length; i++) {
 		services[i].init();
 	}
 }
 
+/**
+ * 注册
+ */
+location：LifecycleMBeanBase
+protected final ObjectName register(Object obj, String objectNameKeyProperties) {
+
+	// getDomain()：获取这个域（组件）的名称。
+	StringBuilder name = new StringBuilder(getDomain());
+	name.append(':');
+	name.append(objectNameKeyProperties);
+
+	ObjectName on = null;
+
+	try {
+		on = new ObjectName(name.toString());
+		Registry.getRegistry(null, null).registerComponent(obj, on, null);
+	} catch (MalformedObjectNameException e) {
+		log.warn(sm.getString("lifecycleMBeanBase.registerFail", obj, name), e);
+	} catch (Exception e) {
+		log.warn(sm.getString("lifecycleMBeanBase.registerFail", obj, name), e);
+	}
+
+	return on;
+}
+
+/**
+ * 获取Registry，
+ */
+location：Registry
+public static synchronized Registry getRegistry(Object key, Object guard) {
+	Registry localRegistry;
+	
+	// HashMap<Object, Registry> perLoaderRegistries
+	if(perLoaderRegistries != null) {
+	
+		// 使用线程隔离的。
+		if(key == null) {
+			key=Thread.currentThread().getContextClassLoader();
+		}
+		
+		if(key != null) {
+			localRegistry = perLoaderRegistries.get(key);
+			if( localRegistry == null ) {
+				localRegistry=new Registry();
+				localRegistry.guard=guard;
+				perLoaderRegistries.put( key, localRegistry );
+				return localRegistry;
+			}
+			if( localRegistry.guard != null && localRegistry.guard != guard ) {
+				return null; 
+			}
+			return localRegistry;
+		}
+	}
+
+	if (registry == null) {
+		registry = new Registry();
+	}
+	
+	if( registry.guard != null && registry.guard != guard ) {
+		return null;
+	}
+	return (registry);
+}
+
+
+##########################################################    Server\Service初始化    ##########################################
 /**
  *
  */
@@ -978,7 +1450,7 @@ protected void initInternal() throws LifecycleException {
 		engine.init();
 	}
 
-	// 初始化Executors
+	// 初始化线程池。
 	for (Executor executor : findExecutors()) {
 		if (executor instanceof JmxEnabled) {
 			((JmxEnabled) executor).setDomain(getDomain());
@@ -1006,25 +1478,78 @@ protected void initInternal() throws LifecycleException {
 	}
 }
 
+##########################################################    Server\Service\MapperListener初始化    ##########################################
+
+/**
+ *
+ */
 location：MapperListener
 protected void initInternal() throws LifecycleException {
 	if (oname == null) {
 		mserver = Registry.getRegistry(null, null).getMBeanServer();
-
 		oname = register(this, getObjectNameKeyProperties());
 	}
 }
 
+
+
+##########################################################    Server\Service\Engine初始化    ##########################################
+
+/**
+ *
+ */
+location：StandardEngine
+protected void initInternal() throws LifecycleException {
+	getRealm();
+	super.initInternal();
+}
+
+/**
+ *
+ */
+location：StandardEngine
+public Realm getRealm() {
+	Realm configured = super.getRealm();
+	if (configured == null) {
+		configured = new NullRealm();
+		this.setRealm(configured);
+	}
+	return configured;
+}
+
+/**
+ *
+ */
+location：ContainerBase
+public Realm getRealm() {
+	Lock l = realmLock.readLock();
+	l.lock();
+	try {
+		if (realm != null)
+			return (realm);
+		if (parent != null)
+			return (parent.getRealm());
+		return null;
+	} finally {
+		l.unlock();
+	}
+}
+
+##########################################################    Server\Service\Connector初始化    ##########################################
+/**
+ *
+ */
 location：Connector
 protected void initInternal() throws LifecycleException {
 
 	super.initInternal();
 
 	// 初始化adapter。请求处理器的实现，该处理将处理委托给CoyoteAdapter。
+	// protocolHandler默认为org.apache.coyote.http11.Http11NioProtocol的实例。
 	adapter = new CoyoteAdapter(this);
 	protocolHandler.setAdapter(adapter);
 
-	
+	// 设置解析Body的Http方法，这里是POST方法。
 	if (null == parseBodyMethodsSet) {
 		// getParseBodyMethods()：默认为POST
 		setParseBodyMethods(getParseBodyMethods());
@@ -1042,7 +1567,8 @@ protected void initInternal() throws LifecycleException {
 	}
 
 	/**
-	 * 启动
+	 *  这里开启了socket监听。
+	 * 
 	 */ 
 	try {
 		protocolHandler.init();
@@ -1077,9 +1603,12 @@ public void setProtocol(String protocol) {
 }
 
 /**
- * 初始化：Http11NioProtocol
+ * 其是Http11NioProtocol实例
+ *
+ * Http11NioProtocol extends AbstractHttp11Protocol
+ * 		AbstractHttp11Protocol  extends  AbstractProtocol
  */
-location：Http11NioProtocol
+location：AbstractHttp11Protocol
 public void init() throws Exception {
 	for (UpgradeProtocol upgradeProtocol : upgradeProtocols) {
 		configureUpgradeProtocol(upgradeProtocol);
@@ -1116,11 +1645,36 @@ public void init() throws Exception {
 	endpoint.init();
 }
 
+
+/**
+ * 其是NioEndpoint实例。
+ *
+ * NioEndpoint  extends  AbstractJsseEndpoint
+ *		AbstractJsseEndpoint extends AbstractEndpoint
+ */
+location：AbstractJsseEndpoint
 public void init() throws Exception {
 	testServerCipherSuitesOrderSupport();
 	super.init();
 }
 
+/**
+ * 
+ */
+location：AbstractJsseEndpoint
+private void testServerCipherSuitesOrderSupport() {
+	if(!JreCompat.isJre8Available() && !OpenSSLImplementation.class.getName().equals(getSslImplementationName())) {
+		for (SSLHostConfig sslHostConfig : sslHostConfigs.values()) {
+			if (sslHostConfig.getHonorCipherOrder() != null) {
+				throw new UnsupportedOperationException(sm.getString("endpoint.jsse.cannotHonorServerCipherOrder"));
+			}
+		}
+	}
+}
+
+/**
+ *
+ */
 location：AbstractEndpoint
 public void init() throws Exception {
 	// bindOnInit = true
@@ -1191,7 +1745,7 @@ public void bind() throws Exception {
 }
 
 /**
- * 打开，
+ * 打开
  */
 location：NioSeletorPool
 public void open() throws IOException {
@@ -1317,5 +1871,106 @@ public void run() {
 	}
 }
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+###################################################################################################################################
+######			附录一		############################     		    server.xml      	 	###################################
+###################################################################################################################################
+<Server port="8005" shutdown="SHUTDOWN">
+	<Listener className="org.apache.catalina.startup.VersionLoggerListener" />
+	<!--  
+	<Listener className="org.apache.catalina.security.SecurityListener" />
+	-->
+	<Listener className="org.apache.catalina.core.AprLifecycleListener" SSLEngine="on" />
+	<Listener className="org.apache.catalina.core.JreMemoryLeakPreventionListener" />
+	<Listener className="org.apache.catalina.mbeans.GlobalResourcesLifecycleListener" />
+	<Listener className="org.apache.catalina.core.ThreadLocalLeakPreventionListener" />
+	<GlobalNamingResources>
+		<Resource name="UserDatabase" auth="Container" type="org.apache.catalina.UserDatabase" description="User database that can be updated and saved"
+			  factory="org.apache.catalina.users.MemoryUserDatabaseFactory" pathname="conf/tomcat-users.xml" />
+	</GlobalNamingResources>
+
+	<Service name="Catalina">
+
+		<!--
+		<Executor name="tomcatThreadPool" namePrefix="catalina-exec-" maxThreads="150" minSpareThreads="4"/>
+		-->
+
+		<Connector port="8082" protocol="HTTP/1.1" connectionTimeout="20000" redirectPort="8443" />
+
+		<!--
+		<Connector executor="tomcatThreadPool" port="8080" protocol="HTTP/1.1" connectionTimeout="20000" redirectPort="8443" />
+		-->
+
+		<!--
+		<Connector port="8443" protocol="org.apache.coyote.http11.Http11NioProtocol" maxThreads="150" SSLEnabled="true">
+			<SSLHostConfig>
+				<Certificate certificateKeystoreFile="conf/localhost-rsa.jks"
+							 type="RSA" />
+			</SSLHostConfig>
+		</Connector>
+		-->
+		<!--
+		<Connector port="8443" protocol="org.apache.coyote.http11.Http11AprProtocol" maxThreads="150" SSLEnabled="true" >
+			<UpgradeProtocol className="org.apache.coyote.http2.Http2Protocol" />
+			<SSLHostConfig>
+				<Certificate certificateKeyFile="conf/localhost-rsa-key.pem"
+							 certificateFile="conf/localhost-rsa-cert.pem"
+							 certificateChainFile="conf/localhost-rsa-chain.pem"
+							 type="RSA" />
+			</SSLHostConfig>
+		</Connector>
+		-->
+
+		<Connector port="8009" protocol="AJP/1.3" redirectPort="8443" />
+
+
+		<Engine name="Catalina" defaultHost="localhost">
+
+			<!--
+			<Cluster className="org.apache.catalina.ha.tcp.SimpleTcpCluster"/>
+			-->
+
+			<Realm className="org.apache.catalina.realm.LockOutRealm">
+				<Realm className="org.apache.catalina.realm.UserDatabaseRealm" resourceName="UserDatabase"/>
+			</Realm>
+
+			<Host name="localhost"  appBase="webapps" unpackWARs="true" autoDeploy="true">
+
+			<!--
+			<Valve className="org.apache.catalina.authenticator.SingleSignOn" />
+			-->
+
+			<!-- 
+			<Context path="/tomcat" docBase="/maven-servlet" reloadable="false" ></Context>
+			-->
+
+				  
+			<Valve className="org.apache.catalina.valves.AccessLogValve" directory="logs" prefix="localhost_access_log" suffix=".txt" 
+					pattern="%h %l %u %t &quot;%r&quot; %s %b" />
+		  </Host>
+		</Engine>
+	</Service>
+</Server>
 
 

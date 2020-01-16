@@ -5,7 +5,12 @@
 ##################################################################################################################################################
 ##################################################################################################################################################
  
-FormAuthenticationFilter  extends  AuthenticatingFilter  AuthenticationFilter  extends  AccessControlFilter  extends  PathMatchingFilter  extends  AdviceFilter  extends  AdviceFilter  extends  OncePerRequestFilter
+FormAuthenticationFilter  extends  AuthenticatingFilter  
+			AuthenticatingFilter extends  AuthenticationFilter
+					AuthenticationFilter  extends  AccessControlFilter 
+							AccessControlFilter  extends  PathMatchingFilter 
+									PathMatchingFilter extends  AdviceFilter  
+											AdviceFilter  extends  OncePerRequestFilter
 
 
 /**
@@ -177,7 +182,7 @@ protected boolean onAccessDenied(ServletRequest request, ServletResponse respons
 
 
 ################################################################################################################################
-############################################     ###########################################################
+############################################   				  ###########################################################
 ################################################################################################################################
 /**
  * 
