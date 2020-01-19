@@ -1,0 +1,1471 @@
+########################################################################################################################################
+#####################################    HostConfig其是一个监听器，当被触发是会执行lifecycleEvent方法。   ##############################
+########################################################################################################################################
+
+
+/**
+ *
+ */
+location：HostConfig
+public void lifecycleEvent(LifecycleEvent event) {
+
+	try {
+		host = (Host) event.getLifecycle();
+		
+		if (host instanceof StandardHost) {
+			setCopyXML(((StandardHost) host).isCopyXML());
+			setDeployXML(((StandardHost) host).isDeployXML());
+			setUnpackWARs(((StandardHost) host).isUnpackWARs());
+			setContextClass(((StandardHost) host).getContextClass());
+		}
+	} catch (ClassCastException e) {
+		log.error(sm.getString("hostConfig.cce", event.getLifecycle()), e);
+		return;
+	}
+
+	if (event.getType().equals(Lifecycle.PERIODIC_EVENT)) {
+		check();
+	} else if (event.getType().equals(Lifecycle.BEFORE_START_EVENT)) {
+		beforeStart();
+	} else if (event.getType().equals(Lifecycle.START_EVENT)) {
+		start();
+	} else if (event.getType().equals(Lifecycle.STOP_EVENT)) {
+		stop();
+	}
+}
+
+/**
+ *
+ */
+location：HostConfig
+public void start() {
+
+	if (log.isDebugEnabled()) {
+		log.debug(sm.getString("hostConfig.start"));
+	}
+
+	try {
+		ObjectName hostON = host.getObjectName();
+		oname = new ObjectName(hostON.getDomain() + ":type=Deployer,host=" + host.getName());
+		Registry.getRegistry(null, null).registerComponent(this, oname, this.getClass().getName());
+	} catch (Exception e) {
+		log.error(sm.getString("hostConfig.jmx.register", oname), e);
+	}
+
+	if (!host.getAppBaseFile().isDirectory()) {
+		log.error(sm.getString("hostConfig.appBase", host.getName(), host.getAppBaseFile().getPath()));
+		host.setDeployOnStartup(false);
+		host.setAutoDeploy(false);
+	}
+
+	if (host.getDeployOnStartup()) {
+		deployApps();
+	}
+}
+
+/**
+ * 解压文件。
+ */
+location：HostConfig
+protected void deployApps() {
+	// Host中配置的appBase对应的值。
+	File appBase = host.getAppBaseFile();
+	
+	// 配置的路径。
+	File configBase = host.getConfigBaseFile();
+	
+	// 获取过滤过可忽略文件及文件夹的剩余文件及文件夹。
+	String[] filteredAppPaths = filterAppPaths(appBase.list());
+	
+	// 解压configBase文件夹下的xml描述文件。
+	deployDescriptors(configBase, configBase.list());
+	
+	// 解压war包。
+	deployWARs(appBase, filteredAppPaths);
+	
+	// 
+	deployDirectories(appBase, filteredAppPaths);
+
+}
+
+
+
+/**
+ * 获取过滤过可忽略文件及文件夹的剩余文件及文件夹。
+ */
+location：HostConfig
+protected String[] filterAppPaths(String[] unfilteredAppPaths) {
+	// 获取可忽略的匹配规则。
+	Pattern filter = host.getDeployIgnorePattern();
+	
+	// unfilteredAppPaths：为appBase下的所有文件及文件夹。
+	if (filter == null || unfilteredAppPaths == null) {
+		return unfilteredAppPaths;
+	}
+
+	// 过滤忽略的文件及文件夹。
+	List<String> filteredList = new ArrayList<>();
+	Matcher matcher = null;
+	for (String appPath : unfilteredAppPaths) {
+		if (matcher == null) {
+			matcher = filter.matcher(appPath);
+		} else {
+			matcher.reset(appPath);
+		}
+		if (matcher.matches()) {
+			if (log.isDebugEnabled()) {
+				log.debug(sm.getString("hostConfig.ignorePath", appPath));
+			}
+		} else {
+			filteredList.add(appPath);
+		}
+	}
+	return filteredList.toArray(new String[filteredList.size()]);
+}
+
+/**
+ * 
+ */
+location：HostConfig
+protected void deployDescriptors(File configBase, String[] files) {
+
+	if (files == null) {
+		return;
+	}
+
+	ExecutorService es = host.getStartStopExecutor();
+	List<Future<?>> results = new ArrayList<>();
+
+	for (int i = 0; i < files.length; i++) {
+		File contextXml = new File(configBase, files[i]);
+
+		if (files[i].toLowerCase(Locale.ENGLISH).endsWith(".xml")) {
+			ContextName cn = new ContextName(files[i], true);
+
+			if (isServiced(cn.getName()) || deploymentExists(cn.getName())) {
+				continue;
+			}
+			results.add(es.submit(new DeployDescriptor(this, cn, contextXml)));
+		}
+	}
+
+	for (Future<?> result : results) {
+		try {
+			result.get();
+		} catch (Exception e) {
+			log.error(sm.getString("hostConfig.deployDescriptor.threaded.error"), e);
+		}
+	}
+}	
+
+/**
+ * 解压war包。
+ */
+location：HostConfig
+protected void deployWARs(File appBase, String[] files) {
+
+	if (files == null) {
+		return;
+	}
+
+	
+	// 这个现场的名称为locahost-startStop-*
+	ExecutorService es = host.getStartStopExecutor();
+	List<Future<?>> results = new ArrayList<>();
+
+	for (int i = 0; i < files.length; i++) {
+
+		// 判读文件夹名称是否为：META-INF
+		if (files[i].equalsIgnoreCase("META-INF")) {
+			continue;
+		}
+		
+		// 判读文件夹名称是否为：WEB-INF
+		if (files[i].equalsIgnoreCase("WEB-INF")) {
+			continue;
+		}
+		
+		File war = new File(appBase, files[i]);
+		
+		// 判读文件是否是.war文件。
+		if (files[i].toLowerCase(Locale.ENGLISH).endsWith(".war") && war.isFile() && !invalidWars.contains(files[i]) ) {
+
+			ContextName cn = new ContextName(files[i], true);
+
+			if (isServiced(cn.getName())) {
+				continue;
+			}
+			if (deploymentExists(cn.getName())) {
+				DeployedApplication app = deployed.get(cn.getName());
+				boolean unpackWAR = unpackWARs;
+				if (unpackWAR && host.findChild(cn.getName()) instanceof StandardContext) {
+					unpackWAR = ((StandardContext) host.findChild(cn.getName())).getUnpackWAR();
+				}
+				if (!unpackWAR && app != null) {
+					File dir = new File(appBase, cn.getBaseName());
+					if (dir.exists()) {
+						if (!app.loggedDirWarning) {
+							log.warn(sm.getString("hostConfig.deployWar.hiddenDir", dir.getAbsoluteFile(), war.getAbsoluteFile()));
+							app.loggedDirWarning = true;
+						}
+					} else {
+						app.loggedDirWarning = false;
+					}
+				}
+				continue;
+			}
+
+			if (!validateContextPath(appBase, cn.getBaseName())) {
+				log.error(sm.getString("hostConfig.illegalWarName", files[i]));
+				invalidWars.add(files[i]);
+				continue;
+			}
+
+			results.add(es.submit(new DeployWar(this, cn, war)));
+		}
+	}
+
+	for (Future<?> result : results) {
+		try {
+			result.get();
+		} catch (Exception e) {
+			log.error(sm.getString("hostConfig.deployWar.threaded.error"), e);
+		}
+	}
+}
+
+/**
+ * 的内部类。
+ */
+location：HostConfig
+private static class DeployWar implements Runnable {
+
+	private HostConfig config;
+	private ContextName cn;
+	private File war;
+
+	public DeployWar(HostConfig config, ContextName cn, File war) {
+		this.config = config;
+		this.cn = cn;
+		this.war = war;
+	}
+
+	@Override
+	public void run() {
+		config.deployWAR(cn, war);
+	}
+}
+
+/**
+ * 
+ */
+location：HostConfig
+protected void deployWAR(ContextName cn, File war) {
+
+	File xml = new File(host.getAppBaseFile(),
+			cn.getBaseName() + "/" + Constants.ApplicationContextXml);
+
+	File warTracker = new File(host.getAppBaseFile(), cn.getBaseName() + Constants.WarTracker);
+
+	boolean xmlInWar = false;
+	try (JarFile jar = new JarFile(war)) {
+		JarEntry entry = jar.getJarEntry(Constants.ApplicationContextXml);
+		if (entry != null) {
+			xmlInWar = true;
+		}
+	} catch (IOException e) {
+		/* Ignore */
+	}
+
+	// If there is an expanded directory then any xml in that directory
+	// should only be used if the directory is not out of date and
+	// unpackWARs is true. Note the code below may apply further limits
+	boolean useXml = false;
+	// If the xml file exists then expandedDir must exists so no need to
+	// test that here
+	if (xml.exists() && unpackWARs &&
+			(!warTracker.exists() || warTracker.lastModified() == war.lastModified())) {
+		useXml = true;
+	}
+
+	Context context = null;
+	boolean deployThisXML = isDeployThisXML(war, cn);
+
+	try {
+		if (deployThisXML && useXml && !copyXML) {
+			synchronized (digesterLock) {
+				try {
+					context = (Context) digester.parse(xml);
+				} catch (Exception e) {
+					log.error(sm.getString("hostConfig.deployDescriptor.error",war.getAbsolutePath()), e);
+				} finally {
+					digester.reset();
+					if (context == null) {
+						context = new FailedContext();
+					}
+				}
+			}
+			context.setConfigFile(xml.toURI().toURL());
+		} else if (deployThisXML && xmlInWar) {
+			synchronized (digesterLock) {
+				try (JarFile jar = new JarFile(war)) {
+					JarEntry entry = jar.getJarEntry(Constants.ApplicationContextXml);
+					try (InputStream istream = jar.getInputStream(entry)) {
+						context = (Context) digester.parse(istream);
+					}
+				} catch (Exception e) {
+					log.error(sm.getString("hostConfig.deployDescriptor.error", war.getAbsolutePath()), e);
+				} finally {
+					digester.reset();
+					if (context == null) {
+						context = new FailedContext();
+					}
+					context.setConfigFile(UriUtil.buildJarUrl(war, Constants.ApplicationContextXml));
+				}
+			}
+		} else if (!deployThisXML && xmlInWar) {
+			// Block deployment as META-INF/context.xml may contain security
+			// configuration necessary for a secure deployment.
+			log.error(sm.getString("hostConfig.deployDescriptor.blocked", cn.getPath(), Constants.ApplicationContextXml, new File(host.getConfigBaseFile(), cn.getBaseName() + ".xml")));
+		} else {
+			// 创建Context实例，默认为StandardContext
+			context = (Context) Class.forName(contextClass).getConstructor().newInstance();
+		}
+	} catch (Throwable t) {
+		ExceptionUtils.handleThrowable(t);
+		log.error(sm.getString("hostConfig.deployWar.error", war.getAbsolutePath()), t);
+	} finally {
+		if (context == null) {
+			context = new FailedContext();
+		}
+	}
+
+	boolean copyThisXml = false;
+	if (deployThisXML) {
+		if (host instanceof StandardHost) {
+			copyThisXml = ((StandardHost) host).isCopyXML();
+		}
+
+		// If Host is using default value Context can override it.
+		if (!copyThisXml && context instanceof StandardContext) {
+			copyThisXml = ((StandardContext) context).getCopyXML();
+		}
+
+		if (xmlInWar && copyThisXml) {
+			// Change location of XML file to config base
+			xml = new File(host.getConfigBaseFile(), cn.getBaseName() + ".xml");
+			try (JarFile jar = new JarFile(war)) {
+				JarEntry entry = jar.getJarEntry(Constants.ApplicationContextXml);
+				try (
+					InputStream istream = jar.getInputStream(entry);
+					FileOutputStream fos = new FileOutputStream(xml);
+					BufferedOutputStream ostream = new BufferedOutputStream(fos, 1024)
+				) {
+					byte buffer[] = new byte[1024];
+					while (true) {
+						int n = istream.read(buffer);
+						if (n < 0) {
+							break;
+						}
+						ostream.write(buffer, 0, n);
+					}
+					ostream.flush();
+				}
+			} catch (IOException e) {
+				/* Ignore */
+			}
+		}
+	}
+
+	DeployedApplication deployedApp = new DeployedApplication(cn.getName(), xml.exists() && deployThisXML && copyThisXml);
+
+	long startTime = 0;
+	
+	// Deploy the application in this WAR file
+	if(log.isInfoEnabled()) {
+		startTime = System.currentTimeMillis();
+		log.info(sm.getString("hostConfig.deployWar", war.getAbsolutePath()));
+	}
+
+	try {
+		// Populate redeploy resources with the WAR file
+		deployedApp.redeployResources.put(war.getAbsolutePath(), Long.valueOf(war.lastModified()));
+
+		if (deployThisXML && xml.exists() && copyThisXml) {
+			deployedApp.redeployResources.put(xml.getAbsolutePath(), Long.valueOf(xml.lastModified()));
+		} else {
+			// In case an XML file is added to the config base later
+			deployedApp.redeployResources.put((new File(host.getConfigBaseFile(), cn.getBaseName() + ".xml")).getAbsolutePath(), Long.valueOf(0));
+		}
+
+		Class<?> clazz = Class.forName(host.getConfigClass());
+		LifecycleListener listener = (LifecycleListener) clazz.getConstructor().newInstance();
+		context.addLifecycleListener(listener);
+
+		context.setName(cn.getName());
+		context.setPath(cn.getPath());
+		context.setWebappVersion(cn.getVersion());
+		context.setDocBase(cn.getBaseName() + ".war");
+		
+		/**
+		 *  【【【这里向元素添加子元素[也就是Context]，并启动子元素。】】】
+		 */
+		host.addChild(context);
+	} catch (Throwable t) {
+		ExceptionUtils.handleThrowable(t);
+		log.error(sm.getString("hostConfig.deployWar.error",
+				war.getAbsolutePath()), t);
+	} finally {
+		// If we're unpacking WARs, the docBase will be mutated after
+		// starting the context
+		boolean unpackWAR = unpackWARs;
+		if (unpackWAR && context instanceof StandardContext) {
+			unpackWAR = ((StandardContext) context).getUnpackWAR();
+		}
+		if (unpackWAR && context.getDocBase() != null) {
+			File docBase = new File(host.getAppBaseFile(), cn.getBaseName());
+			deployedApp.redeployResources.put(docBase.getAbsolutePath(),
+					Long.valueOf(docBase.lastModified()));
+			addWatchedResources(deployedApp, docBase.getAbsolutePath(),
+					context);
+			if (deployThisXML && !copyThisXml && (xmlInWar || xml.exists())) {
+				deployedApp.redeployResources.put(xml.getAbsolutePath(),
+						Long.valueOf(xml.lastModified()));
+			}
+		} else {
+			// Passing null for docBase means that no resources will be
+			// watched. This will be logged at debug level.
+			addWatchedResources(deployedApp, null, context);
+		}
+		// Add the global redeploy resources (which are never deleted) at
+		// the end so they don't interfere with the deletion process
+		addGlobalRedeployResources(deployedApp);
+	}
+
+	deployed.put(cn.getName(), deployedApp);
+
+	if (log.isInfoEnabled()) {
+		log.info(sm.getString("hostConfig.deployWar.finished",
+			war.getAbsolutePath(), Long.valueOf(System.currentTimeMillis() - startTime)));
+	}
+}
+
+/**
+ * StandardHost extends  ContainerBase
+ */
+location：StandardHost
+public void addChild(Container child) {
+
+	child.addLifecycleListener(new MemoryLeakTrackingListener());
+
+	if (!(child instanceof Context)) {
+		throw new IllegalArgumentException(sm.getString("standardHost.notContext"));
+	}
+	super.addChild(child);
+
+}
+
+
+/**
+ *
+ */
+location：ContainerBase
+public void addChild(Container child) {
+	if (Globals.IS_SECURITY_ENABLED) {
+		PrivilegedAction<Void> dp = new PrivilegedAddChild(child);
+		AccessController.doPrivileged(dp);
+	} else {
+		addChildInternal(child);
+	}
+}
+
+
+/**
+ *
+ */
+location：ContainerBase
+private void addChildInternal(Container child) {
+
+	if(log.isDebugEnabled()) {
+		log.debug("Add child " + child + " " + this);
+	}
+	
+	synchronized(children) {
+		if (children.get(child.getName()) != null) {
+			throw new IllegalArgumentException("addChild:  Child name '" + child.getName() + "' is not unique");
+		}									 
+		child.setParent(this);
+		children.put(child.getName(), child);
+	}
+
+	try {
+		if ((getState().isAvailable() || LifecycleState.STARTING_PREP.equals(getState())) && startChildren) {
+			child.start();
+		}
+	} catch (LifecycleException e) {
+		log.error("ContainerBase.addChild: start: ", e);
+		throw new IllegalStateException("ContainerBase.addChild: start: " + e);
+	} finally {
+		fireContainerEvent(ADD_CHILD_EVENT, child);
+	}
+}
+
+protected synchronized void startInternal() throws LifecycleException {
+
+	if(log.isDebugEnabled())
+		log.debug("Starting " + getBaseName());
+
+	// Send j2ee.state.starting notification
+	if (this.getObjectName() != null) {
+		Notification notification = new Notification("j2ee.state.starting",
+				this.getObjectName(), sequenceNumber.getAndIncrement());
+		broadcaster.sendNotification(notification);
+	}
+
+	setConfigured(false);
+	boolean ok = true;
+
+	// Currently this is effectively a NO-OP but needs to be called to
+	// ensure the NamingResources follows the correct lifecycle
+	if (namingResources != null) {
+		namingResources.start();
+	}
+
+	// Post work directory
+	postWorkDirectory();
+
+	// Add missing components as necessary
+	if (getResources() == null) {   // (1) Required by Loader
+		if (log.isDebugEnabled())
+			log.debug("Configuring default Resources");
+
+		try {
+			setResources(new StandardRoot(this));
+		} catch (IllegalArgumentException e) {
+			log.error(sm.getString("standardContext.resourcesInit"), e);
+			ok = false;
+		}
+	}
+	if (ok) {
+		resourcesStart();
+	}
+
+	if (getLoader() == null) {
+		WebappLoader webappLoader = new WebappLoader(getParentClassLoader());
+		webappLoader.setDelegate(getDelegate());
+		setLoader(webappLoader);
+	}
+
+	// An explicit cookie processor hasn't been specified; use the default
+	if (cookieProcessor == null) {
+		cookieProcessor = new Rfc6265CookieProcessor();
+	}
+
+	// Initialize character set mapper
+	getCharsetMapper();
+
+	// Validate required extensions
+	boolean dependencyCheck = true;
+	try {
+		dependencyCheck = ExtensionValidator.validateApplication
+			(getResources(), this);
+	} catch (IOException ioe) {
+		log.error(sm.getString("standardContext.extensionValidationError"), ioe);
+		dependencyCheck = false;
+	}
+
+	if (!dependencyCheck) {
+		// do not make application available if dependency check fails
+		ok = false;
+	}
+
+	// Reading the "catalina.useNaming" environment variable
+	String useNamingProperty = System.getProperty("catalina.useNaming");
+	if ((useNamingProperty != null)
+		&& (useNamingProperty.equals("false"))) {
+		useNaming = false;
+	}
+
+	if (ok && isUseNaming()) {
+		if (getNamingContextListener() == null) {
+			NamingContextListener ncl = new NamingContextListener();
+			ncl.setName(getNamingContextName());
+			ncl.setExceptionOnFailedWrite(getJndiExceptionOnFailedWrite());
+			addLifecycleListener(ncl);
+			setNamingContextListener(ncl);
+		}
+	}
+
+	// Standard container startup
+	if (log.isDebugEnabled())
+		log.debug("Processing standard container startup");
+
+
+	// Binding thread
+	ClassLoader oldCCL = bindThread();
+
+	try {
+		if (ok) {
+			// Start our subordinate components, if any
+			Loader loader = getLoader();
+			if (loader instanceof Lifecycle) {
+				((Lifecycle) loader).start();
+			}
+
+			// since the loader just started, the webapp classloader is now
+			// created.
+			setClassLoaderProperty("clearReferencesRmiTargets",
+					getClearReferencesRmiTargets());
+			setClassLoaderProperty("clearReferencesStopThreads",
+					getClearReferencesStopThreads());
+			setClassLoaderProperty("clearReferencesStopTimerThreads",
+					getClearReferencesStopTimerThreads());
+			setClassLoaderProperty("clearReferencesHttpClientKeepAliveThread",
+					getClearReferencesHttpClientKeepAliveThread());
+			setClassLoaderProperty("clearReferencesObjectStreamClassCaches",
+					getClearReferencesObjectStreamClassCaches());
+			setClassLoaderProperty("clearReferencesThreadLocals",
+					getClearReferencesThreadLocals());
+
+			// By calling unbindThread and bindThread in a row, we setup the
+			// current Thread CCL to be the webapp classloader
+			unbindThread(oldCCL);
+			oldCCL = bindThread();
+
+			// Initialize logger again. Other components might have used it
+			// too early, so it should be reset.
+			logger = null;
+			getLogger();
+
+			Realm realm = getRealmInternal();
+			if(null != realm) {
+				if (realm instanceof Lifecycle) {
+					((Lifecycle) realm).start();
+				}
+
+				// Place the CredentialHandler into the ServletContext so
+				// applications can have access to it. Wrap it in a "safe"
+				// handler so application's can't modify it.
+				CredentialHandler safeHandler = new CredentialHandler() {
+					@Override
+					public boolean matches(String inputCredentials, String storedCredentials) {
+						return getRealmInternal().getCredentialHandler().matches(inputCredentials, storedCredentials);
+					}
+
+					@Override
+					public String mutate(String inputCredentials) {
+						return getRealmInternal().getCredentialHandler().mutate(inputCredentials);
+					}
+				};
+				context.setAttribute(Globals.CREDENTIAL_HANDLER, safeHandler);
+			}
+
+			// 【【【 这个很重要】】】
+			fireLifecycleEvent(Lifecycle.CONFIGURE_START_EVENT, null);
+
+			// Start our child containers, if not already started
+			for (Container child : findChildren()) {
+				if (!child.getState().isAvailable()) {
+					child.start();
+				}
+			}
+
+			// Start the Valves in our pipeline (including the basic),
+			// if any
+			if (pipeline instanceof Lifecycle) {
+				((Lifecycle) pipeline).start();
+			}
+
+			// Acquire clustered manager
+			Manager contextManager = null;
+			Manager manager = getManager();
+			if (manager == null) {
+				if (log.isDebugEnabled()) {
+					log.debug(sm.getString("standardContext.cluster.noManager", Boolean.valueOf((getCluster() != null)), Boolean.valueOf(distributable)));
+				}
+				if ( (getCluster() != null) && distributable) {
+					try {
+						contextManager = getCluster().createManager(getName());
+					} catch (Exception ex) {
+						log.error("standardContext.clusterFail", ex);
+						ok = false;
+					}
+				} else {
+					contextManager = new StandardManager();
+				}
+			}
+
+			if (contextManager != null) {
+				if (log.isDebugEnabled()) {
+					log.debug(sm.getString("standardContext.manager", contextManager.getClass().getName()));
+				}
+				setManager(contextManager);
+			}
+
+			if (manager!=null && (getCluster() != null) && distributable) {
+				getCluster().registerManager(manager);
+			}
+		}
+
+		if (!getConfigured()) {
+			log.error(sm.getString("standardContext.configurationFail"));
+			ok = false;
+		}
+
+		if (ok)
+			getServletContext().setAttribute(Globals.RESOURCES_ATTR, getResources());
+
+		if (ok ) {
+			if (getInstanceManager() == null) {
+				javax.naming.Context context = null;
+				if (isUseNaming() && getNamingContextListener() != null) {
+					context = getNamingContextListener().getEnvContext();
+				}
+				Map<String, Map<String, String>> injectionMap = buildInjectionMap(getIgnoreAnnotations() ? new NamingResourcesImpl(): getNamingResources());
+				setInstanceManager(new DefaultInstanceManager(context, injectionMap, this, this.getClass().getClassLoader()));
+			}
+			getServletContext().setAttribute(InstanceManager.class.getName(), getInstanceManager());
+			InstanceManagerBindings.bind(getLoader().getClassLoader(), getInstanceManager());
+		}
+
+		if (ok) {
+			getServletContext().setAttribute(JarScanner.class.getName(), getJarScanner());
+		}
+
+		mergeParameters();
+
+		for (Map.Entry<ServletContainerInitializer, Set<Class<?>>> entry :
+			initializers.entrySet()) {
+			try {
+				entry.getKey().onStartup(entry.getValue(), getServletContext());
+			} catch (ServletException e) {
+				log.error(sm.getString("standardContext.sciFail"), e);
+				ok = false;
+				break;
+			}
+		}
+
+		if (ok) {
+			if (!listenerStart()) {
+				log.error(sm.getString("standardContext.listenerFail"));
+				ok = false;
+			}
+		}
+		
+		if (ok) {
+			checkConstraintsForUncoveredMethods(findConstraints());
+		}
+
+		try {
+			Manager manager = getManager();
+			if (manager instanceof Lifecycle) {
+				((Lifecycle) manager).start();
+			}
+		} catch(Exception e) {
+			log.error(sm.getString("standardContext.managerFail"), e);
+			ok = false;
+		}
+
+		if (ok) {
+			if (!filterStart()) {
+				log.error(sm.getString("standardContext.filterFail"));
+				ok = false;
+			}
+		}
+
+		if (ok) {
+			if (!loadOnStartup(findChildren())){
+				log.error(sm.getString("standardContext.servletFail"));
+				ok = false;
+			}
+		}
+
+		super.threadStart();
+	} finally {
+		unbindThread(oldCCL);
+	}
+
+	if (ok) {
+		if (log.isDebugEnabled())
+			log.debug("Starting completed");
+	} else {
+		log.error(sm.getString("standardContext.startFailed", getName()));
+	}
+
+	startTime=System.currentTimeMillis();
+	
+	if (ok && (this.getObjectName() != null)) {
+		Notification notification = new Notification("j2ee.state.running", this.getObjectName(), sequenceNumber.getAndIncrement());
+		broadcaster.sendNotification(notification);
+	}
+
+	getResources().gc();
+
+	// Reinitializing if something went wrong
+	if (!ok) {
+		setState(LifecycleState.FAILED);
+	} else {
+		setState(LifecycleState.STARTING);
+	}
+}
+
+/**
+ *
+ */
+location：LifecycleBase
+protected void fireLifecycleEvent(String type, Object data) {
+	// Type：Configure_start
+	LifecycleEvent event = new LifecycleEvent(this, type, data);
+	
+	// 这个监听器为ContextConfig。
+	for (LifecycleListener listener : lifecycleListeners) {
+		listener.lifecycleEvent(event);
+	}
+}
+
+/**
+ *
+ */
+location：LifecycleBase
+public void lifecycleEvent(LifecycleEvent event) {
+
+	try {
+		context = (Context) event.getLifecycle();
+	} catch (ClassCastException e) {
+		log.error(sm.getString("contextConfig.cce", event.getLifecycle()), e);
+		return;
+	}
+
+	if (event.getType().equals(Lifecycle.CONFIGURE_START_EVENT)) {
+		configureStart();
+	} else if (event.getType().equals(Lifecycle.BEFORE_START_EVENT)) {
+		beforeStart();
+	} else if (event.getType().equals(Lifecycle.AFTER_START_EVENT)) {
+		if (originalDocBase != null) {
+			context.setDocBase(originalDocBase);
+		}
+	} else if (event.getType().equals(Lifecycle.CONFIGURE_STOP_EVENT)) {
+		configureStop();
+	} else if (event.getType().equals(Lifecycle.AFTER_INIT_EVENT)) {
+		init();
+	} else if (event.getType().equals(Lifecycle.AFTER_DESTROY_EVENT)) {
+		destroy();
+	}
+}
+
+/**
+ *
+ */
+location：ContextConfig
+protected synchronized void configureStart() {
+	if (log.isDebugEnabled()) {
+		log.debug(sm.getString("contextConfig.start"));
+	}
+
+	if (log.isDebugEnabled()) {
+		log.debug(sm.getString("contextConfig.xmlSettings", context.getName(), Boolean.valueOf(context.getXmlValidation()), Boolean.valueOf(context.getXmlNamespaceAware())));
+	}
+
+	webConfig();
+
+	if (!context.getIgnoreAnnotations()) {
+		applicationAnnotationsConfig();
+	}
+	if (ok) {
+		validateSecurityRoles();
+	}
+
+	if (ok) {
+		authenticatorConfig();
+	}
+
+	if (log.isDebugEnabled()) {
+		log.debug("Pipeline Configuration:");
+		Pipeline pipeline = context.getPipeline();
+		Valve valves[] = null;
+		if (pipeline != null) {
+			valves = pipeline.getValves();
+		}
+		if (valves != null) {
+			for (int i = 0; i < valves.length; i++) {
+				log.debug("  " + valves[i].getClass().getName());
+			}
+		}
+		log.debug("======================");
+	}
+
+	if (ok) {
+		context.setConfigured(true);
+	} else {
+		log.error(sm.getString("contextConfig.unavailable"));
+		context.setConfigured(false);
+	}
+
+}
+
+
+/**
+ *
+ */
+location：ContextConfig
+protected void webConfig() {
+	
+	WebXmlParser webXmlParser = new WebXmlParser(context.getXmlNamespaceAware(), context.getXmlValidation(), context.getXmlBlockExternal());
+
+	Set<WebXml> defaults = new HashSet<>();
+	defaults.add(getDefaultWebXmlFragment(webXmlParser));
+
+	WebXml webXml = createWebXml();
+
+	// 获取Web.xml文件。
+	InputSource contextWebXml = getContextWebXmlSource();
+	
+	if (!webXmlParser.parseWebXml(contextWebXml, webXml, false)) {
+		ok = false;
+	}
+
+	ServletContext sContext = context.getServletContext();
+
+	Map<String,WebXml> fragments = processJarsForWebFragments(webXml, webXmlParser);
+
+	Set<WebXml> orderedFragments = null;
+	orderedFragments = WebXml.orderWebFragments(webXml, fragments, sContext);
+
+	if (ok) {
+		processServletContainerInitializers();
+	}
+
+	if  (!webXml.isMetadataComplete() || typeInitializerMap.size() > 0) {
+		processClasses(webXml, orderedFragments);
+	}
+
+	if (!webXml.isMetadataComplete()) {
+		if (ok) {
+			ok = webXml.merge(orderedFragments);
+		}
+
+		webXml.merge(defaults);
+
+		if (ok) {
+			convertJsps(webXml);
+		}
+
+		if (ok) {
+			configureContext(webXml);
+		}
+	} else {
+		webXml.merge(defaults);
+		convertJsps(webXml);
+		configureContext(webXml);
+	}
+
+	if (context.getLogEffectiveWebXml()) {
+		log.info("web.xml:\n" + webXml.toXml());
+	}
+
+	if (ok) {
+		Set<WebXml> resourceJars = new LinkedHashSet<>();
+		for (WebXml fragment : orderedFragments) {
+			resourceJars.add(fragment);
+		}
+		for (WebXml fragment : fragments.values()) {
+			if (!resourceJars.contains(fragment)) {
+				resourceJars.add(fragment);
+			}
+		}
+		processResourceJARs(resourceJars);
+	}
+
+	if (ok) {
+		for (Map.Entry<ServletContainerInitializer, Set<Class<?>>> entry : initializerClassMap.entrySet()) {
+			if (entry.getValue().isEmpty()) {
+				context.addServletContainerInitializer(entry.getKey(), null);
+			} else {
+				context.addServletContainerInitializer(entry.getKey(), entry.getValue());
+			}
+		}
+	}
+}
+
+/**
+ * 
+ */
+location：WebXmlParser
+public WebXmlParser(boolean namespaceAware, boolean validation, boolean blockExternal) {
+	webRuleSet = new WebRuleSet(false);
+	webDigester = DigesterFactory.newDigester(validation, namespaceAware, webRuleSet, blockExternal);
+	webDigester.getParser();
+
+	webFragmentRuleSet = new WebRuleSet(true);
+	webFragmentDigester = DigesterFactory.newDigester(validation, namespaceAware, webFragmentRuleSet, blockExternal);
+	webFragmentDigester.getParser();
+}
+
+/**
+ * 
+ */
+location：ContextConfig
+protected Map<String,WebXml> processJarsForWebFragments(WebXml application, WebXmlParser webXmlParser) {
+
+	JarScanner jarScanner = context.getJarScanner();
+	boolean delegate = false;
+	if (context instanceof StandardContext) {
+		delegate = ((StandardContext) context).getDelegate();
+	}
+	boolean parseRequired = true;
+	Set<String> absoluteOrder = application.getAbsoluteOrdering();
+	if (absoluteOrder != null && absoluteOrder.isEmpty() && !context.getXmlValidation()) {
+		parseRequired = false;
+	}
+	FragmentJarScannerCallback callback = new FragmentJarScannerCallback(webXmlParser, delegate, parseRequired);
+
+	jarScanner.scan(JarScanType.PLUGGABILITY, context.getServletContext(), callback);
+
+	if (!callback.isOk()) {
+		ok = false;
+	}
+	return callback.getFragments();
+}
+
+/**
+ * 
+ */
+location：ContextConfig
+protected void processClasses(WebXml webXml, Set<WebXml> orderedFragments) {
+	Map<String, JavaClassCacheEntry> javaClassCache = new HashMap<>();
+
+	if (ok) {
+		WebResource[] webResources = context.getResources().listResources("/WEB-INF/classes");
+
+		for (WebResource webResource : webResources) {
+			if ("META-INF".equals(webResource.getName())) {
+				continue;
+			}
+			processAnnotationsWebResource(webResource, webXml, webXml.isMetadataComplete(), javaClassCache);
+		}
+	}
+
+	if (ok) {
+		processAnnotations(orderedFragments, webXml.isMetadataComplete(), javaClassCache);
+	}
+
+	javaClassCache.clear();
+}
+
+private void configureContext(WebXml webxml) {
+	context.setPublicId(webxml.getPublicId());
+
+	context.setEffectiveMajorVersion(webxml.getMajorVersion());
+	context.setEffectiveMinorVersion(webxml.getMinorVersion());
+
+	for (Entry<String, String> entry : webxml.getContextParams().entrySet()) {
+		context.addParameter(entry.getKey(), entry.getValue());
+	}
+	context.setDenyUncoveredHttpMethods(webxml.getDenyUncoveredHttpMethods());
+	context.setDisplayName(webxml.getDisplayName());
+	context.setDistributable(webxml.isDistributable());
+	
+	for (ContextLocalEjb ejbLocalRef : webxml.getEjbLocalRefs().values()) {
+		context.getNamingResources().addLocalEjb(ejbLocalRef);
+	}
+	
+	for (ContextEjb ejbRef : webxml.getEjbRefs().values()) {
+		context.getNamingResources().addEjb(ejbRef);
+	}
+	
+	for (ContextEnvironment environment : webxml.getEnvEntries().values()) {
+		context.getNamingResources().addEnvironment(environment);
+	}
+	
+	for (ErrorPage errorPage : webxml.getErrorPages().values()) {
+		context.addErrorPage(errorPage);
+	}
+	
+	for (FilterDef filter : webxml.getFilters().values()) {
+		if (filter.getAsyncSupported() == null) {
+			filter.setAsyncSupported("false");
+		}
+		context.addFilterDef(filter);
+	}
+	
+	for (FilterMap filterMap : webxml.getFilterMappings()) {
+		context.addFilterMap(filterMap);
+	}
+	
+	context.setJspConfigDescriptor(webxml.getJspConfigDescriptor());
+	for (String listener : webxml.getListeners()) {
+		context.addApplicationListener(listener);
+	}
+	
+	for (Entry<String, String> entry : webxml.getLocaleEncodingMappings().entrySet()) {
+		context.addLocaleEncodingMappingParameter(entry.getKey(), entry.getValue());
+	}
+	
+	if (webxml.getLoginConfig() != null) {
+		context.setLoginConfig(webxml.getLoginConfig());
+	}
+	for (MessageDestinationRef mdr : webxml.getMessageDestinationRefs().values()) {
+		context.getNamingResources().addMessageDestinationRef(mdr);
+	}
+
+	context.setIgnoreAnnotations(webxml.isMetadataComplete());
+	for (Entry<String, String> entry : webxml.getMimeMappings().entrySet()) {
+		context.addMimeMapping(entry.getKey(), entry.getValue());
+	}
+	
+	for (ContextResourceEnvRef resource : webxml.getResourceEnvRefs().values()) {
+		context.getNamingResources().addResourceEnvRef(resource);
+	}
+	for (ContextResource resource : webxml.getResourceRefs().values()) {
+		context.getNamingResources().addResource(resource);
+	}
+	boolean allAuthenticatedUsersIsAppRole = webxml.getSecurityRoles().contains(SecurityConstraint.ROLE_ALL_AUTHENTICATED_USERS);
+	for (SecurityConstraint constraint : webxml.getSecurityConstraints()) {
+		if (allAuthenticatedUsersIsAppRole) {
+			constraint.treatAllAuthenticatedUsersAsApplicationRole();
+		}
+		context.addConstraint(constraint);
+	}
+	for (String role : webxml.getSecurityRoles()) {
+		context.addSecurityRole(role);
+	}
+	for (ContextService service : webxml.getServiceRefs().values()) {
+		context.getNamingResources().addService(service);
+	}
+	for (ServletDef servlet : webxml.getServlets().values()) {
+		Wrapper wrapper = context.createWrapper();
+
+		if (servlet.getLoadOnStartup() != null) {
+			wrapper.setLoadOnStartup(servlet.getLoadOnStartup().intValue());
+		}
+		
+		if (servlet.getEnabled() != null) {
+			wrapper.setEnabled(servlet.getEnabled().booleanValue());
+		}
+		
+		wrapper.setName(servlet.getServletName());
+		Map<String,String> params = servlet.getParameterMap();
+		
+		for (Entry<String, String> entry : params.entrySet()) {
+			wrapper.addInitParameter(entry.getKey(), entry.getValue());
+		}
+		
+		wrapper.setRunAs(servlet.getRunAs());
+		Set<SecurityRoleRef> roleRefs = servlet.getSecurityRoleRefs();
+		
+		for (SecurityRoleRef roleRef : roleRefs) {
+			wrapper.addSecurityReference(
+					roleRef.getName(), roleRef.getLink());
+		}
+		
+		wrapper.setServletClass(servlet.getServletClass());
+		MultipartDef multipartdef = servlet.getMultipartDef();
+		
+		if (multipartdef != null) {
+			if (multipartdef.getMaxFileSize() != null && multipartdef.getMaxRequestSize()!= null && multipartdef.getFileSizeThreshold() != null) {
+				wrapper.setMultipartConfigElement(new MultipartConfigElement(multipartdef.getLocation(), Long.parseLong(multipartdef.getMaxFileSize()), 
+						Long.parseLong(multipartdef.getMaxRequestSize()), Integer.parseInt( multipartdef.getFileSizeThreshold())));
+			} else {
+				wrapper.setMultipartConfigElement(new MultipartConfigElement(multipartdef.getLocation()));
+			}
+		}
+		if (servlet.getAsyncSupported() != null) {
+			wrapper.setAsyncSupported(servlet.getAsyncSupported().booleanValue());
+		}
+		wrapper.setOverridable(servlet.isOverridable());
+		
+		【【【Wrapper的操作，包括init、start等操作。】】】
+		context.addChild(wrapper);
+	}
+	for (Entry<String, String> entry : webxml.getServletMappings().entrySet()) {
+		context.addServletMappingDecoded(entry.getKey(), entry.getValue());
+	}
+	SessionConfig sessionConfig = webxml.getSessionConfig();
+	if (sessionConfig != null) {
+		if (sessionConfig.getSessionTimeout() != null) {
+			context.setSessionTimeout(sessionConfig.getSessionTimeout().intValue());
+		}
+		SessionCookieConfig scc = context.getServletContext().getSessionCookieConfig();
+		scc.setName(sessionConfig.getCookieName());
+		scc.setDomain(sessionConfig.getCookieDomain());
+		scc.setPath(sessionConfig.getCookiePath());
+		scc.setComment(sessionConfig.getCookieComment());
+		if (sessionConfig.getCookieHttpOnly() != null) {
+			scc.setHttpOnly(sessionConfig.getCookieHttpOnly().booleanValue());
+		}
+		if (sessionConfig.getCookieSecure() != null) {
+			scc.setSecure(sessionConfig.getCookieSecure().booleanValue());
+		}
+		if (sessionConfig.getCookieMaxAge() != null) {
+			scc.setMaxAge(sessionConfig.getCookieMaxAge().intValue());
+		}
+		if (sessionConfig.getSessionTrackingModes().size() > 0) {
+			context.getServletContext().setSessionTrackingModes(
+					sessionConfig.getSessionTrackingModes());
+		}
+	}
+
+	for (String welcomeFile : webxml.getWelcomeFiles()) {
+		if (welcomeFile != null && welcomeFile.length() > 0) {
+			context.addWelcomeFile(welcomeFile);
+		}
+	}
+
+	for (JspPropertyGroup jspPropertyGroup : webxml.getJspPropertyGroups()) {
+		String jspServletName = context.findServletMapping("*.jsp");
+		if (jspServletName == null) {
+			jspServletName = "jsp";
+		}
+		if (context.findChild(jspServletName) != null) {
+			for (String urlPattern : jspPropertyGroup.getUrlPatterns()) {
+				context.addServletMappingDecoded(urlPattern, jspServletName, true);
+			}
+		} else {
+			if(log.isDebugEnabled()) {
+				for (String urlPattern : jspPropertyGroup.getUrlPatterns()) {
+					log.debug("Skipping " + urlPattern + " , no servlet " + jspServletName);
+				}
+			}
+		}
+	}
+
+	for (Entry<String, String> entry : webxml.getPostConstructMethods().entrySet()) {
+		context.addPostConstructMethod(entry.getKey(), entry.getValue());
+	}
+
+	for (Entry<String, String> entry : webxml.getPreDestroyMethods().entrySet()) {
+		context.addPreDestroyMethod(entry.getKey(), entry.getValue());
+	}
+}
+
+/**
+ * StandardWrapper启动。
+ */
+location：StandardWrapper
+protected synchronized void startInternal() throws LifecycleException {
+
+	if (this.getObjectName() != null) {
+		Notification notification = new Notification("j2ee.state.starting", this.getObjectName(), sequenceNumber++);
+		broadcaster.sendNotification(notification);
+	}
+
+	super.startInternal();
+
+	setAvailable(0L);
+
+	if (this.getObjectName() != null) {
+		Notification notification = new Notification("j2ee.state.running", this.getObjectName(), sequenceNumber++);
+		broadcaster.sendNotification(notification);
+	}
+
+}
+
+
+/**
+ * 
+ */
+location：HostConfig
+protected void deployDirectories(File appBase, String[] files) {
+	if (files == null) {
+		return;
+	}
+
+	ExecutorService es = host.getStartStopExecutor();
+	List<Future<?>> results = new ArrayList<>();
+
+	for (int i = 0; i < files.length; i++) {
+
+		if (files[i].equalsIgnoreCase("META-INF")) {
+			continue;
+		}
+		
+		if (files[i].equalsIgnoreCase("WEB-INF")) {
+			continue;
+		}
+		
+		File dir = new File(appBase, files[i]);
+		if (dir.isDirectory()) {
+			ContextName cn = new ContextName(files[i], false);
+
+			if (isServiced(cn.getName()) || deploymentExists(cn.getName())) {
+				continue;
+			}
+
+			results.add(es.submit(new DeployDirectory(this, cn, dir)));
+		}
+	}
+
+	for (Future<?> result : results) {
+		try {
+			result.get();
+		} catch (Exception e) {
+			log.error(sm.getString("hostConfig.deployDir.threaded.error"), e);
+		}
+	}
+}
+
+
+/**
+ * HostConfig的内部类。
+ */
+location：HostConfig
+private static class DeployDirectory implements Runnable {
+
+	private HostConfig config;
+	private ContextName cn;
+	private File dir;
+
+	public DeployDirectory(HostConfig config, ContextName cn, File dir) {
+		this.config = config;
+		this.cn = cn;
+		this.dir = dir;
+	}
+
+	@Override
+	public void run() {
+		config.deployDirectory(cn, dir);
+	}
+}
+
+/**
+ * 
+ */
+location：HostConfig
+protected void deployDirectory(ContextName cn, File dir) {
+
+	long startTime = 0;
+	
+	if( log.isInfoEnabled() ) {
+		startTime = System.currentTimeMillis();
+		log.info(sm.getString("hostConfig.deployDir", dir.getAbsolutePath()));
+	}
+
+	Context context = null;
+	File xml = new File(dir, Constants.ApplicationContextXml);
+	File xmlCopy = new File(host.getConfigBaseFile(), cn.getBaseName() + ".xml");
+
+
+	DeployedApplication deployedApp;
+	boolean copyThisXml = isCopyXML();
+	boolean deployThisXML = isDeployThisXML(dir, cn);
+
+	try {
+		if (deployThisXML && xml.exists()) {
+			synchronized (digesterLock) {
+				try {
+					context = (Context) digester.parse(xml);
+				} catch (Exception e) {
+					log.error(sm.getString(
+							"hostConfig.deployDescriptor.error",
+							xml), e);
+					context = new FailedContext();
+				} finally {
+					digester.reset();
+					if (context == null) {
+						context = new FailedContext();
+					}
+				}
+			}
+
+			if (copyThisXml == false && context instanceof StandardContext) {
+				// Host is using default value. Context may override it.
+				copyThisXml = ((StandardContext) context).getCopyXML();
+			}
+
+			if (copyThisXml) {
+				Files.copy(xml.toPath(), xmlCopy.toPath());
+				context.setConfigFile(xmlCopy.toURI().toURL());
+			} else {
+				context.setConfigFile(xml.toURI().toURL());
+			}
+		} else if (!deployThisXML && xml.exists()) {
+			// Block deployment as META-INF/context.xml may contain security
+			// configuration necessary for a secure deployment.
+			log.error(sm.getString("hostConfig.deployDescriptor.blocked",
+					cn.getPath(), xml, xmlCopy));
+			context = new FailedContext();
+		} else {
+			context = (Context) Class.forName(contextClass).getConstructor().newInstance();
+		}
+
+		Class<?> clazz = Class.forName(host.getConfigClass());
+		LifecycleListener listener = (LifecycleListener) clazz.getConstructor().newInstance();
+		context.addLifecycleListener(listener);
+
+		context.setName(cn.getName());
+		context.setPath(cn.getPath());
+		context.setWebappVersion(cn.getVersion());
+		context.setDocBase(cn.getBaseName());
+		host.addChild(context);
+	} catch (Throwable t) {
+		ExceptionUtils.handleThrowable(t);
+		log.error(sm.getString("hostConfig.deployDir.error",
+				dir.getAbsolutePath()), t);
+	} finally {
+		deployedApp = new DeployedApplication(cn.getName(),
+				xml.exists() && deployThisXML && copyThisXml);
+
+		// Fake re-deploy resource to detect if a WAR is added at a later
+		// point
+		deployedApp.redeployResources.put(dir.getAbsolutePath() + ".war",
+				Long.valueOf(0));
+		deployedApp.redeployResources.put(dir.getAbsolutePath(),
+				Long.valueOf(dir.lastModified()));
+		if (deployThisXML && xml.exists()) {
+			if (copyThisXml) {
+				deployedApp.redeployResources.put(
+						xmlCopy.getAbsolutePath(),
+						Long.valueOf(xmlCopy.lastModified()));
+			} else {
+				deployedApp.redeployResources.put(
+						xml.getAbsolutePath(),
+						Long.valueOf(xml.lastModified()));
+				// Fake re-deploy resource to detect if a context.xml file is
+				// added at a later point
+				deployedApp.redeployResources.put(
+						xmlCopy.getAbsolutePath(),
+						Long.valueOf(0));
+			}
+		} else {
+			// Fake re-deploy resource to detect if a context.xml file is
+			// added at a later point
+			deployedApp.redeployResources.put(
+					xmlCopy.getAbsolutePath(),
+					Long.valueOf(0));
+			if (!xml.exists()) {
+				deployedApp.redeployResources.put(
+						xml.getAbsolutePath(),
+						Long.valueOf(0));
+			}
+		}
+		addWatchedResources(deployedApp, dir.getAbsolutePath(), context);
+		// Add the global redeploy resources (which are never deleted) at
+		// the end so they don't interfere with the deletion process
+		addGlobalRedeployResources(deployedApp);
+	}
+
+	deployed.put(cn.getName(), deployedApp);
+
+	if( log.isInfoEnabled() ) {
+		log.info(sm.getString("hostConfig.deployDir.finished", dir.getAbsolutePath(), Long.valueOf(System.currentTimeMillis() - startTime)));
+	}
+}
+
+
+protected void threadStart() {
+
+	if (thread != null) {
+		return;
+	}
+	
+	if (backgroundProcessorDelay <= 0) {
+		return;
+	}
+
+	threadDone = false;
+	String threadName = "ContainerBackgroundProcessor[" + toString() + "]";
+	thread = new Thread(new ContainerBackgroundProcessor(), threadName);
+	thread.setDaemon(true);
+	thread.start();
+
+}

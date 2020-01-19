@@ -120,7 +120,7 @@ public final synchronized void start() throws LifecycleException {
 
 ##########################################################    Server启动    ##########################################
 /**
- * 
+ * StandardServer
  */
 location：StandardServer
 protected void startInternal() throws LifecycleException {
@@ -130,6 +130,7 @@ protected void startInternal() throws LifecycleException {
 	// 设置状态。
 	setState(LifecycleState.STARTING);
 
+	// 启动globalNamingResources  【【这个一直报错，原因不明】】
 	globalNamingResources.start();
 
 	synchronized (servicesLock) {
@@ -139,50 +140,6 @@ protected void startInternal() throws LifecycleException {
 	}
 }
 
-/**
- *
- */
-location：LifeCycleBase
-public final synchronized void start() throws LifecycleException {
-
-	if (LifecycleState.STARTING_PREP.equals(state) || LifecycleState.STARTING.equals(state) || LifecycleState.STARTED.equals(state)) {
-
-		if (log.isDebugEnabled()) {
-			Exception e = new LifecycleException();
-			log.debug(sm.getString("lifecycleBase.alreadyStarted", toString()), e);
-		} else if (log.isInfoEnabled()) {
-			log.info(sm.getString("lifecycleBase.alreadyStarted", toString()));
-		}
-
-		return;
-	}
-
-	if (state.equals(LifecycleState.NEW)) {
-		init();
-	} else if (state.equals(LifecycleState.FAILED)) {
-		stop();
-	} else if (!state.equals(LifecycleState.INITIALIZED) && !state.equals(LifecycleState.STOPPED)) {
-		invalidTransition(Lifecycle.BEFORE_START_EVENT);
-	}
-
-	try {
-		setStateInternal(LifecycleState.STARTING_PREP, null, false);
-		
-		startInternal();
-		
-		if (state.equals(LifecycleState.FAILED)) {
-			stop();
-		} else if (!state.equals(LifecycleState.STARTING)) {
-			invalidTransition(Lifecycle.AFTER_START_EVENT);
-		} else {
-			setStateInternal(LifecycleState.STARTED, null, false);
-		}
-	} catch (Throwable t) {
-		ExceptionUtils.handleThrowable(t);
-		setStateInternal(LifecycleState.FAILED, null, false);
-		throw new LifecycleException(sm.getString("lifecycleBase.startFail", toString()), t);
-	}
-}
 
 ##########################################################    Server\globalNamingResources启动    ##########################################
 /**
@@ -221,7 +178,8 @@ protected void initInternal() throws LifecycleException {
 
 ##########################################################    Server\Service启动    ##########################################
 /**
- *
+ * StandardService中比较重要的几个成员变量：Server server；Connector connectors[]；Engine engine；ArrayList<Executor> executors；
+ * 
  */
 location：StandardService
 protected void startInternal() throws LifecycleException {
@@ -287,19 +245,28 @@ protected synchronized void startInternal() throws LifecycleException {
 	logger = null;
 	getLogger();
 	
+	// 启动Cluster。
 	Cluster cluster = getClusterInternal();
 	if (cluster instanceof Lifecycle) {
 		((Lifecycle) cluster).start();
 	}
 	
+	// 启动Realm.
 	Realm realm = getRealmInternal();
 	if (realm instanceof Lifecycle) {
 		((Lifecycle) realm).start();
 	}
 
+	// 获取其子容器。
 	Container children[] = findChildren();
+	
 	List<Future<Void>> results = new ArrayList<>();
+	
+	// 把任务提交给线程池，并获取一个执行结果Future。
 	for (int i = 0; i < children.length; i++) {
+		
+		// 线程池会调用StartChild的call方法，同时在StartChild的call方法中会调用children的start()方法。
+		// 所以调用children的start()方法是一个异步过程。【【【这里是Host启动过程。】】】
 		results.add(startStopExecutor.submit(new StartChild(children[i])));
 	}
 
@@ -331,15 +298,69 @@ protected synchronized void startInternal() throws LifecycleException {
 	threadStart();
 }
 
-##########################################################    Server\Service\engine\Realm 启动    ##########################################
+
+/**
+ * 其是StandardEngin实例。
+ */
+location：ContainerBase
+public Container[] findChildren() {
+
+	// HashMap<String, Container> children = new HashMap<>();  这里是在StandardEngin实例下。其key为：defaultHost属性对应的值。
+	// children：就是就是实例的子元素。
+	synchronized (children) {
+		Container results[] = new Container[children.size()];
+		return children.values().toArray(results);
+	}
+}
+
+/**
+ * ContainerBase的一个内部类。
+ */
+location：ContainerBase
+private static class StartChild implements Callable<Void> {
+
+	private Container child;
+
+	public StartChild(Container child) {
+		this.child = child;
+	}
+
+	@Override
+	public Void call() throws LifecycleException {
+		child.start();
+		return null;
+	}
+}
+
+##########################################################    Server\Service\engine\cluster启动    ##########################################
 /**
  *
  */
+location：SimpleTcpCluster
+protected void initInternal() throws LifecycleException {
+	super.initInternal();
+	if (clusterDeployer != null) {
+		StringBuilder name = new StringBuilder("type=Cluster");
+		Container container = getContainer();
+		if (container != null) {
+			name.append(container.getMBeanKeyProperties());
+		}
+		name.append(",component=Deployer");
+		
+		onameClusterDeployer = register(clusterDeployer, name.toString());
+	}
+}
+
+##########################################################    Server\Service\engine\Realm 启动    ##########################################
+/**
+ * LockoutRealm extends CombinedRealm
+ */
 location：LockoutRealm
 protected void startInternal() throws LifecycleException {
-	failedUsers = new LinkedHashMap<String, LockRecord>(cacheSize, 0.75f,
-			true) {
+	// 就是创建一个LinkedHashMap。
+	failedUsers = new LinkedHashMap<String, LockRecord>(cacheSize, 0.75f, true) {
 		private static final long serialVersionUID = 1L;
+		
 		@Override
 		protected boolean removeEldestEntry(Map.Entry<String, LockRecord> eldest) {
 			if (size() > cacheSize) {
@@ -355,6 +376,42 @@ protected void startInternal() throws LifecycleException {
 	};
 
 	super.startInternal();
+}
+
+/**
+ * 
+ */
+location：LockoutRealm
+protected void startInternal() throws LifecycleException {
+
+	Iterator<Realm> iter = realms.iterator();
+
+	while (iter.hasNext()) {
+		Realm realm = iter.next();
+		
+		// 循环启动Realm下面的Realm
+		if (realm instanceof Lifecycle) {
+			try {
+				((Lifecycle) realm).start();
+			} catch (LifecycleException e) {
+				iter.remove();
+				log.error(sm.getString("combinedRealm.realmStartFail", realm.getClass().getName()), e);
+			}
+		}
+	}
+	super.startInternal();
+}
+
+/**
+ * 
+ */
+location：RealmBase
+protected void startInternal() throws LifecycleException {
+	if (credentialHandler == null) {
+		credentialHandler = new MessageDigestCredentialHandler();
+	}
+
+	setState(LifecycleState.STARTING);
 }
 
 ##########################################################    Server\Service\mapperListener启动    ##########################################
@@ -437,6 +494,7 @@ public void start() throws Exception {
  */
 location：AbstractEndPoint
 public final void start() throws Exception {
+	// 如果没有启动，进行启动操作。
 	if (bindState == BindState.UNBOUND) {
 		bind();
 		bindState = BindState.BOUND_ON_START;
@@ -445,2276 +503,280 @@ public final void start() throws Exception {
 }
 
 
+##########################################################    Server\Service\engine\Host启动    ##########################################
 
-
-
-################################################################################################################################################
-#########################################################    监听TCP/IP连接，并处理请求   ######################################################
-################################################################################################################################################
-NioEndpoint.Acceptor：线程名称为：-Acceptor-；实现了Runnable接口，无限循环，监听TCP/IP连接。当监听到连接以后，会处理指定的连接，具体是获取到一个
-	可用Poller，并把socket注册到Poller中的队列上。
-NioEndPoint.Poller：线程名称为：-ClientPoller-；实现了Runnable接口。当Acceptor线程调用Poller的register()方法时，会把socket封装成的PollerEvent对象，
-	并添加到Poller中的PollerEvent队列中。Poller的run()方法是一个无限循环操作，获取Poller内部队列中的PollerEvent元素，并调用PollerEvent对象的run方法。
-	然后调用processKey(..)方法处理连接[使用工作线程处理连接]。
-
+		Host是异步启动的。而且Host还没有初始化。
 
 /**
- * 创建服务端，打开socket连接。
+ * 其是StandardHost实例。
  */
-location：NioEndPoint
-public void bind() throws Exception {
-
-	if (!getUseInheritedChannel()) {
-		/**
-		 * 打开一个serverSocke。
-		 */
-		serverSock = ServerSocketChannel.open();
-		socketProperties.setProperties(serverSock.socket());
-		
-		// 创建地址。
-		InetSocketAddress addr = (getAddress()!=null?new InetSocketAddress(getAddress(),getPort()):new InetSocketAddress(getPort()));
-		
-		// 绑定地址，socket运行。
-		serverSock.socket().bind(addr, getAcceptCount());
-	} else {
-		Channel ic = System.inheritedChannel();
-		
-		if (ic instanceof ServerSocketChannel) {
-			serverSock = (ServerSocketChannel) ic;
-		}
-		if (serverSock == null) {
-			throw new IllegalArgumentException(sm.getString("endpoint.init.bind.inherited"));
-		}
-	}
+location：ContainerBase
+protected void initInternal() throws LifecycleException {
+	BlockingQueue<Runnable> startStopQueue = new LinkedBlockingQueue<>();
 	
-	// 设置ServerSocket为非堵塞模式。
-	serverSock.configureBlocking(true); 
-
-	if (acceptorThreadCount == 0) {
-		acceptorThreadCount = 1;
-	}
-	
-	if (pollerThreadCount <= 0) {
-		pollerThreadCount = 1;
-	}
-	
-	setStopLatch(new CountDownLatch(pollerThreadCount));
-
-	// 初始化SSL。
-	initialiseSsl();
-
-	selectorPool.open();
-}
-
-/**
- * 开启NioEndPoint：创建工作线程；开启Poller线程；开启接收者请求线程。
- * NioEndPoint.Poller：实现了Runnable接口，
- *		run():将套接字添加到轮询器的后台线程，检查轮询器是否触发了事件，并在事件发生时将关联的套接字移交给适当的处理器。
- */
-location：NioEndPoint
-public void startInternal() throws Exception {
-
-	if (!running) {
-		running = true;
-		paused = false;
-
-		processorCache = new SynchronizedStack<>(SynchronizedStack.DEFAULT_SIZE, socketProperties.getProcessorCache());
-		eventCache = new SynchronizedStack<>(SynchronizedStack.DEFAULT_SIZE, socketProperties.getEventCache());
-		nioChannels = new SynchronizedStack<>(SynchronizedStack.DEFAULT_SIZE, socketProperties.getBufferPool());
-
-		// 创建工作线程集合。
-		if (getExecutor() == null) {
-			createExecutor();
-		}
-
-		initializeConnectionLatch();
-
-		// 开启Poller线程
-		pollers = new Poller[getPollerThreadCount()];
-		
-		for (int i=0; i < pollers.length; i++) {
-			pollers[i] = new Poller();
-			Thread pollerThread = new Thread(pollers[i], getName() + "-ClientPoller-"+i);
-			pollerThread.setPriority(threadPriority);
-			pollerThread.setDaemon(true);
-			pollerThread.start();
-		}
-
-		// 开启接收者请求线程
-		startAcceptorThreads();
-	}
-}
-
-/**
- * 创建工作线程集合。
- */
-location：AbstractEndPoint
-public void createExecutor() {
-	internalExecutor = true;
-	TaskQueue taskqueue = new TaskQueue();
-	
-	TaskThreadFactory tf = new TaskThreadFactory(getName() + "-exec-", daemon, getThreadPriority());
-	
-	executor = new ThreadPoolExecutor(getMinSpareThreads(), getMaxThreads(), 60, TimeUnit.SECONDS,taskqueue, tf);
-	taskqueue.setParent((ThreadPoolExecutor) executor);
-}
-
-/**
- * 启动所有的核心线程。
- */
-location：AbstractEndPoint
-public ThreadPoolExecutor(int corePoolSize, int maximumPoolSize, long keepAliveTime, TimeUnit unit, BlockingQueue<Runnable> workQueue, ThreadFactory threadFactory) {
-	super(corePoolSize, maximumPoolSize, keepAliveTime, unit, workQueue, threadFactory, new RejectHandler());
-	prestartAllCoreThreads();
-}
-
-/**
- * 开启接收者线程。
- */
-location：AbstractEndPoint
-protected final void startAcceptorThreads() {
-	int count = getAcceptorThreadCount();
-	acceptors = new Acceptor[count];
-
-	for (int i = 0; i < count; i++) {
-		acceptors[i] = createAcceptor();
-		String threadName = getName() + "-Acceptor-" + i;
-		acceptors[i].setThreadName(threadName);
-		Thread t = new Thread(acceptors[i], threadName);
-		t.setPriority(getAcceptorThreadPriority());
-		t.setDaemon(getDaemon());
-		t.start();
-	}
-}
-
-/**
- * 创建接收者。
- * Acceptor：实现了Runnable接口，
- * 		run()：监听传入的TCP/IP连接并将其交给适当的处理器的后台线程。
- */ 
-location：NioEndpoint.Acceptor
-protected AbstractEndpoint.Acceptor createAcceptor() {
-	return new Acceptor();
-}
-
-/**
- * 接收者，实现一个Runnable。
- */
-location：AbstractEndpoint.Acceptor
-public abstract static class Acceptor implements Runnable {
-	public enum AcceptorState {
-		NEW, RUNNING, PAUSED, ENDED
-	}
-
-	protected volatile AcceptorState state = AcceptorState.NEW;
-	
-	public final AcceptorState getState() {
-		return state;
-	}
-
-	private String threadName;
-	
-	protected final void setThreadName(final String threadName) {
-		this.threadName = threadName;
-	}
-	protected final String getThreadName() {
-		return threadName;
-	}
-}
-
-/**
- * 具体的接收者的run方法。
- */
-location：NioEndpoint.Acceptor
-protected class Acceptor extends AbstractEndpoint.Acceptor {
-
-	public void run() {
-
-		int errorDelay = 0;
-
-		// 循环操作，直到收到关闭命令
-		while (running) {
-
-			// 运行状态，但是暂停，每隔50ms停一下。
-			while (paused && running) {
-				state = AcceptorState.PAUSED;
-				try {
-					Thread.sleep(50);
-				} catch (InterruptedException e) {
-					
-				}
-			}
-
-			if (!running) {
-				break;
-			}
+	// 创建localhost-startStop-* 线程。
+	startStopExecutor = new ThreadPoolExecutor(
+			getStartStopThreadsInternal(),
+			getStartStopThreadsInternal(), 10, TimeUnit.SECONDS,
+			startStopQueue,
+			new StartStopThreadFactory(getName() + "-startStop-"));
 			
-			state = AcceptorState.RUNNING;
-
-			try {
-				//如果已达到最大连接数，等待。
-				countUpOrAwaitConnection();
-
-				SocketChannel socket = null;
-				
-				try {
-					// 接受来自服务器套接字的下一个传入连接。获取一个请求。
-					socket = serverSock.accept();
-				} catch (IOException ioe) {
-				
-					countDownConnection();
-					if (running) {
-						errorDelay = handleExceptionWithDelay(errorDelay);
-						throw ioe;
-					} else {
-						break;
-					}
-				}
-				
-				// 成功接受，重置错误延迟
-				errorDelay = 0;
-
-				// 配置socket
-				if (running && !paused) {
-				
-					// ###############################################################
-					// 	  如果成功，setSocketOptions()会将套接字移交给适当的处理器
-					// ###############################################################
-					if (!setSocketOptions(socket)) {
-						closeSocket(socket);
-					}
-					
-				} else {
-					closeSocket(socket);
-				}
-			} catch (Throwable t) {
-				ExceptionUtils.handleThrowable(t);
-				log.error(sm.getString("endpoint.accept.fail"), t);
-			}
-		}
-		
-		// 关闭
-		state = AcceptorState.ENDED;
-	}
-	
-}
-
-/**
- * 
- */
-location：NioEndpoint
-protected void countUpOrAwaitConnection() throws InterruptedException {
-	if (maxConnections == -1) { 
-		return;
-	}
-	
-	// 类似一个共享锁。
-	LimitLatch latch = connectionLimitLatch;
-	
-	if (latch != null) { 
-		// 尝试获取锁。
-		latch.countUpOrAwait();
-	}
-}
-
-/**
- * 
- */
-location：NioEndpoint
-protected long countDownConnection() {
-	if (maxConnections==-1) { 
-		return -1;
-	}
-	
-	LimitLatch latch = connectionLimitLatch;
-	if (latch != null) {
-	
-		// 释放锁。
-		long result = latch.countDown();
-		if (result<0) {
-			getLog().warn(sm.getString("endpoint.warn.incorrectConnectionCount"));
-		}
-		
-		return result;
-	} else {
-		return -1;
-	}
-}
-
-/**
- * 处理一个Socket连接。
- */
-location：NioEndPoint
-protected boolean setSocketOptions(SocketChannel socket) {
-
-	try {
-		// 设置为非堵塞模式，
-		socket.configureBlocking(false);
-		
-		// 从通道中获取一个Socket。
-		Socket sock = socket.socket();
-		
-		socketProperties.setProperties(sock);
-
-		NioChannel channel = nioChannels.pop();
-		
-		if (channel == null) {
-			SocketBufferHandler bufhandler = new SocketBufferHandler(socketProperties.getAppReadBufSize(), socketProperties.getAppWriteBufSize(), socketProperties.getDirectBuffer());
-			
-			// 判断是否是SSL
-			if (isSSLEnabled()) {
-				channel = new SecureNioChannel(socket, bufhandler, selectorPool, this);
-			} else {
-				channel = new NioChannel(socket, bufhandler);
-			}
-		} else {
-			channel.setIOChannel(socket);
-			channel.reset();
-		}
-		
-		// 获取一个可用的Poller。
-		getPoller0().register(channel);
-		
-	} catch (Throwable t) {
-		ExceptionUtils.handleThrowable(t);
-		try {
-			log.error("",t);
-		} catch (Throwable tt) {
-			ExceptionUtils.handleThrowable(tt);
-		}
-		
-		return false;
-	}
-	return true;
-}
-
-/**
- * 获取一个可用的Poller。
- */ 
-location：NioEndPoint.Poller
-public Poller getPoller0() {
-	int idx = Math.abs(pollerRotater.incrementAndGet()) % pollers.length;
-	return pollers[idx];
-}
-
-
-/**
- * 把（一个请求）socket包装成一个PollerEvent对象，并把这个PollerEvent对象添加到Poller对象的PollerEvent队列中，Poller实现了Runnable接口，当Poller启动时，
- * 会进入一个无效循环，获取PollerEvent队列中的元素，并处理pollerEvent。
- */ 
-location：NioEndPoint.Poller
-public void register(final NioChannel socket) {
-	socket.setPoller(this);
-	
-	NioSocketWrapper ka = new NioSocketWrapper(socket, NioEndpoint.this);
-	socket.setSocketWrapper(ka);
-	
-	// 设置NioSocketWrapper属性。
-	ka.setPoller(this);
-	ka.setReadTimeout(getSocketProperties().getSoTimeout());
-	ka.setWriteTimeout(getSocketProperties().getSoTimeout());
-	ka.setKeepAliveLeft(NioEndpoint.this.getMaxKeepAliveRequests());
-	ka.setSecure(isSSLEnabled());
-	ka.setReadTimeout(getConnectionTimeout());
-	ka.setWriteTimeout(getConnectionTimeout());
-	
-	// PollerEvent类是实现了Runnable。
-	PollerEvent r = eventCache.pop();
-	
-	ka.interestOps(SelectionKey.OP_READ);
-	
-	if ( r == null) { 
-		r = new PollerEvent(socket, ka, OP_REGISTER);
-	} else { 
-		r.reset(socket, ka, OP_REGISTER);
-	}
-	
-	// 把socket封装成的PollerEvent对象，并添加到Poller中的PollerEvent队列中。
-	addEvent(r);
-}
-
-/**
- * 把socket封装成的PollerEvent对象，并添加到Poller中的PollerEvent队列中。
- */ 
-location：NioEndPoint.Poller
-private void addEvent(PollerEvent event) {
-	// SynchronizedQueue<PollerEvent> events：用于保存PollerEvent。
-	// 向SynchronizedQueue<PollerEvent>队列中添加元素。
-	events.offer(event);
-	if (wakeupCounter.incrementAndGet() == 0) {
-		selector.wakeup();
-	}
-}
-
-
-
-/**
- *
- */
-location：NioEndPoint.Poller
-public void run() {
-
-	while (true) {
-
-		boolean hasEvents = false;
-
-		try {
-			if (!close) {
-				
-				// 判读PollerEvent队列中是否有元素，如果有，执行PollerEvent的run方法，并重置。
-				hasEvents = events();
-				
-				if (wakeupCounter.getAndSet(-1) > 0) {
-					keyCount = selector.selectNow();
-				} else {
-					keyCount = selector.select(selectorTimeout);
-				}
-				wakeupCounter.set(0);
-			}
-			
-			// 如果是关闭状态，执行的操作。
-			if (close) {
-				events();
-				timeout(0, false);
-				try {
-					selector.close();
-				} catch (IOException ioe) {
-					log.error(sm.getString("endpoint.nio.selectorCloseFail"), ioe);
-				}
-				break;
-			}
-			
-		} catch (Throwable x) {
-			ExceptionUtils.handleThrowable(x);
-			log.error("",x);
-			continue;
-		}
-		
-		if (keyCount == 0) {
-			hasEvents = (hasEvents | events());
-		}
-
-		Iterator<SelectionKey> iterator = keyCount > 0 ? selector.selectedKeys().iterator() : null;
-
-		while (iterator != null && iterator.hasNext()) {
-			SelectionKey sk = iterator.next();
-			NioSocketWrapper attachment = (NioSocketWrapper)sk.attachment();
-
-			if (attachment == null) {
-				iterator.remove();
-			} else {
-				iterator.remove();
-				
-				/**
-				 * 非常重要。进行处理连接。
-				 */
-				processKey(sk, attachment);
-			}
-		}
-
-		timeout(keyCount,hasEvents);
-	}
-
-	getStopLatch().countDown();
-}
-
-/**
- * 获取PollerEvent对象，并执行其run()方法。执行完成以后，进行重置操作。
- */
-location：NioEndPoint.Poller
-public boolean events() {
-	boolean result = false;
-	
-	PollerEvent pe = null;
-	
-	// 从栈顶获取一个PollerEvent对象，并执行他。
-	for (int i = 0, size = events.size(); i < size && (pe = events.poll()) != null; i++ ) {
-	
-		result = true;
-		
-		try {
-			pe.run();
-			
-			// 重置PollerEvent
-			pe.reset();
-	
-			// 把重置后的PollerEvent放入缓存中。
-			if (running && !paused) {
-				eventCache.push(pe);
-			}
-			
-		} catch ( Throwable x ) {
-			log.error("",x);
-		}
-	}
-
-	return result;
-}
-
-/**
- *
- */
-location：NioEndPoint.PollerEvent
-public void run() {
-	if (interestOps == OP_REGISTER) {
-		try {
-			socket.getIOChannel().register(socket.getPoller().getSelector(), SelectionKey.OP_READ, socketWrapper);
-		} catch (Exception x) {
-			log.error(sm.getString("endpoint.nio.registerFail"), x);
-		}
-	} else {
-		final SelectionKey key = socket.getIOChannel().keyFor(socket.getPoller().getSelector());
-		try {
-			if (key == null) {
-				socket.socketWrapper.getEndpoint().countDownConnection();
-				((NioSocketWrapper) socket.socketWrapper).closed = true;
-			} else {
-				final NioSocketWrapper socketWrapper = (NioSocketWrapper) key.attachment();
-				
-				if (socketWrapper != null) {
-					int ops = key.interestOps() | interestOps;
-					socketWrapper.interestOps(ops);
-					key.interestOps(ops);
-				} else {
-					socket.getPoller().cancelledKey(key);
-				}
-			}
-		} catch (CancelledKeyException ckx) {
-			try {
-				socket.getPoller().cancelledKey(key);
-			} catch (Exception ignore) {}
-		}
-	}
-}
-
-/**
- * 处理Socket。
- */
-location：NioEndPoint
-protected void processKey(SelectionKey sk, NioSocketWrapper attachment) {
-	try {
-		if (close) {
-			cancelledKey(sk);
-			
-		} else if (sk.isValid() && attachment != null) {
-			if (sk.isReadable() || sk.isWritable() ) {
-				
-				if ( attachment.getSendfileData() != null ) {
-					processSendfile(sk,attachment, false);
-				
-				} else {
-					unreg(sk, attachment, sk.readyOps());
-					boolean closeSocket = false;
-					
-					// 读在写之前。这是NIO处理操作。
-					if (sk.isReadable()) {
-						if (!processSocket(attachment, SocketEvent.OPEN_READ, true)) {
-							closeSocket = true;
-						}
-					}
-					if (!closeSocket && sk.isWritable()) {
-						if (!processSocket(attachment, SocketEvent.OPEN_WRITE, true)) {
-							closeSocket = true;
-						}
-					}
-					if (closeSocket) {
-						cancelledKey(sk);
-					}
-				}
-			}
-		} else {
-			cancelledKey(sk);
-		}
-	} catch ( CancelledKeyException ckx ) {
-		cancelledKey(sk);
-	} catch (Throwable t) {
-		ExceptionUtils.handleThrowable(t);
-		log.error("",t);
-	}
-}
-
-/**
- * SocketProcessorBase实现了Runnable接口。
- * 操作Socket。
- */
-location：AbstractEndPoint
-public boolean processSocket(SocketWrapperBase<S> socketWrapper, SocketEvent event, boolean dispatch) {
-	try {
-		if (socketWrapper == null) {
-			return false;
-		}
-		
-		// SynchronizedStack<SocketProcessorBase<S>> processorCache：
-		// 从栈顶弹出一个元素。
-		SocketProcessorBase<S> sc = processorCache.pop();
-		
-		
-		if (sc == null) {
-			sc = createSocketProcessor(socketWrapper, event);
-		} else {
-			sc.reset(socketWrapper, event);
-		}
-		
-		// 获取线程池。
-		Executor executor = getExecutor();
-		
-		// 判断是通过线程池执行，还是使用当前线程执行。
-		if (dispatch && executor != null) {
-			executor.execute(sc);
-		} else {
-			sc.run();
-		}
-	} catch (RejectedExecutionException ree) {
-		getLog().warn(sm.getString("endpoint.executor.fail", socketWrapper) , ree);
-		return false;
-	} catch (Throwable t) {
-		ExceptionUtils.handleThrowable(t);
-		getLog().error(sm.getString("endpoint.process.fail"), t);
-		return false;
-	}
-	return true;
-}
-
-
-/**
- * 工作线程正常开始处理的地方。
- */
-location：SocketProcessorBase
-public final void run() {
-	synchronized (socketWrapper) {
-		if (socketWrapper.isClosed()) {
-			return;
-		}
-		doRun();
-	}
-}
-
-/**
- * SocketProcessor：等效于Worker，但仅在外部Executor线程池中使用。
- */
-location：NioEndPoint.SocketProcessor
-protected void doRun() {
-	
-	// 获取对应的NioChannel
-	NioChannel socket = socketWrapper.getSocket();
-	
-	// 获取SelectionKey。
-	SelectionKey key = socket.getIOChannel().keyFor(socket.getPoller().getSelector());
-
-	try {
-		int handshake = -1;
-
-		try {
-			if (key != null) {
-				if (socket.isHandshakeComplete()) {
-					handshake = 0;
-				} else if (event == SocketEvent.STOP || event == SocketEvent.DISCONNECT || event == SocketEvent.ERROR) {
-					handshake = -1;
-				} else {
-					handshake = socket.handshake(key.isReadable(), key.isWritable());
-					event = SocketEvent.OPEN_READ;
-				}
-			}
-		} catch (IOException x) {
-			handshake = -1;
-			if (log.isDebugEnabled()) log.debug("Error during SSL handshake",x);
-		} catch (CancelledKeyException ckx) {
-			handshake = -1;
-		}
-		
-		if (handshake == 0) {
-			SocketState state = SocketState.OPEN;
-			if (event == null) {
-				state = getHandler().process(socketWrapper, SocketEvent.OPEN_READ);
-			} else {
-				state = getHandler().process(socketWrapper, event);
-			}
-			
-			if (state == SocketState.CLOSED) {
-				close(socket, key);
-			}
-		} else if (handshake == -1 ) {
-			close(socket, key);
-		} else if (handshake == SelectionKey.OP_READ){
-			socketWrapper.registerReadInterest();
-		} else if (handshake == SelectionKey.OP_WRITE){
-			socketWrapper.registerWriteInterest();
-		}
-	} catch (CancelledKeyException cx) {
-		socket.getPoller().cancelledKey(key);
-	} catch (VirtualMachineError vme) {
-		ExceptionUtils.handleThrowable(vme);
-	} catch (Throwable t) {
-		log.error("", t);
-		socket.getPoller().cancelledKey(key);
-	} finally {
-		socketWrapper = null;
-		event = null;
-		
-		if (running && !paused) {
-			processorCache.push(this);
-		}
-	}
-}
-
-/**
- *
- */
-location：AbstractProtocol.ConnectionHandler
-public SocketState process(SocketWrapperBase<S> wrapper, SocketEvent status) {
-	if (getLog().isDebugEnabled()) {
-		getLog().debug(sm.getString("abstractConnectionHandler.process", wrapper.getSocket(), status));
-	}
-	
-	// 没有
-	if (wrapper == null) {
-		return SocketState.CLOSED;
-	}
-
-	S socket = wrapper.getSocket();
-
-	Processor processor = connections.get(socket);
-	
-	if (getLog().isDebugEnabled()) {
-		getLog().debug(sm.getString("abstractConnectionHandler.connectionsGet", processor, socket));
-	}
-
-	if (SocketEvent.TIMEOUT == status && (processor == null || !processor.isAsync() || !processor.checkAsyncTimeoutGeneration())) {
-		return SocketState.OPEN;
-	}
-
-	if (processor != null) {
-		getProtocol().removeWaitingProcessor(processor);
-	} else if (status == SocketEvent.DISCONNECT || status == SocketEvent.ERROR) {
-		return SocketState.CLOSED;
-	}
-
-	ContainerThreadMarker.set();
-
-	try {
-		if (processor == null) {
-			String negotiatedProtocol = wrapper.getNegotiatedProtocol();
-			if (negotiatedProtocol != null) {
-				UpgradeProtocol upgradeProtocol = getProtocol().getNegotiatedProtocol(negotiatedProtocol);
-				if (upgradeProtocol != null) {
-					processor = upgradeProtocol.getProcessor(wrapper, getProtocol().getAdapter());
-				} else if (negotiatedProtocol.equals("http/1.1")) {
-				
-				} else {
-					if (getLog().isDebugEnabled()) {
-						getLog().debug(sm.getString("abstractConnectionHandler.negotiatedProcessor.fail", negotiatedProtocol));
-					}
-					return SocketState.CLOSED;
-					
-					throw new IllegalStateException(sm.getString("abstractConnectionHandler.negotiatedProcessor.fail", negotiatedProtocol));
-				}
-			}
-		}
-		if (processor == null) {
-			processor = recycledProcessors.pop();
-			if (getLog().isDebugEnabled()) {
-				getLog().debug(sm.getString("abstractConnectionHandler.processorPop", processor));
-			}
-		}
-		if (processor == null) {
-			processor = getProtocol().createProcessor();
-			register(processor);
-		}
-
-		processor.setSslSupport(wrapper.getSslSupport(getProtocol().getClientCertProvider()));
-
-		connections.put(socket, processor);
-
-		SocketState state = SocketState.CLOSED;
-		
-		do {
-			// 调用过程。
-			state = processor.process(wrapper, status);
-
-			if (state == SocketState.UPGRADING) {
-			
-				UpgradeToken upgradeToken = processor.getUpgradeToken();
-				
-				ByteBuffer leftOverInput = processor.getLeftoverInput();
-				if (upgradeToken == null) {
-				
-					UpgradeProtocol upgradeProtocol = getProtocol().getUpgradeProtocol("h2c");
-					if (upgradeProtocol != null) {
-						processor = upgradeProtocol.getProcessor(wrapper, getProtocol().getAdapter());
-						wrapper.unRead(leftOverInput);
-						connections.put(socket, processor);
-					} else {
-						if (getLog().isDebugEnabled()) {
-							getLog().debug(sm.getString("abstractConnectionHandler.negotiatedProcessor.fail", "h2c"));
-						}
-						return SocketState.CLOSED;
-					}
-				} else {
-					HttpUpgradeHandler httpUpgradeHandler = upgradeToken.getHttpUpgradeHandler();
-					
-					release(processor);
-					
-					processor = getProtocol().createUpgradeProcessor(wrapper, upgradeToken);
-					if (getLog().isDebugEnabled()) {
-						getLog().debug(sm.getString("abstractConnectionHandler.upgradeCreate", processor, wrapper));
-					}
-					wrapper.unRead(leftOverInput);
-					
-					wrapper.setUpgraded(true);
-					
-					connections.put(socket, processor);
-					
-					if (upgradeToken.getInstanceManager() == null) {
-						httpUpgradeHandler.init((WebConnection) processor);
-					} else {
-						ClassLoader oldCL = upgradeToken.getContextBind().bind(false, null);
-						try {
-							httpUpgradeHandler.init((WebConnection) processor);
-						} finally {
-							upgradeToken.getContextBind().unbind(false, oldCL);
-						}
-					}
-				}
-			}
-		} while ( state == SocketState.UPGRADING);
-
-		if (state == SocketState.LONG) {
-			
-			longPoll(wrapper, processor);
-			if (processor.isAsync()) {
-				getProtocol().addWaitingProcessor(processor);
-			}
-		} else if (state == SocketState.OPEN) {
-			
-			connections.remove(socket);
-			release(processor);
-			wrapper.registerReadInterest();
-		} else if (state == SocketState.SENDFILE) {
-			
-		} else if (state == SocketState.UPGRADED) {
-			
-			if (status != SocketEvent.OPEN_WRITE) {
-				longPoll(wrapper, processor);
-			}
-		} else if (state == SocketState.SUSPENDED) {
-			
-		} else {
-			
-			connections.remove(socket);
-			if (processor.isUpgrade()) {
-				UpgradeToken upgradeToken = processor.getUpgradeToken();
-				HttpUpgradeHandler httpUpgradeHandler = upgradeToken.getHttpUpgradeHandler();
-				InstanceManager instanceManager = upgradeToken.getInstanceManager();
-				if (instanceManager == null) {
-					httpUpgradeHandler.destroy();
-				} else {
-					ClassLoader oldCL = upgradeToken.getContextBind().bind(false, null);
-					try {
-						httpUpgradeHandler.destroy();
-					} finally {
-						try {
-							instanceManager.destroyInstance(httpUpgradeHandler);
-						} catch (Throwable e) {
-							ExceptionUtils.handleThrowable(e);
-							getLog().error(sm.getString("abstractConnectionHandler.error"), e);
-						}
-						upgradeToken.getContextBind().unbind(false, oldCL);
-					}
-				}
-			} else {
-				release(processor);
-			}
-		}
-		return state;
-	} catch(java.net.SocketException e) {
-		getLog().debug(sm.getString("abstractConnectionHandler.socketexception.debug"), e);
-	} catch (java.io.IOException e) {
-		getLog().debug(sm.getString("abstractConnectionHandler.ioexception.debug"), e);
-	} catch (ProtocolException e) {
-		getLog().debug(sm.getString("abstractConnectionHandler.protocolexception.debug"), e);
-	} catch (Throwable e) {
-		ExceptionUtils.handleThrowable(e);
-		getLog().error(sm.getString("abstractConnectionHandler.error"), e);
-	} finally {
-		ContainerThreadMarker.clear();
-	}
-
-	connections.remove(socket);
-	release(processor);
-	return SocketState.CLOSED;
+	startStopExecutor.allowCoreThreadTimeOut(true);
+	super.initInternal();
 }
 
 
 /**
  *
  */
-location：AbstractProcessorLight（Http11Processor继承他）
-public SocketState process(SocketWrapperBase<?> socketWrapper, SocketEvent status) throws IOException {
-
-	SocketState state = SocketState.CLOSED;
-	Iterator<DispatchType> dispatches = null;
-	do {
-		if (dispatches != null) {
-			DispatchType nextDispatch = dispatches.next();
-			state = dispatch(nextDispatch.getSocketStatus());
-		} else if (status == SocketEvent.DISCONNECT) {
-			
-		} else if (isAsync() || isUpgrade() || state == SocketState.ASYNC_END) {
-			state = dispatch(status);
-			if (state == SocketState.OPEN) {
-				state = service(socketWrapper);
-			}
-		} else if (status == SocketEvent.OPEN_WRITE) {
-			state = SocketState.LONG;
-		} else if (status == SocketEvent.OPEN_READ){
-			state = service(socketWrapper);
-		} else {
-			state = SocketState.CLOSED;
-		}
-
-		if (getLog().isDebugEnabled()) {
-			getLog().debug("Socket: [" + socketWrapper + "], Status in: [" + status + "], State out: [" + state + "]");
-		}
-
-		if (state != SocketState.CLOSED && isAsync()) {
-			state = asyncPostProcess();
-			if (getLog().isDebugEnabled()) {
-				getLog().debug("Socket: [" + socketWrapper + "], State after async post processing: [" + state + "]");
-			}
-		}
-
-		if (dispatches == null || !dispatches.hasNext()) {
-			dispatches = getIteratorAndClearDispatches();
-		}
-	} while (state == SocketState.ASYNC_END ||
-			dispatches != null && state != SocketState.CLOSED);
-
-	return state;
-}
-
-/**
- * 
- */ 
-location：Http11Processor
-public SocketState service(SocketWrapperBase<?> socketWrapper) throws IOException {
-	// 获取RequestInfo。
-	RequestInfo rp = request.getRequestProcessor();
-	rp.setStage(org.apache.coyote.Constants.STAGE_PARSE);
-
-	setSocketWrapper(socketWrapper);
-	inputBuffer.init(socketWrapper);
-	outputBuffer.init(socketWrapper);
-
-	keepAlive = true;
-	openSocket = false;
-	readComplete = true;
-	boolean keptAlive = false;
-	SendfileState sendfileState = SendfileState.DONE;
-
-	while (!getErrorState().isError() && keepAlive && !isAsync() && upgradeToken == null && sendfileState == SendfileState.DONE && !endpoint.isPaused()) {
-
-		// 解析请求头。
+location：StandardHost
+protected synchronized void startInternal() throws LifecycleException {
+	String errorValve = getErrorReportValveClass();
+	
+	if ((errorValve != null) && (!errorValve.equals(""))) {
 		try {
-			if (!inputBuffer.parseRequestLine(keptAlive)) {
-				if (inputBuffer.getParsingRequestLinePhase() == -1) {
-					return SocketState.UPGRADING;
-				} else if (handleIncompleteRequestLineRead()) {
+			boolean found = false;
+			Valve[] valves = getPipeline().getValves();
+			for (Valve valve : valves) {
+				if (errorValve.equals(valve.getClass().getName())) {
+					found = true;
 					break;
 				}
 			}
-
-			if (endpoint.isPaused()) {
-				response.setStatus(503);
-				setErrorState(ErrorState.CLOSE_CLEAN, null);
-			} else {
-				keptAlive = true;
-				
-				// 每次通过JMX更改限制时设置此值
-				request.getMimeHeaders().setLimit(endpoint.getMaxHeaderCount());
-				
-				if (!inputBuffer.parseHeaders()) {
-					openSocket = true;
-					readComplete = false;
-					break;
-				}
-				
-				if (!disableUploadTimeout) {
-					socketWrapper.setReadTimeout(connectionUploadTimeout);
-				}
-			}
-		} catch (IOException e) {
-			if (log.isDebugEnabled()) {
-				log.debug(sm.getString("http11processor.header.parse"), e);
-			}
-			
-			setErrorState(ErrorState.CLOSE_CONNECTION_NOW, e);
-			break;
-		} catch (Throwable t) {
-			ExceptionUtils.handleThrowable(t);
-			UserDataHelper.Mode logMode = userDataHelper.getNextMode();
-			if (logMode != null) {
-				String message = sm.getString("http11processor.header.parse");
-				switch (logMode) {
-					case INFO_THEN_DEBUG:
-						message += sm.getString("http11processor.fallToDebug");
-					case INFO:
-						log.info(message, t);
-						break;
-					case DEBUG:
-						log.debug(message, t);
-				}
-			}
-			
-			response.setStatus(400);
-			setErrorState(ErrorState.CLOSE_CLEAN, t);
-			getAdapter().log(request, response, 0);
-		}
-
-		// 是否要求升级
-		Enumeration<String> connectionValues = request.getMimeHeaders().values("Connection");
-		boolean foundUpgrade = false;
-		while (connectionValues.hasMoreElements() && !foundUpgrade) {
-			foundUpgrade = connectionValues.nextElement().toLowerCase(Locale.ENGLISH).contains("upgrade");
-		}
-
-		if (foundUpgrade) {
-			String requestedProtocol = request.getHeader("Upgrade");
-
-			UpgradeProtocol upgradeProtocol = httpUpgradeProtocols.get(requestedProtocol);
-			if (upgradeProtocol != null) {
-				if (upgradeProtocol.accept(request)) {
-					response.setStatus(HttpServletResponse.SC_SWITCHING_PROTOCOLS);
-					response.setHeader("Connection", "Upgrade");
-					response.setHeader("Upgrade", requestedProtocol);
-					action(ActionCode.CLOSE,  null);
-					getAdapter().log(request, response, 0);
-
-					InternalHttpUpgradeHandler upgradeHandler = upgradeProtocol.getInternalUpgradeHandler(getAdapter(), cloneRequest(request));
-					UpgradeToken upgradeToken = new UpgradeToken(upgradeHandler, null, null);
-					action(ActionCode.UPGRADE, upgradeToken);
-					return SocketState.UPGRADING;
-				}
-			}
-		}
-
-		if (!getErrorState().isError()) {
-			rp.setStage(org.apache.coyote.Constants.STAGE_PREPARE);
-			try {
-				prepareRequest();
-			} catch (Throwable t) {
-				ExceptionUtils.handleThrowable(t);
-				if (log.isDebugEnabled()) {
-					log.debug(sm.getString("http11processor.request.prepare"), t);
-				}
-				response.setStatus(500);
-				setErrorState(ErrorState.CLOSE_CLEAN, t);
-				getAdapter().log(request, response, 0);
-			}
-		}
-
-		if (maxKeepAliveRequests == 1) {
-			keepAlive = false;
-		} else if (maxKeepAliveRequests > 0 && socketWrapper.decrementKeepAlive() <= 0) {
-			keepAlive = false;
-		}
-
-		// 在适配器中处理请求
-		if (!getErrorState().isError()) {
-			try {
-				rp.setStage(org.apache.coyote.Constants.STAGE_SERVICE);
-				
-				/**
-				 *     很重要很重要很重要很重要很重要很重要很重要
-				 */
-				getAdapter().service(request, response);
-				
-				// 处理在发生严重错误之前提交响应的时间。 抛出ServletException应该同时将状态设置为500并设置errorException。 
-				// 如果我们在此处失败，则响应可能已经提交，因此我们无法尝试设置标头。
-				if(keepAlive && !getErrorState().isError() && !isAsync() && statusDropsConnection(response.getStatus())) {
-					setErrorState(ErrorState.CLOSE_CLEAN, null);
-				}
-				
-			} catch (InterruptedIOException e) {
-				setErrorState(ErrorState.CLOSE_CONNECTION_NOW, e);
-			} catch (HeadersTooLargeException e) {
-			
-				log.error(sm.getString("http11processor.request.process"), e);
-				
-				// 不应提交响应，但无论如何都要进行检查以确保安全
-				if (response.isCommitted()) {
-					setErrorState(ErrorState.CLOSE_NOW, e);
-				} else {
-					response.reset();
-					response.setStatus(500);
-					setErrorState(ErrorState.CLOSE_CLEAN, e);
-					response.setHeader("Connection", "close"); // TODO: Remove
-				}
-			} catch (Throwable t) {
-				ExceptionUtils.handleThrowable(t);
-				log.error(sm.getString("http11processor.request.process"), t);
-				response.setStatus(500);
-				setErrorState(ErrorState.CLOSE_CLEAN, t);
-				getAdapter().log(request, response, 0);
-			}
-		}
-
-		// 完成请求的处理
-		rp.setStage(org.apache.coyote.Constants.STAGE_ENDINPUT);
-		
-		if (!isAsync()) {
-			endRequest();
-		}
-		rp.setStage(org.apache.coyote.Constants.STAGE_ENDOUTPUT);
-
-		if (getErrorState().isError()) {
-			response.setStatus(500);
-		}
-
-		if (!isAsync() || getErrorState().isError()) {
-			request.updateCounters();
-			if (getErrorState().isIoAllowed()) {
-				inputBuffer.nextRequest();
-				outputBuffer.nextRequest();
-			}
-		}
-
-		if (!disableUploadTimeout) {
-			int soTimeout = endpoint.getConnectionTimeout();
-			if(soTimeout > 0) {
-				socketWrapper.setReadTimeout(soTimeout);
-			} else {
-				socketWrapper.setReadTimeout(0);
-			}
-		}
-
-		rp.setStage(org.apache.coyote.Constants.STAGE_KEEPALIVE);
-
-		sendfileState = processSendfile(socketWrapper);
-	}
-
-	rp.setStage(org.apache.coyote.Constants.STAGE_ENDED);
-
-	if (getErrorState().isError() || endpoint.isPaused()) {
-		return SocketState.CLOSED;
-	} else if (isAsync()) {
-		return SocketState.LONG;
-	} else if (isUpgrade()) {
-		return SocketState.UPGRADING;
-	} else {
-		if (sendfileState == SendfileState.PENDING) {
-			return SocketState.SENDFILE;
-		} else {
-			if (openSocket) {
-				if (readComplete) {
-					return SocketState.OPEN;
-				} else {
-					return SocketState.LONG;
-				}
-			} else {
-				return SocketState.CLOSED;
-			}
-		}
-	}
-}
-
-/**
- *
- */
-location：CoyoteAdapter
-public void service(org.apache.coyote.Request req, org.apache.coyote.Response res) throws Exception {
-
-	Request request = (Request) req.getNote(ADAPTER_NOTES);
-	Response response = (Response) res.getNote(ADAPTER_NOTES);
-
-	if (request == null) {
-		request = connector.createRequest();
-		request.setCoyoteRequest(req);
-		response = connector.createResponse();
-		response.setCoyoteResponse(res);
-
-		request.setResponse(response);
-		response.setRequest(request);
-
-		req.setNote(ADAPTER_NOTES, request);
-		res.setNote(ADAPTER_NOTES, response);
-
-		req.getParameters().setQueryStringCharset(connector.getURICharset());
-	}
-
-	if (connector.getXpoweredBy()) {
-		response.addHeader("X-Powered-By", POWERED_BY);
-	}
-
-	boolean async = false;
-	boolean postParseSuccess = false;
-
-	req.getRequestProcessor().setWorkerThreadName(THREAD_NAME.get());
-
-	try {
-		// 设置映射。
-		postParseSuccess = postParseRequest(req, request, res, response);
-		
-		if (postParseSuccess) {
-			request.setAsyncSupported(connector.getService().getContainer().getPipeline().isAsyncSupported());
-			
-			// connector.getService().getContainer()：返回的是一个Engine。所有的容器都实现了
-			// 获取通道的第一基础阀[默认的基础阀为StandardEngineValve]。
-			connector.getService().getContainer().getPipeline().getFirst().invoke(request, response);
-		}
-		
-		if (request.isAsync()) {
-			async = true;
-			ReadListener readListener = req.getReadListener();
-			if (readListener != null && request.isFinished()) {
-				ClassLoader oldCL = null;
-				try {
-					oldCL = request.getContext().bind(false, null);
-					if (req.sendAllDataReadEvent()) {
-						req.getReadListener().onAllDataRead();
-					}
-				} finally {
-					request.getContext().unbind(false, oldCL);
-				}
-			}
-
-			Throwable throwable = (Throwable) request.getAttribute(RequestDispatcher.ERROR_EXCEPTION);
-
-			if (!request.isAsyncCompleting() && throwable != null) {
-				request.getAsyncContextInternal().setErrorState(throwable, true);
-			}
-		} else {
-			request.finishRequest();
-			response.finishResponse();
-		}
-
-	} catch (IOException e) {
-
-	} finally {
-		AtomicBoolean error = new AtomicBoolean(false);
-		res.action(ActionCode.IS_ERROR, error);
-
-		if (request.isAsyncCompleting() && error.get()) {
-			res.action(ActionCode.ASYNC_POST_PROCESS,  null);
-			async = false;
-		}
-
-		if (!async && postParseSuccess) {
-			
-			Context context = request.getContext();
-			
-			if (context != null) {
-				context.logAccess(request, response, System.currentTimeMillis() - req.getStartTime(), false);
-			}
-		}
-
-		req.getRequestProcessor().setWorkerThreadName(null);
-
-		if (!async) {
-			request.recycle();
-			response.recycle();
-		}
-	}
-}
-
-protected boolean postParseRequest(org.apache.coyote.Request req, Request request, org.apache.coyote.Response res, Response response) throws IOException, ServletException {
-
-	if (req.scheme().isNull()) {
-		req.scheme().setString(connector.getScheme());
-		request.setSecure(connector.getSecure());
-	} else {
-		request.setSecure(req.scheme().equals("https"));
-	}
-
-	String proxyName = connector.getProxyName();
-	int proxyPort = connector.getProxyPort();
-	if (proxyPort != 0) {
-		req.setServerPort(proxyPort);
-	} else if (req.getServerPort() == -1) {
-		if (req.scheme().equals("https")) {
-			req.setServerPort(443);
-		} else {
-			req.setServerPort(80);
-		}
-	}
-	if (proxyName != null) {
-		req.serverName().setString(proxyName);
-	}
-
-	MessageBytes undecodedURI = req.requestURI();
-
-	if (undecodedURI.equals("*")) {
-		if (req.method().equalsIgnoreCase("OPTIONS")) {
-			StringBuilder allow = new StringBuilder();
-			allow.append("GET, HEAD, POST, PUT, DELETE");
-			if (connector.getAllowTrace()) {
-				allow.append(", TRACE");
-			}
-			allow.append(", OPTIONS");
-			res.setHeader("Allow", allow.toString());
-		} else {
-			res.setStatus(404);
-			res.setMessage("Not found");
-		}
-		connector.getService().getContainer().logAccess(request, response, 0, true);
-		return false;
-	}
-
-	MessageBytes decodedURI = req.decodedURI();
-
-	if (undecodedURI.getType() == MessageBytes.T_BYTES) {
-		decodedURI.duplicate(undecodedURI);
-
-		parsePathParameters(req, request);
-
-		try {
-			req.getURLDecoder().convert(decodedURI, false);
-		} catch (IOException ioe) {
-			res.setStatus(400);
-			res.setMessage("Invalid URI: " + ioe.getMessage());
-			connector.getService().getContainer().logAccess(request, response, 0, true);
-			return false;
-		}
-		
-		if (!normalize(req.decodedURI())) {
-			res.setStatus(400);
-			res.setMessage("Invalid URI");
-			connector.getService().getContainer().logAccess(request, response, 0, true);
-			return false;
-		}
-	
-		convertURI(decodedURI, request);
-		
-		if (!checkNormalize(req.decodedURI())) {
-			res.setStatus(400);
-			res.setMessage("Invalid URI character encoding");
-			connector.getService().getContainer().logAccess(request, response, 0, true);
-			return false;
-		}
-	} else {
-		decodedURI.toChars();
-		CharChunk uriCC = decodedURI.getCharChunk();
-		int semicolon = uriCC.indexOf(';');
-		if (semicolon > 0) {
-			decodedURI.setChars(uriCC.getBuffer(), uriCC.getStart(), semicolon);
-		}
-	}
-
-	MessageBytes serverName;
-	if (connector.getUseIPVHosts()) {
-		serverName = req.localName();
-		if (serverName.isNull()) {
-			res.action(ActionCode.REQ_LOCAL_NAME_ATTRIBUTE, null);
-		}
-	} else {
-		serverName = req.serverName();
-	}
-
-	String version = null;
-	Context versionContext = null;
-	boolean mapRequired = true;
-
-	while (mapRequired) {
-		
-		// ############################################################
-		// 将request和wrapper关联起来
-		// ############################################################
-		connector.getService().getMapper().map(serverName, decodedURI, version, request.getMappingData());
-
-		if (request.getContext() == null) {
-			res.setStatus(404);
-			res.setMessage("Not found");
-			
-			Host host = request.getHost();
-			
-			if (host != null) {
-				host.logAccess(request, response, 0, true);
-			}
-			return false;
-		}
-
-		String sessionID;
-		if (request.getServletContext().getEffectiveSessionTrackingModes().contains(SessionTrackingMode.URL)) {
-
-			sessionID = request.getPathParameter(SessionConfig.getSessionUriParamName(request.getContext()));
-			if (sessionID != null) {
-				request.setRequestedSessionId(sessionID);
-				request.setRequestedSessionURL(true);
-			}
-		}
-
-		parseSessionCookiesId(request);
-		parseSessionSslId(request);
-
-		sessionID = request.getRequestedSessionId();
-
-		mapRequired = false;
-		if (version != null && request.getContext() == versionContext) {
-			
-		} else {
-			version = null;
-			versionContext = null;
-
-			Context[] contexts = request.getMappingData().contexts;
-			
-			if (contexts != null && sessionID != null) {
-				
-				for (int i = (contexts.length); i > 0; i--) {
-					Context ctxt = contexts[i - 1];
-					if (ctxt.getManager().findSession(sessionID) != null) {
-						
-						if (!ctxt.equals(request.getMappingData().context)) {
-							
-							version = ctxt.getWebappVersion();
-							versionContext = ctxt;
-							
-							request.getMappingData().recycle();
-							mapRequired = true;
-							
-							request.recycleSessionInfo();
-							request.recycleCookieInfo(true);
-						}
-						break;
-					}
-				}
-			}
-		}
-
-		if (!mapRequired && request.getContext().getPaused()) {
-			
-			try {
-				Thread.sleep(1000);
-			} catch (InterruptedException e) {
-				
-			}
-			
-			request.getMappingData().recycle();
-			mapRequired = true;
-		}
-	}
-
-	MessageBytes redirectPathMB = request.getMappingData().redirectPath;
-	if (!redirectPathMB.isNull()) {
-		String redirectPath = URLEncoder.DEFAULT.encode(redirectPathMB.toString(), StandardCharsets.UTF_8);
-		String query = request.getQueryString();
-		if (request.isRequestedSessionIdFromURL()) {
-			
-			redirectPath = redirectPath + ";" + SessionConfig.getSessionUriParamName(request.getContext()) +  "=" + request.getRequestedSessionId();
-		}
-		if (query != null) {
-			redirectPath = redirectPath + "?" + query;
-		}
-		response.sendRedirect(redirectPath);
-		request.getContext().logAccess(request, response, 0, true);
-		return false;
-	}
-
-	if (!connector.getAllowTrace() && req.method().equalsIgnoreCase("TRACE")) {
-		Wrapper wrapper = request.getWrapper();
-		String header = null;
-		if (wrapper != null) {
-			String[] methods = wrapper.getServletMethods();
-			if (methods != null) {
-				for (int i=0; i<methods.length; i++) {
-					if ("TRACE".equals(methods[i])) {
-						continue;
-					}
-					if (header == null) {
-						header = methods[i];
-					} else {
-						header += ", " + methods[i];
-					}
-				}
-			}
-		}
-		res.setStatus(405);
-		res.addHeader("Allow", header);
-		res.setMessage("TRACE method is not allowed");
-		request.getContext().logAccess(request, response, 0, true);
-		return false;
-	}
-
-	doConnectorAuthenticationAuthorization(req, request);
-
-	return true;
-}
-
-
-
-public void map(MessageBytes host, MessageBytes uri, String version, MappingData mappingData) throws IOException {
-
-	if (host.isNull()) {
-		host.getCharChunk().append(defaultHostName);
-	}
-	
-	host.toChars();
-	uri.toChars();
-	
-	internalMap(host.getCharChunk(), uri.getCharChunk(), version, mappingData);
-}
-
-private final void internalMap(CharChunk host, CharChunk uri, String version, MappingData mappingData) throws IOException {
-
-	if (mappingData.host != null) {
-		throw new AssertionError();
-	}
-
-	uri.setLimit(-1);
-
-	MappedHost[] hosts = this.hosts;
-	MappedHost mappedHost = exactFindIgnoreCase(hosts, host);
-	if (mappedHost == null) {
-		int firstDot = host.indexOf('.');
-		if (firstDot > -1) {
-			int offset = host.getOffset();
-			try {
-				host.setOffset(firstDot + offset);
-				mappedHost = exactFindIgnoreCase(hosts, host);
-			} finally {
-				host.setOffset(offset);
-			}
-		}
-		if (mappedHost == null) {
-			mappedHost = defaultHost;
-			if (mappedHost == null) {
-				return;
-			}
-		}
-	}
-	mappingData.host = mappedHost.object;
-
-	ContextList contextList = mappedHost.contextList;
-	MappedContext[] contexts = contextList.contexts;
-	int pos = find(contexts, uri);
-	if (pos == -1) {
-		return;
-	}
-
-	int lastSlash = -1;
-	int uriEnd = uri.getEnd();
-	int length = -1;
-	boolean found = false;
-	MappedContext context = null;
-	while (pos >= 0) {
-		context = contexts[pos];
-		if (uri.startsWith(context.name)) {
-			length = context.name.length();
-			if (uri.getLength() == length) {
-				found = true;
-				break;
-			} else if (uri.startsWithIgnoreCase("/", length)) {
-				found = true;
-				break;
-			}
-		}
-		if (lastSlash == -1) {
-			lastSlash = nthSlash(uri, contextList.nesting + 1);
-		} else {
-			lastSlash = lastSlash(uri);
-		}
-		uri.setEnd(lastSlash);
-		pos = find(contexts, uri);
-	}
-	uri.setEnd(uriEnd);
-
-	if (!found) {
-		if (contexts[0].name.equals("")) {
-			context = contexts[0];
-		} else {
-			context = null;
-		}
-	}
-	if (context == null) {
-		return;
-	}
-
-	mappingData.contextPath.setString(context.name);
-
-	ContextVersion contextVersion = null;
-	ContextVersion[] contextVersions = context.versions;
-	final int versionCount = contextVersions.length;
-	if (versionCount > 1) {
-		Context[] contextObjects = new Context[contextVersions.length];
-		for (int i = 0; i < contextObjects.length; i++) {
-			contextObjects[i] = contextVersions[i].object;
-		}
-		mappingData.contexts = contextObjects;
-		if (version != null) {
-			contextVersion = exactFind(contextVersions, version);
-		}
-	}
-	if (contextVersion == null) {
-		contextVersion = contextVersions[versionCount - 1];
-	}
-	mappingData.context = contextVersion.object;
-	mappingData.contextSlashCount = contextVersion.slashCount;
-
-	if (!contextVersion.isPaused()) {
-		internalMapWrapper(contextVersion, uri, mappingData);
-	}
-
-}
-
-location：Mapper
-private final void internalMapWrapper(ContextVersion contextVersion, CharChunk path, MappingData mappingData) throws IOException {
-
-	int pathOffset = path.getOffset();
-	int pathEnd = path.getEnd();
-	boolean noServletPath = false;
-
-	int length = contextVersion.path.length();
-	if (length == (pathEnd - pathOffset)) {
-		noServletPath = true;
-	}
-	int servletPath = pathOffset + length;
-	path.setOffset(servletPath);
-
-	MappedWrapper[] exactWrappers = contextVersion.exactWrappers;
-	internalMapExactWrapper(exactWrappers, path, mappingData);
-
-	boolean checkJspWelcomeFiles = false;
-	MappedWrapper[] wildcardWrappers = contextVersion.wildcardWrappers;
-	if (mappingData.wrapper == null) {
-		internalMapWildcardWrapper(wildcardWrappers, contextVersion.nesting, path, mappingData);
-		if (mappingData.wrapper != null && mappingData.jspWildCard) {
-			char[] buf = path.getBuffer();
-			if (buf[pathEnd - 1] == '/') {
-				mappingData.wrapper = null;
-				checkJspWelcomeFiles = true;
-			} else {
-				mappingData.wrapperPath.setChars(buf, path.getStart(), path.getLength());
-				mappingData.pathInfo.recycle();
-			}
-		}
-	}
-
-	if(mappingData.wrapper == null && noServletPath && contextVersion.object.getMapperContextRootRedirectEnabled()) {
-		path.append('/');
-		pathEnd = path.getEnd();
-		mappingData.redirectPath.setChars(path.getBuffer(), pathOffset, pathEnd - pathOffset);
-		path.setEnd(pathEnd - 1);
-		return;
-	}
-
-	MappedWrapper[] extensionWrappers = contextVersion.extensionWrappers;
-	if (mappingData.wrapper == null && !checkJspWelcomeFiles) {
-		internalMapExtensionWrapper(extensionWrappers, path, mappingData, true);
-	}
-
-	if (mappingData.wrapper == null) {
-		boolean checkWelcomeFiles = checkJspWelcomeFiles;
-		if (!checkWelcomeFiles) {
-			char[] buf = path.getBuffer();
-			checkWelcomeFiles = (buf[pathEnd - 1] == '/');
-		}
-		if (checkWelcomeFiles) {
-			for (int i = 0; (i < contextVersion.welcomeResources.length) && (mappingData.wrapper == null); i++) {
-				path.setOffset(pathOffset);
-				path.setEnd(pathEnd);
-				path.append(contextVersion.welcomeResources[i], 0, contextVersion.welcomeResources[i].length());
-				path.setOffset(servletPath);
-
-				internalMapExactWrapper(exactWrappers, path, mappingData);
-
-				if (mappingData.wrapper == null) {
-					internalMapWildcardWrapper(wildcardWrappers, contextVersion.nesting, path, mappingData);
-				}
-
-				if (mappingData.wrapper == null && contextVersion.resources != null) {
-					String pathStr = path.toString();
-					WebResource file = contextVersion.resources.getResource(pathStr);
-					if (file != null && file.isFile()) {
-						internalMapExtensionWrapper(extensionWrappers, path, mappingData, true);
-						if (mappingData.wrapper == null && contextVersion.defaultWrapper != null) {
-							mappingData.wrapper = contextVersion.defaultWrapper.object;
-							mappingData.requestPath.setChars(path.getBuffer(), path.getStart(), path.getLength());
-							mappingData.wrapperPath.setChars(path.getBuffer(), path.getStart(), path.getLength());
-							mappingData.requestPath.setString(pathStr);
-							mappingData.wrapperPath.setString(pathStr);
-						}
-					}
-				}
-			}
-
-			path.setOffset(servletPath);
-			path.setEnd(pathEnd);
-		}
-
-	}
-
-
-
-
-
-/**
- * Engine的基础阀为StandardEngineValve
- */
-location：StandardEngineValve
-public final void invoke(Request request, Response response) throws IOException, ServletException {
-
-	Host host = request.getHost();
-	
-	if (host == null) {
-		response.sendError(HttpServletResponse.SC_BAD_REQUEST, sm.getString("standardEngine.noHost", request.getServerName()));
-		return;
-	}
-	if (request.isAsyncSupported()) {
-		request.setAsyncSupported(host.getPipeline().isAsyncSupported());
-	}
-
-	// Host的基础阀：StandardHostValve，
-	// AccessLogValve  -->  ErrorReportValve  --> StandardHostValve
-	host.getPipeline().getFirst().invoke(request, response);
-
-}
-
-/**
- * Host容器的基础阀。
- */
-location：StandardHostValve
-public final void invoke(Request request, Response response) throws IOException, ServletException {
-
-	Context context = request.getContext();
-	if (context == null) {
-		response.sendError(HttpServletResponse.SC_INTERNAL_SERVER_ERROR, sm.getString("standardHost.noContext"));
-		return;
-	}
-
-	if (request.isAsyncSupported()) {
-		request.setAsyncSupported(context.getPipeline().isAsyncSupported());
-	}
-
-	boolean asyncAtStart = request.isAsync();
-	boolean asyncDispatching = request.isAsyncDispatching();
-
-	try {
-		context.bind(Globals.IS_SECURITY_ENABLED, MY_CLASSLOADER);
-
-		if (!asyncAtStart && !context.fireRequestInitEvent(request.getRequest())) {
-			return;
-		}
-
-		try {
-			if (!asyncAtStart || asyncDispatching) {
-				// 获取Context的第一个阀。 NonLoginAuthenticator -->   StandardContextValve。
-				context.getPipeline().getFirst().invoke(request, response);
-			} else {
-				if (!response.isErrorReportRequired()) {
-					throw new IllegalStateException(sm.getString("standardHost.asyncStateError"));
-				}
+			if(!found) {
+				Valve valve =
+					(Valve) Class.forName(errorValve).getConstructor().newInstance();
+				getPipeline().addValve(valve);
 			}
 		} catch (Throwable t) {
 			ExceptionUtils.handleThrowable(t);
-			container.getLogger().error("Exception Processing " + request.getRequestURI(), t);
-			
-			if (!response.isErrorReportRequired()) {
-				request.setAttribute(RequestDispatcher.ERROR_EXCEPTION, t);
-				throwable(request, response, t);
+			log.error(sm.getString("standardHost.invalidErrorReportValveClass", errorValve), t);
+		}
+	}
+	super.startInternal();
+}
+
+/**
+ * 其是StandardHost实例。
+ */
+location：ContainerBase
+protected synchronized void startInternal() throws LifecycleException {
+
+	logger = null;
+	getLogger();
+	
+	// 启动Cluster。
+	Cluster cluster = getClusterInternal();
+	if (cluster instanceof Lifecycle) {
+		((Lifecycle) cluster).start();
+	}
+	
+	// 启动Realm.
+	Realm realm = getRealmInternal();
+	if (realm instanceof Lifecycle) {
+		((Lifecycle) realm).start();
+	}
+
+	// 获取其子容器。
+	Container children[] = findChildren();
+	
+	List<Future<Void>> results = new ArrayList<>();
+	
+	// 把任务提交给线程池，并获取一个执行结果Future。
+	for (int i = 0; i < children.length; i++) {
+		
+		// 线程池会调用StartChild的call方法，同时在StartChild的call方法中会调用children的start()方法。
+		// 所以调用children的start()方法是一个异步过程。【【【这里是Host启动过程。】】】
+		results.add(startStopExecutor.submit(new StartChild(children[i])));
+	}
+
+	MultiThrowable multiThrowable = null;
+
+	for (Future<Void> result : results) {
+		try {
+			result.get();
+		} catch (Throwable e) {
+			log.error(sm.getString("containerBase.threadedStartFailed"), e);
+			if (multiThrowable == null) {
+				multiThrowable = new MultiThrowable();
 			}
+			multiThrowable.add(e);
 		}
 
-		response.setSuspended(false);
+	}
+	if (multiThrowable != null) {
+		throw new LifecycleException(sm.getString("containerBase.threadedStartFailed"), multiThrowable.getThrowable());
+	}
 
-		Throwable t = (Throwable) request.getAttribute(RequestDispatcher.ERROR_EXCEPTION);
+	// 这里是StandardPipeline
+	if (pipeline instanceof Lifecycle) {
+		((Lifecycle) pipeline).start();
+	}
 
-		if (!context.getState().isAvailable()) {
+
+	/**
+	 * 在StandardHost的startInternal的方法中，解压appBase下的文件。
+	 * 开始基本完成以后，会触发LifecycleListener监听器的lifecycleEvent的方法，传入的状态为start。
+	 * 
+	 */
+	【【【这个做了很多事情。】】】
+	setState(LifecycleState.STARTING);
+
+	threadStart();
+}
+
+/**
+ * 其是StandardHost实例。
+ */
+location：LifecycleBase
+private synchronized void setStateInternal(LifecycleState state, Object data, boolean check) throws LifecycleException {
+
+	if (log.isDebugEnabled()) {
+		log.debug(sm.getString("lifecycleBase.setState", this, state));
+	}
+
+	if (check) {
+		
+		if (state == null) {
+			invalidTransition("null");
 			return;
 		}
 
-		if (response.isErrorReportRequired()) {
-			if (t != null) {
-				throwable(request, response, t);
-			} else {
-				status(request, response);
-			}
+		if (!(state == LifecycleState.FAILED || (this.state == LifecycleState.STARTING_PREP && state == LifecycleState.STARTING) ||
+				(this.state == LifecycleState.STOPPING_PREP && state == LifecycleState.STOPPING) ||
+				(this.state == LifecycleState.FAILED && state == LifecycleState.STOPPING))) {
+				
+			invalidTransition(state.name());
 		}
+	}
 
-		if (!request.isAsync() && !asyncAtStart) {
-			context.fireRequestDestroyEvent(request.getRequest());
-		}
-	} finally {
-		if (ACCESS_SESSION) {
-			request.getSession(false);
-		}
-
-		context.unbind(Globals.IS_SECURITY_ENABLED, MY_CLASSLOADER);
+	this.state = state;
+	String lifecycleEvent = state.getLifecycleEvent();
+	if (lifecycleEvent != null) {
+		fireLifecycleEvent(lifecycleEvent, data);
 	}
 }
 
+/**
+ * 其是StandardHost实例。
+ */
+location：LifecycleBase
+protected void fireLifecycleEvent(String type, Object data) {
+	// 这时type为start了。
+	LifecycleEvent event = new LifecycleEvent(this, type, data);
+	
+	for (LifecycleListener listener : lifecycleListeners) {
+		// 【【【一个很重要的监听器HostConfig】】】
+		listener.lifecycleEvent(event);
+	}
+}
 
 /**
  *
  */
-location：NonLoginAuthenticator
-public void invoke(Request request, Response response) throws IOException, ServletException {
+location：HostConfig
+public void lifecycleEvent(LifecycleEvent event) {
+
+	try {
+		host = (Host) event.getLifecycle();
+		
+		if (host instanceof StandardHost) {
+			setCopyXML(((StandardHost) host).isCopyXML());
+			setDeployXML(((StandardHost) host).isDeployXML());
+			setUnpackWARs(((StandardHost) host).isUnpackWARs());
+			setContextClass(((StandardHost) host).getContextClass());
+		}
+	} catch (ClassCastException e) {
+		log.error(sm.getString("hostConfig.cce", event.getLifecycle()), e);
+		return;
+	}
+
+	if (event.getType().equals(Lifecycle.PERIODIC_EVENT)) {
+		check();
+	} else if (event.getType().equals(Lifecycle.BEFORE_START_EVENT)) {
+		beforeStart();
+	} else if (event.getType().equals(Lifecycle.START_EVENT)) {
+		start();
+	} else if (event.getType().equals(Lifecycle.STOP_EVENT)) {
+		stop();
+	}
+}
+
+/**
+ *
+ */
+location：HostConfig
+public void start() {
 
 	if (log.isDebugEnabled()) {
-		log.debug("Security checking request " + request.getMethod() + " " + request.getRequestURI());
+		log.debug(sm.getString("hostConfig.start"));
 	}
 
-	if (cache) {
-		Principal principal = request.getUserPrincipal();
-		if (principal == null) {
-			Session session = request.getSessionInternal(false);
-			if (session != null) {
-				principal = session.getPrincipal();
-				if (principal != null) {
-					if (log.isDebugEnabled()) {
-						log.debug("We have cached auth type " + session.getAuthType() + " for principal " + principal);
-					}
-					request.setAuthType(session.getAuthType());
-					request.setUserPrincipal(principal);
-				}
-			}
-		}
+	try {
+		ObjectName hostON = host.getObjectName();
+		oname = new ObjectName(hostON.getDomain() + ":type=Deployer,host=" + host.getName());
+		Registry.getRegistry(null, null).registerComponent(this, oname, this.getClass().getName());
+	} catch (Exception e) {
+		log.error(sm.getString("hostConfig.jmx.register", oname), e);
 	}
 
-	boolean authRequired = isContinuationRequired(request);
-
-	Realm realm = this.context.getRealm();
-	SecurityConstraint[] constraints = realm.findSecurityConstraints(request, this.context);
-
-	AuthConfigProvider jaspicProvider = getJaspicProvider();
-	if (jaspicProvider != null) {
-		authRequired = true;
+	if (!host.getAppBaseFile().isDirectory()) {
+		log.error(sm.getString("hostConfig.appBase", host.getName(), host.getAppBaseFile().getPath()));
+		host.setDeployOnStartup(false);
+		host.setAutoDeploy(false);
 	}
 
-	if (constraints == null && !context.getPreemptiveAuthentication() && !authRequired) {
-		if (log.isDebugEnabled()) {
-			log.debug(" Not subject to any constraint");
-		}
-		getNext().invoke(request, response);
-		return;
-	}
-
-	if (constraints != null && disableProxyCaching && !"POST".equalsIgnoreCase(request.getMethod())) {
-		if (securePagesWithPragma) {
-			response.setHeader("Pragma", "No-cache");
-			response.setHeader("Cache-Control", "no-cache");
-		} else {
-			response.setHeader("Cache-Control", "private");
-		}
-		response.setHeader("Expires", DATE_ONE);
-	}
-
-	if (constraints != null) {
-		if (log.isDebugEnabled()) {
-			log.debug(" Calling hasUserDataPermission()");
-		}
-		if (!realm.hasUserDataPermission(request, response, constraints)) {
-			if (log.isDebugEnabled()) {
-				log.debug(" Failed hasUserDataPermission() test");
-			}
-
-			return;
-		}
-	}
-
-	boolean hasAuthConstraint = false;
-	if (constraints != null) {
-		hasAuthConstraint = true;
-		for (int i = 0; i < constraints.length && hasAuthConstraint; i++) {
-			if (!constraints[i].getAuthConstraint()) {
-				hasAuthConstraint = false;
-			} else if (!constraints[i].getAllRoles() && !constraints[i].getAuthenticatedUsers()) {
-				String[] roles = constraints[i].findAuthRoles();
-				if (roles == null || roles.length == 0) {
-					hasAuthConstraint = false;
-				}
-			}
-		}
-	}
-
-	if (!authRequired && hasAuthConstraint) {
-		authRequired = true;
-	}
-
-	if (!authRequired && context.getPreemptiveAuthentication()) {
-		authRequired = request.getCoyoteRequest().getMimeHeaders().getValue("authorization") != null;
-	}
-
-	if (!authRequired && context.getPreemptiveAuthentication() && HttpServletRequest.CLIENT_CERT_AUTH.equals(getAuthMethod())) {
-		X509Certificate[] certs = getRequestCertificates(request);
-		authRequired = certs != null && certs.length > 0;
-	}
-
-	JaspicState jaspicState = null;
-
-	if (authRequired) {
-		if (log.isDebugEnabled()) {
-			log.debug(" Calling authenticate()");
-		}
-
-		if (jaspicProvider != null) {
-			jaspicState = getJaspicState(jaspicProvider, request, response, hasAuthConstraint);
-			if (jaspicState == null) {
-				return;
-			}
-		}
-
-		if (jaspicProvider == null && !doAuthenticate(request, response) || jaspicProvider != null && !authenticateJaspic(request, response, jaspicState, false)) {
-			if (log.isDebugEnabled()) {
-				log.debug(" Failed authenticate() test");
-			}
-
-			return;
-		}
-
-	}
-
-	if (constraints != null) {
-		if (log.isDebugEnabled()) {
-			log.debug(" Calling accessControl()");
-		}
-		if (!realm.hasResourcePermission(request, response, constraints, this.context)) {
-			if (log.isDebugEnabled()) {
-				log.debug(" Failed accessControl() test");
-			}
-			return;
-		}
-	}
-
-	if (log.isDebugEnabled()) {
-		log.debug(" Successfully passed all security constraints");
-	}
-	getNext().invoke(request, response);
-
-	if (jaspicProvider != null) {
-		secureResponseJspic(request, response, jaspicState);
+	if (host.getDeployOnStartup()) {
+		deployApps();
 	}
 }
 
 /**
- * Context：的基础阀。
+ * 解压文件。
  */
-location：StandardContextValve。
-public final void invoke(Request request, Response response) throws IOException, ServletException {
-
-	MessageBytes requestPathMB = request.getRequestPathMB();
-	if ((requestPathMB.startsWithIgnoreCase("/META-INF/", 0)) || (requestPathMB.equalsIgnoreCase("/META-INF"))
-			|| (requestPathMB.startsWithIgnoreCase("/WEB-INF/", 0)) || (requestPathMB.equalsIgnoreCase("/WEB-INF"))) {
-		response.sendError(HttpServletResponse.SC_NOT_FOUND);
-		return;
-	}
-
-	Wrapper wrapper = request.getWrapper();
-	if (wrapper == null || wrapper.isUnavailable()) {
-		response.sendError(HttpServletResponse.SC_NOT_FOUND);
-		return;
-	}
-
-	try {
-		response.sendAcknowledgement();
-	} catch (IOException ioe) {
-		container.getLogger().error(sm.getString("standardContextValve.acknowledgeException"), ioe);
-		request.setAttribute(RequestDispatcher.ERROR_EXCEPTION, ioe);
-		response.sendError(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
-		return;
-	}
-
-	if (request.isAsyncSupported()) {
-		request.setAsyncSupported(wrapper.getPipeline().isAsyncSupported());
-	}
+location：HostConfig
+protected void deployApps() {
+	// Host中配置的appBase对应的值。
+	File appBase = host.getAppBaseFile();
 	
-	// Wrapper的基础阀：StandardWrapperValve
-	wrapper.getPipeline().getFirst().invoke(request, response);
-}
-
-/**
- * Wrapper的基础阀。
- */
-location：StandardWrapperValve
-public final void invoke(Request request, Response response) throws IOException, ServletException {
-
-	boolean unavailable = false;
-	Throwable throwable = null;
-
-	long t1=System.currentTimeMillis();
-	requestCount.incrementAndGet();
-	StandardWrapper wrapper = (StandardWrapper) getContainer();
-	Servlet servlet = null;
-	Context context = (Context) wrapper.getParent();
-
-	if (!context.getState().isAvailable()) {
-		response.sendError(HttpServletResponse.SC_SERVICE_UNAVAILABLE, sm.getString("standardContext.isUnavailable"));
-		unavailable = true;
-	}
-
+	// 配置的路径。
+	File configBase = host.getConfigBaseFile();
 	
-	if (!unavailable && wrapper.isUnavailable()) {
-		container.getLogger().info(sm.getString("standardWrapper.isUnavailable", wrapper.getName()));
-		long available = wrapper.getAvailable();
-		if ((available > 0L) && (available < Long.MAX_VALUE)) {
-			response.setDateHeader("Retry-After", available);
-			response.sendError(HttpServletResponse.SC_SERVICE_UNAVAILABLE, sm.getString("standardWrapper.isUnavailable", wrapper.getName()));
-		} else if (available == Long.MAX_VALUE) {
-			response.sendError(HttpServletResponse.SC_NOT_FOUND, sm.getString("standardWrapper.notFound", wrapper.getName()));
-		}
-		unavailable = true;
-	}
-
-	try {
-		if (!unavailable) {
-			servlet = wrapper.allocate();
-		}
-	} catch (UnavailableException e) {
-		container.getLogger().error(sm.getString("standardWrapper.allocateException", wrapper.getName()), e);
-		long available = wrapper.getAvailable();
-		if ((available > 0L) && (available < Long.MAX_VALUE)) {
-			response.setDateHeader("Retry-After", available);
-			response.sendError(HttpServletResponse.SC_SERVICE_UNAVAILABLE, sm.getString("standardWrapper.isUnavailable", wrapper.getName()));
-		} else if (available == Long.MAX_VALUE) {
-			response.sendError(HttpServletResponse.SC_NOT_FOUND, sm.getString("standardWrapper.notFound", wrapper.getName()));
-		}
-	} catch (ServletException e) {
-		container.getLogger().error(sm.getString("standardWrapper.allocateException", wrapper.getName()), StandardWrapper.getRootCause(e));
-		throwable = e;
-		exception(request, response, e);
-	} catch (Throwable e) {
-		ExceptionUtils.handleThrowable(e);
-		container.getLogger().error(sm.getString("standardWrapper.allocateException", wrapper.getName()), e);
-		throwable = e;
-		exception(request, response, e);
-		servlet = null;
-	}
-
-	MessageBytes requestPathMB = request.getRequestPathMB();
-	DispatcherType dispatcherType = DispatcherType.REQUEST;
-	if (request.getDispatcherType()==DispatcherType.ASYNC) dispatcherType = DispatcherType.ASYNC;
-	request.setAttribute(Globals.DISPATCHER_TYPE_ATTR,dispatcherType);
-	request.setAttribute(Globals.DISPATCHER_REQUEST_PATH_ATTR, requestPathMB);
-	ApplicationFilterChain filterChain = ApplicationFilterFactory.createFilterChain(request, wrapper, servlet);
-
-	try {
-		if ((servlet != null) && (filterChain != null)) {
-			if (context.getSwallowOutput()) {
-				try {
-					SystemLogHandler.startCapture();
-					if (request.isAsyncDispatching()) {
-						request.getAsyncContextInternal().doInternalDispatch();
-					} else {
-						filterChain.doFilter(request.getRequest(),
-								response.getResponse());
-					}
-				} finally {
-					String log = SystemLogHandler.stopCapture();
-					if (log != null && log.length() > 0) {
-						context.getLogger().info(log);
-					}
-				}
-			} else {
-				if (request.isAsyncDispatching()) {
-					request.getAsyncContextInternal().doInternalDispatch();
-				} else {
-					filterChain.doFilter
-						(request.getRequest(), response.getResponse());
-				}
-			}
-
-		}
-	} catch (ClientAbortException | CloseNowException e) {
-		if (container.getLogger().isDebugEnabled()) {
-			container.getLogger().debug(sm.getString("standardWrapper.serviceException", wrapper.getName(), context.getName()), e);
-		}
-		throwable = e;
-		exception(request, response, e);
-	} catch (IOException e) {
-		container.getLogger().error(sm.getString( "standardWrapper.serviceException", wrapper.getName(), context.getName()), e);
-		throwable = e;
-		exception(request, response, e);
-	} catch (UnavailableException e) {
-		container.getLogger().error(sm.getString("standardWrapper.serviceException", wrapper.getName(), context.getName()), e);
-		wrapper.unavailable(e);
-		long available = wrapper.getAvailable();
-		if ((available > 0L) && (available < Long.MAX_VALUE)) {
-			response.setDateHeader("Retry-After", available);
-			response.sendError(HttpServletResponse.SC_SERVICE_UNAVAILABLE, sm.getString("standardWrapper.isUnavailable", wrapper.getName()));
-		} else if (available == Long.MAX_VALUE) {
-			response.sendError(HttpServletResponse.SC_NOT_FOUND, sm.getString("standardWrapper.notFound", wrapper.getName()));
-		}
-	} catch (ServletException e) {
-		Throwable rootCause = StandardWrapper.getRootCause(e);
-		if (!(rootCause instanceof ClientAbortException)) {
-			container.getLogger().error(sm.getString("standardWrapper.serviceExceptionRoot", wrapper.getName(), context.getName(), e.getMessage()), rootCause);
-		}
-		throwable = e;
-		exception(request, response, e);
-	} catch (Throwable e) {
-		ExceptionUtils.handleThrowable(e);
-		container.getLogger().error(sm.getString("standardWrapper.serviceException", wrapper.getName(), context.getName()), e);
-		throwable = e;
-		exception(request, response, e);
-	}
-
-	if (filterChain != null) {
-		filterChain.release();
-	}
-
-	try {
-		if (servlet != null) {
-			wrapper.deallocate(servlet);
-		}
-	} catch (Throwable e) {
-		ExceptionUtils.handleThrowable(e);
-		container.getLogger().error(sm.getString("standardWrapper.deallocateException", wrapper.getName()), e);
-		if (throwable == null) {
-			throwable = e;
-			exception(request, response, e);
-		}
-	}
-
-	try {
-		if ((servlet != null) &&
-			(wrapper.getAvailable() == Long.MAX_VALUE)) {
-			wrapper.unload();
-		}
-	} catch (Throwable e) {
-		ExceptionUtils.handleThrowable(e);
-		container.getLogger().error(sm.getString("standardWrapper.unloadException", wrapper.getName()), e);
-		if (throwable == null) {
-			throwable = e;
-			exception(request, response, e);
-		}
-	}
-	long t2=System.currentTimeMillis();
-
-	long time=t2-t1;
-	processingTime += time;
-	if( time > maxTime) maxTime=time;
-	if( time < minTime) minTime=time;
+	// 获取过滤过可忽略文件及文件夹的剩余文件及文件夹。
+	String[] filteredAppPaths = filterAppPaths(appBase.list());
+	
+	// 解压configBase文件夹下的xml描述文件。
+	deployDescriptors(configBase, configBase.list());
+	
+	// 解压war包。
+	deployWARs(appBase, filteredAppPaths);
+	
+	// 
+	deployDirectories(appBase, filteredAppPaths);
 
 }
 
 
+
+##########################################################    Server\Service\engine\Host.StandardPipeline启动    ##########################################
+
+	先初始化，虽然初始化啥都没有做。
 
 /**
- * 拦击的请求。
+ *
  */
-location：ThreadPoolExecutor
-public void await() {
-	if( port == -2 ) {
-		return;
+location：StandardPipeline
+protected synchronized void startInternal() throws LifecycleException {
+	Valve current = first;
+	if (current == null) {
+		current = basic;
 	}
-	if( port==-1 ) {
-		try {
-			awaitThread = Thread.currentThread();
-			while(!stopAwait) {
-				try {
-					Thread.sleep( 10000 );
-				} catch( InterruptedException ex ) {
-					
-				}
-			}
-		} finally {
-			awaitThread = null;
+	while (current != null) {
+		if (current instanceof Lifecycle) {
+			((Lifecycle) current).start();
 		}
-		return;
+		current = current.getNext();
 	}
 
-	try {
-		awaitSocket = new ServerSocket(port, 1, InetAddress.getByName(address));
-	} catch (IOException e) {
-		log.error("StandardServer.await: create[" + address + ":" + port + "]: ", e);
-		return;
-	}
-
-	try {
-		awaitThread = Thread.currentThread();
-
-		while (!stopAwait) {
-			ServerSocket serverSocket = awaitSocket;
-			if (serverSocket == null) {
-				break;
-			}
-
-			Socket socket = null;
-			StringBuilder command = new StringBuilder();
-			try {
-				InputStream stream;
-				long acceptStartTime = System.currentTimeMillis();
-				try {
-				
-					/**
-					 * 获取一次请求。
-					 */
-					socket = serverSocket.accept();
-					socket.setSoTimeout(10 * 1000);  
-					
-					stream = socket.getInputStream();
-				} catch (SocketTimeoutException ste) {
-					log.warn(sm.getString("standardServer.accept.timeout", Long.valueOf(System.currentTimeMillis() - acceptStartTime)), ste);
-					continue;
-				} catch (AccessControlException ace) {
-					log.warn("StandardServer.accept security exception: " + ace.getMessage(), ace);
-					continue;
-				} catch (IOException e) {
-					if (stopAwait) {
-						break;
-					}
-					log.error("StandardServer.await: accept: ", e);
-					break;
-				}
-
-				int expected = 1024;
-				
-				while (expected < shutdown.length()) {
-					if (random == null) {
-						random = new Random();
-					}
-					
-					expected += (random.nextInt() % 1024);
-				}
-				
-				// 读取请求信息。
-				while (expected > 0) {
-					int ch = -1;
-					try {
-						ch = stream.read();
-					} catch (IOException e) {
-						log.warn("StandardServer.await: read: ", e);
-						ch = -1;
-					}
-					
-					if (ch < 32 || ch == 127) {
-						break;
-					}
-					
-					command.append((char) ch);
-					
-					expected--;
-				}
-			} finally {
-				try {
-					if (socket != null) {
-						socket.close();
-					}
-				} catch (IOException e) {
-					
-				}
-			}
-
-			// 判断是否是停止命令
-			boolean match = command.toString().equals(shutdown);
-			if (match) {
-				log.info(sm.getString("standardServer.shutdownViaPort"));
-				break;
-			} else {
-				log.warn("StandardServer.await: Invalid command '" + command.toString() + "' received");
-			}
-		}
-	} finally {
-		ServerSocket serverSocket = awaitSocket;
-		awaitThread = null;
-		awaitSocket = null;
-
-		if (serverSocket != null) {
-			try {
-				serverSocket.close();
-			} catch (IOException e) {
-				
-			}
-		}
-	}
+	setState(LifecycleState.STARTING);
 }
-
-
-SocketProcessorBase

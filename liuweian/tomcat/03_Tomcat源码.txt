@@ -1505,7 +1505,7 @@ protected void initInternal() throws LifecycleException {
 }
 
 /**
- *
+ * 获取Realm
  */
 location：StandardEngine
 public Realm getRealm() {
@@ -1525,14 +1525,34 @@ public Realm getRealm() {
 	Lock l = realmLock.readLock();
 	l.lock();
 	try {
-		if (realm != null)
+		if (realm != null) {
 			return (realm);
-		if (parent != null)
+		}
+		
+		if (parent != null) {
 			return (parent.getRealm());
+		}
+		
 		return null;
+		
 	} finally {
 		l.unlock();
 	}
+}
+
+/**
+ * 初始化线程池。
+ */
+location：ContainerBase
+protected void initInternal() throws LifecycleException {
+	BlockingQueue<Runnable> startStopQueue = new LinkedBlockingQueue<>();
+	startStopExecutor = new ThreadPoolExecutor(
+			getStartStopThreadsInternal(),
+			getStartStopThreadsInternal(), 10, TimeUnit.SECONDS,
+			startStopQueue,
+			new StartStopThreadFactory(getName() + "-startStop-"));
+	startStopExecutor.allowCoreThreadTimeOut(true);
+	super.initInternal();
 }
 
 ##########################################################    Server\Service\Connector初始化    ##########################################
@@ -1744,132 +1764,9 @@ public void bind() throws Exception {
 	selectorPool.open();
 }
 
-/**
- * 打开
- */
-location：NioSeletorPool
-public void open() throws IOException {
-	enabled = true;
-	getSharedSelector();
-	if (SHARED) {
-		blockingSelector = new NioBlockingSelector();
-		blockingSelector.open(getSharedSelector());
-	}
-}
-
-/**
- * WindowsSelectorImpl
- */
-location：NioSeletorPool
-protected Selector getSharedSelector() throws IOException {
-	if (SHARED && SHARED_SELECTOR == null) {
-		synchronized ( NioSelectorPool.class ) {
-			if ( SHARED_SELECTOR == null )  {
-				SHARED_SELECTOR = Selector.open();
-				log.info("Using a shared selector for servlet write/read");
-			}
-		}
-	}
-	return  SHARED_SELECTOR;
-}
-
-/**
- *
- */
-location：NioBlockingSelector
-public void open(Selector selector) {
-	sharedSelector = selector;
-	
-	// BlockPoller：继承Thread类，该类内部有一个Selector。
-	poller = new BlockPoller();
-	
-	// 设置BlockPoller。
-	poller.selector = sharedSelector;
-	poller.setDaemon(true);
-	poller.setName("NioBlockingSelector.BlockPoller-"+(++threadCounter));
-	
-	// 启动线程
-	poller.start();
-}
-
-/**
- *
- */
-location：NioBlockingSelector.BlockPoller
-public void run() {
-	while (run) {
-		try {
-			events();
-			int keyCount = 0;
-			try {
-				int i = wakeupCounter.get();
-				if (i>0) {
-					keyCount = selector.selectNow();
-				} else {
-					wakeupCounter.set(-1);
-					keyCount = selector.select(1000);
-				}
-				wakeupCounter.set(0);
-				if (!run) break;
-			} catch (NullPointerException x ) {
-				if (selector == null) {
-					throw x;
-				}
-				if ( log.isDebugEnabled() ) {
-					log.debug("Possibly encountered sun bug 5076772 on windows JDK 1.5",x);
-				}
-				continue;
-			} catch (CancelledKeyException x) {
-				if (log.isDebugEnabled()) {
-					log.debug("Possibly encountered sun bug 5076772 on windows JDK 1.5",x);
-				}
-				continue;
-			} catch (Throwable x) {
-				ExceptionUtils.handleThrowable(x);
-				log.error("",x);
-				continue;
-			}
-
-			Iterator<SelectionKey> iterator = keyCount > 0 ? selector.selectedKeys().iterator() : null;
-			
-			while (run && iterator != null && iterator.hasNext()) {
-				SelectionKey sk = iterator.next();
-				NioSocketWrapper attachment = (NioSocketWrapper)sk.attachment();
-				try {
-					iterator.remove();
-					sk.interestOps(sk.interestOps() & (~sk.readyOps()));
-					if ( sk.isReadable() ) {
-						countDown(attachment.getReadLatch());
-					}
-					if (sk.isWritable()) {
-						countDown(attachment.getWriteLatch());
-					}
-				} catch (CancelledKeyException ckx) {
-					sk.cancel();
-					countDown(attachment.getReadLatch());
-					countDown(attachment.getWriteLatch());
-				}
-			}
-		}catch ( Throwable t ) {
-			log.error("",t);
-		}
-	}
-	
-	events.clear();
-
-	if (selector.isOpen()) {
-		try {
-			selector.selectNow();
-		}catch( Exception ignore ) {
-			if (log.isDebugEnabled())log.debug("",ignore);
-		}
-	}
-	try {
-		selector.close();
-	}catch( Exception ignore ) {
-		if (log.isDebugEnabled())log.debug("",ignore);
-	}
-}
+########################################################################################################################################################
+######################################        TCP连接      请看		 05_Tomcat源码开启TCP连接 	   #####################################################
+########################################################################################################################################################
 
 
 

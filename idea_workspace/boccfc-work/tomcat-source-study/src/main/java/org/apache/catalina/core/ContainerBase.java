@@ -1420,7 +1420,9 @@ public abstract class ContainerBase extends LifecycleMBeanBase
 
         @Override
         public Void call() throws LifecycleException {
+            System.out.println("this is ContainerBase!!!!!!!!!!");
             child.start();
+            System.out.println("这里要暂停！！！！！！！！！！！！！");
             return null;
         }
     }

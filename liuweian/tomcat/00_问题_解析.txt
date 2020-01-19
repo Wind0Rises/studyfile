@@ -1,4 +1,9 @@
-、tomcat的容器模型。
+零、tomcat的容器模型。
+	* 一个tomcat只能有一个Server。
+	* Connector是连接器，是Service的核心组件之一，一个Service可以有多个Connector，主要是连接客户端请求；
+	* Container是Service的另一个核心组件，按照层级有Engine，Host，Context，Wrapper四种，【【一个Service只有一个Engine】】其主要作用是执行业务逻辑；
+	* Host ---> webapps，里面可以多个应用。  Context  --->  webapps里的具体应用ssm    Wrapper  --->  ssm应用的某一个Servlet。
+	
 
 一、Tomcat的类加载器。
 	1、tomcat的类加载器的模型：
@@ -29,3 +34,27 @@
 
 
 三、CoyoteAdapter这干什么的。
+
+
+四、Tomcat中的Container和Connector是什么？有什么联系？
+
+
+
+五、tomcat如何一个请求的过程。
+	* 首先Tcp监听到连接请求，获取到对应的socket。然后把请求交给Handler处理（这里是ConnectionHandler），然后把请求信息交给Handler处理。
+	
+	* 在Handler中获取Adapter【CoyoteAdapter】，所有的处理过程都是通过CoyoteAdapter进行处理的，通过CoyoteAdapter的service(...)方法。
+	
+	* 通过请求的信息从Mapper【Mapper：实现了Servlet API映射规则。】中获取到对应的Wrapper，放入org.apache.coyote.Request。这里会把请求和Wrapper
+	进行绑定，这是就知道要处理哪一个servlet了。
+	
+	* 通过Connector获取Service，并通过Service获取对应容器，也就顶层容器Engin，然后会容器的pipeline（管道），然后按顺序调用阀，【先处理Engin的管道
+	的阀，然后再执行Host的管道的阀，接着处理Context管的阀，最后处理Wrapper管的的阀。基础阀的作用，是调用下一个子容器的阀。】
+	
+	* 在StandardWrapperValve是最后调用Servlet的过程。首先获取过滤器链，然后执行过滤器链。过滤器链执行完成以后，从Wrapper中获取Servlet的实例，然后调用
+	Servlet实例的service(..)方法。
+	
+	
+六、pipeline、valves、container之间的联系。
+	pipeline：其是接口，描述了一组Valve的集合，当调用invoke（）方法时应按顺序执行这些阀门。 要求管道中某个地方的Valve（通常是最后一个）
+必须处理请求并创建相应的响应，而不是尝试将请求继续传递。
