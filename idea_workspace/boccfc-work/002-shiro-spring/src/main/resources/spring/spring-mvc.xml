@@ -67,9 +67,6 @@
 
 
 
-
-
-
     <!--
         使用ContentNegotiatingViewResolver配置多个视图解析器。
     -->
@@ -135,6 +132,8 @@
 
 
 
+
+    <bean id="/ac" class="com.liu.shiro.basis.controller.TestAbstractController"/>
 
 
 

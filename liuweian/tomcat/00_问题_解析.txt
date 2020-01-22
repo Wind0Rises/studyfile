@@ -30,7 +30,10 @@
 		
 		
 二、如何理解tomcat的server.xml，tomcat是如何解析server.xml的？？
-
+	构建一个Digester对象，并为xml中的每一个元素，绑定一些方法，
+	通过digester.addObjectCreate(..)：添加创建元素的规则；
+	通过digester.addSetProperties(..)：添加设置属性的规则；
+	通过digester.setNextRule(..)：添加执行下一个元素钱的规则；
 
 
 三、CoyoteAdapter这干什么的。
@@ -56,5 +59,17 @@
 	
 	
 六、pipeline、valves、container之间的联系。
-	pipeline：其是接口，描述了一组Valve的集合，当调用invoke（）方法时应按顺序执行这些阀门。 要求管道中某个地方的Valve（通常是最后一个）
-必须处理请求并创建相应的响应，而不是尝试将请求继续传递。
+	pipeline：其是接口，描述了一组Valve的集合，当调用invoke（）方法时应按顺序执行这些阀门。 要求管道中某个地方的Valve（通常是最后一个）必须处理请求并
+创建相应的响应，而不是尝试将请求继续传递。在StandardEngine、StandardContext、StandardHost、StandardWrapper都继承了ContainerBase，ContainerBase实现了Container
+接口，在ContainerBase有一个Pipeline属性。可以通过调用addValve(Valve valve)向管道中添加Valve。
+
+
+七、什么时候解压war和解析应用的web.xml?
+	在StandardHost的setStateInternal(..)方法里，会调用StandardHost绑定的监听器的lifecycleEvent(..)，这里StandardHost只有一个默认的HostConfig，这个监听器是
+在ContextRuleSet中添加的。HostConfig会调用start()方法，在start()方法中会调用deployApps()方法，进行解压操作。
+
+
+八、Tomcat的协议。
+
+
+	

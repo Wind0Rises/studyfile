@@ -1,0 +1,48 @@
+AbstractController的作用类似
+
+
+1、AbstractController配合SimpleUrlHandlerMapping使用？
+
+从DispatherServlet的doDispatch(HttpServletRequest request, HttpServletResponse response)方法的mv = ha.handle(processedRequest, response, 
+mappedHandler.getHandler());操作开始。这个HandlerAdapter就是SimpleUrlHandlerMapping对应的HandlerAdapter。
+
+
+/**
+ * 调用HandlerAdapter的handlerRequest(request, response)方法。
+ */
+location：SimpleControllerHandlerAdapter
+public ModelAndView handle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
+	return ((Controller) handler).handleRequest(request, response);
+}
+
+
+/**
+ * 这个是实现AbstractController的具体实例。
+ */
+location：AbstractController
+public ModelAndView handleRequest(HttpServletRequest request, HttpServletResponse response) throws Exception {
+
+	if (HttpMethod.OPTIONS.matches(request.getMethod())) {
+		response.setHeader("Allow", getAllowHeader());
+		return null;
+	}
+
+	// 委托给WebContentGenerator进行检查和准备。
+	checkRequest(request);
+	prepareResponse(response);
+
+	// 如果需要，在同步块中执行handleRequestInternal。
+	if (this.synchronizeOnSession) {
+		HttpSession session = request.getSession(false);
+		
+		if (session != null) {
+			Object mutex = WebUtils.getSessionMutex(session);
+			synchronized (mutex) {
+				return handleRequestInternal(request, response);
+			}
+		}
+	}
+
+	// handleRequestInternal在AbstractController中是抽象的方法，留给具体的基础AbstractController去实现具体的逻辑。
+	return handleRequestInternal(request, response);
+}

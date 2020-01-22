@@ -88,6 +88,7 @@ final V putVal(K key, V value, boolean onlyIfAbsent) {
 						binCount = 1;
 						for (Node<K,V> e = f;; ++binCount) {
 							K ek;
+							
 							// 如果key已经存在，进行覆盖。
 							if (e.hash == hash && ((ek = e.key) == key || (ek != null && key.equals(ek)))) {
 								oldVal = e.val;
@@ -141,26 +142,62 @@ final V putVal(K key, V value, boolean onlyIfAbsent) {
 	return null;
 }
 
-sizeCtl：初始化之前为0；
-sizeCtl：初始化的时候设置为-1；
-sizeCtl：当在resize的时候，值是1(1 + 正在执行resize操作的线程数量）。
-sizeCtl：初始化之后的其他时间它是下一次table要变成的大小。
+/**
+ * 类似计算hash值。
+ * h --> hashCode。
+ */
+static final int spread(int h) {
+
+	// System.out.println(-8 >>> 2);  1073741822
+	// 1000 0000 0000 0000 0000 1000  原码
+	// 1111 1111 1111 1111 1111 0111  反码 -- 最高位不变，其他位取反
+	// 1111 1111 1111 1111 1111 1000  补码 -- 反码 + 1
+	// 0011 1111 1111 1111 1111 1110  结果
+	
+	// System.out.println(-8 >> 2);
+	// 1000 0000 0000 0000 0000 1000  原码
+	// 1111 1111 1111 1111 1111 0111  反码 -- 最高位不变，其他位取反
+	// 1111 1111 1111 1111 1111 1000  补码 -- 反码 + 1
+	// 1111 1111 1111 1111 1111 1110  结果
+	// 1111 1111 1111 1111 1111 1101
+	// 1000 0000 0000 0000 0000 0010  -2
+	
+	// HASH_BITS = 0x7fffffff;   ===>  0111 1111 1111 1111 1111 1111 1111 1111
+	// ^ : 亦或运算
+	// & : 按位与
+	// >>> : 无符号右移，忽略符号位，空位都以0补齐。(不论正负,高位均补0)不区分符号。
+	// >>  : 有符号右移。若正数,高位补0,负数,高位补1。
+	return (h ^ (h >>> 16)) & HASH_BITS;
+	
+}
+
+
+sizeCtr = 0  ：默认值；
+sizeCtr = -1 ：表示Map正在初始化中；
+sizeCtr = -N ：表示正在有N-1个线程进行扩容操作；
+sizeCtr > 0  : 未初始化则表示初始化Map的大小，已初始化则表示【下次进行扩容操作的阈值】
 
 // 初始化table
 private final Node<K,V>[] initTable() {
 	Node<K,V>[] tab; 
 	int sc;
 	
-	// 循环知道初始化成功。
+	// 循环直到初始化成功。
 	while ((tab = table) == null || tab.length == 0) {
-		// 数据异常。
+	
+		// 让其他线程先执行，这就说明，有其他现在在执行初始化操作，或者扩容操作。
 		if ((sc = sizeCtl) < 0) {
 			Thread.yield();
+			
+		// 通过CAS将sizeCtl设置为-1。
 		} else if (U.compareAndSwapInt(this, SIZECTL, sc, -1)) {
 			try {
 				if ((tab = table) == null || tab.length == 0) {
+				
 					// 设置默认容量。第一次都是16.
 					int n = (sc > 0) ? sc : DEFAULT_CAPACITY;
+					
+					// 初始化数组。
 					Node<K,V>[] nt = (Node<K,V>[]) new Node<?,?>[n];
 					table = tab = nt; 
 					sc = n - (n >>> 2);   // (16 - 4) = 3n/4
@@ -606,3 +643,28 @@ public V get(Object key) {
 	return null;
 }
 
+
+############################################################        size()      ########################################################
+/**
+ *
+ */
+public int size() {
+	long n = sumCount();
+	return ((n < 0L) ? 0 : (n > (long)Integer.MAX_VALUE) ? Integer.MAX_VALUE : (int)n);
+}
+
+/**
+ *
+ */
+final long sumCount() {
+	CounterCell[] as = counterCells; CounterCell a;
+	long sum = baseCount;
+	if (as != null) {
+		for (int i = 0; i < as.length; ++i) {
+			if ((a = as[i]) != null) {
+				sum += a.value;
+			}
+		}
+	}
+	return sum;
+}

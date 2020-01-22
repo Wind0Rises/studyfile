@@ -521,7 +521,7 @@ protected void initNaming() {
  * 创建Digester对象，并为各个节点设置对应的规则。针对server.xml。
  * 这里并没有解析。
  */
-location：
+location：Catalina
 protected Digester createStartDigester() {
 	long t1=System.currentTimeMillis();
 	
