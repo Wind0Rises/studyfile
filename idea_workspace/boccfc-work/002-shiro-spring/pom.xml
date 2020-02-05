@@ -17,7 +17,7 @@
         <maven.compiler.source>1.8</maven.compiler.source>
         <maven.compiler.target>1.8</maven.compiler.target>
 
-        <org.apache.shiro>1.4.1</org.apache.shiro>
+        <org.apache.shiro>1.5.0</org.apache.shiro>
         <!--<org.springframework.version>5.2.0.RELEASE</org.springframework.version>-->
         <org.springframework.version>4.3.12.RELEASE</org.springframework.version>
 
