@@ -1,0 +1,1 @@
+HttpSession：HttpSession是Servlet的规范的其中一个，一个HttpSession有一个唯一的id。session可以保存多个key-value数据，类似一个Map；SessionID通常会保存在客户端的Cookie中。
