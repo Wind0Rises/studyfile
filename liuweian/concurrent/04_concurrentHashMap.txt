@@ -11,7 +11,8 @@
 			3、是否需要从链表到红黑树。在需要转换的时候也是会上锁的。转换之后通过cas更换头节点。
 			###注意步骤2和步骤3锁的是同一个对象，所以在同一时刻2、3只有一个能执行。【分析场景：联系put两个，第一个先执行else;第二个先执行完第三步。这个时候第一步要怎么执行】###
 			
-			
+	
+	总结：头结点为空，直接CAS进行添加。如果不为空，使用的尾插法，把第一个元素上锁。
 			
 			
 			
@@ -59,6 +60,7 @@ final V putVal(K key, V value, boolean onlyIfAbsent) {
 			tab = initTable();
 		
 		// 获取tab数组，第i位置的值，支持volatile语义。
+		// 如果头结点为null，直接添加。
 		} else if ((f = tabAt(tab, i = (n - 1) & hash)) == null) {
 			
 			// 直接进行添加。
@@ -200,7 +202,7 @@ private final Node<K,V>[] initTable() {
 					// 初始化数组。
 					Node<K,V>[] nt = (Node<K,V>[]) new Node<?,?>[n];
 					table = tab = nt; 
-					sc = n - (n >>> 2);   // (16 - 4) = 3n/4
+					sc = n - (n >>> 2);   // (16 - 4) = 3n/4  也就是阈值。
 				}
 			} finally {
 				sizeCtl = sc;
@@ -332,13 +334,16 @@ private final void tryPresize(int size) {
 	}
 }
 
-
-// 检查是否需要扩容，或者是否正在扩容。如果需要扩容，就调用扩容方法，如果正在扩容，就帮助其扩容。
+/** 
+ * 检查是否需要扩容，或者是否正在扩容。如果需要扩容，就调用扩容方法，如果正在扩容，就帮助其扩容。
+ */
+ 
+ // check：-1是删除，1是链表，2是红黑树
 private final void addCount(long x, int check) {
 	CounterCell[] as; 
 	long b, s;
 	
-	// 
+	// counterCells不为null 【或者】 更新baseCount失败
 	if ((as = counterCells) != null || !U.compareAndSwapLong(this, BASECOUNT, b = baseCount, s = b + x)) {
 		CounterCell a; 
 		long v; 
@@ -358,7 +363,7 @@ private final void addCount(long x, int check) {
 		s = sumCount();
 	}
 	
-	//  check >= 0 即为可能出现扩容的情况，例如putVal方法中的调用
+	//  如果check值大于等于0 则需要检验是否需要进行扩容操作，即为可能出现扩容的情况，例如putVal方法中的调用
 	if (check >= 0) {
 		Node<K,V>[] tab, nt; 
 		int n, sc;
@@ -367,7 +372,9 @@ private final void addCount(long x, int check) {
 		// 数组长度不能大于允许的数组最大长度这两个条件才能继续。。这个 while 循环除了判断是否达到阈值从而进行扩容操作
 		// 之外还有一个作用就是当一条线程完成自己的迁移任务后，如果集合还在扩容，则会继续循环，继续加入扩容大军，申请后面的迁移任务
 		while (s >= (long)(sc = sizeCtl) && (tab = table) != null && (n = tab.length) < MAXIMUM_CAPACITY) {
+			
 			int rs = resizeStamp(n);
+			
 			// sc < 0 说明集合正在扩容当中
 			if (sc < 0) {
 			
@@ -386,9 +393,21 @@ private final void addCount(long x, int check) {
 			} else if (U.compareAndSwapInt(this, SIZECTL, sc, (rs << RESIZE_STAMP_SHIFT) + 2)) {
 				transfer(tab, null);
 			}
+			
+			
 			s = sumCount();
 		}
 	}
+}
+
+/**
+ * 返回与扩容有关的一个生成戳rs，每次新的扩容，都有一个不同的n，这个生成戳就是根据n来计算出来的一个数字，n不同，这个数字也不同
+ * 另外还得保证 rs << RESIZE_STAMP_SHIFT 必须是负数
+ * 这个方法的返回值，当且仅当 RESIZE_STAMP_SIZE = 32时为负数
+ * 但是b = 32时MAX_RESIZERS = (1 << (32 - RESIZE_STAMP_BITS)) - 1 = 0，这一点很奇怪
+ */
+static final int resizeStamp(int n) {
+    return Integer.numberOfLeadingZeros(n) | (1 << (RESIZE_STAMP_BITS - 1));
 }
 
 
@@ -479,9 +498,12 @@ private final void fullAddCount(long x, boolean wasUncontended) {
 	}
 }
 
-// 
+/**
+ *
+ */
 private final void transfer(Node<K,V>[] tab, Node<K,V>[] nextTab) {
 	int n = tab.length, stride;
+	
 	if ((stride = (NCPU > 1) ? (n >>> 3) / NCPU : n) < MIN_TRANSFER_STRIDE) {
 		stride = MIN_TRANSFER_STRIDE;
 	}

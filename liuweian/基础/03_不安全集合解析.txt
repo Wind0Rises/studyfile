@@ -1,0 +1,23 @@
+
+
+一、ArrayList线程不安全解析。
+	案例一：ConcurrentModificationException
+		在高并发场景下，如果在遍历List的时候，有线程对List进行了操作，这个时候遍历List就会报错，报错：ConcurrentModificationException。这个错也可能在线程安全的Vector中发生。
+	可以使用Collections中的SynchronizedList集合，SynchronizedList集合可以所有方法都使用Synchronized关键字。
+
+	案例二：高并发null值问题。
+		在add方法中有一步复制过程。elementData[size++] = e;线程1和线程2同时向List中添加元素。线程1和线程2读取到的size都是5，这个时候线程1执行了size++操作，并完成赋值。线程2
+	也进行了size++操作，这个时候size也是5，也就是说覆盖了线程1的操作的值，但是实际情况size自增了两次。
+	
+	案例三：实际操作的操作的次数和List的size不相等。
+	
+
+二、HashMap线程不安全解析。
+	案例一：值覆盖
+	if ((p = tab[i = (n - 1) & hash]) == null) {      步骤一
+		  tab[i] = newNode(hash, key, value, null);		 步骤二
+	}
+		线程A和线程B插入的值进过Hash以后，对应在内部的数据位置是一个，这个时候线程A完成步骤一，准备执行步骤二但是这个时候却把cpu让出来了。这个时候线程B进入步骤一，因为线程A没
+	有插入数据，所以线程B可以进入if循环并完成了步骤二。这个时候有把cpu给到线程A,这个时候线程A会把线程B的数据给覆盖了。
+	
+	案例二：扩容形成闭循环（1.7及以下）1.8及其以上是用来尾插法。

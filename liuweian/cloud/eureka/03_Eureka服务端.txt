@@ -1,0 +1,271 @@
+
+
+
+
+使用@EnableEurekaServer开启服务端，EnableEurekaServer注解会导入EurekaServerMarkerConfiguration类，同时向spring注入Marker类的实例，Marker类就是开启EurekaServer的关键。
+在spring-cloud-netflix-eureka-server.jar包下，这个jar包的spring.factories配置了org.springframework.boot.autoconfigure.EnableAutoConfiguration=org.springframework.cloud.
+etflix.eureka.server.EurekaServerAutoConfiguration内容。
+
+
+@Configuration
+@Import(EurekaServerInitializerConfiguration.class)
+@ConditionalOnBean(EurekaServerMarkerConfiguration.Marker.class)      // 开关。
+@EnableConfigurationProperties({ EurekaDashboardProperties.class, InstanceRegistryProperties.class })
+@PropertySource("classpath:/eureka/server.properties")
+public class EurekaServerAutoConfiguration extends WebMvcConfigurerAdapter { 
+
+	......
+
+}
+
+/**
+ * Eureka Server 初始化配置.
+ * 实现了SmartLifecycle接口，配置生命周期的。
+ */
+@Configuration
+public class EurekaServerInitializerConfiguration implements ServletContextAware, SmartLifecycle, Ordered { 
+
+	....
+
+}
+
+/**
+ *
+ */
+location：EurekaServerInitializerConfiguration
+public void start() {
+	new Thread(new Runnable() {
+		@Override
+		public void run() {
+			try {
+			
+				eurekaServerBootstrap.contextInitialized(EurekaServerInitializerConfiguration.this.servletContext);
+				log.info("Started Eureka Server");
+
+				publish(new EurekaRegistryAvailableEvent(getEurekaServerConfig()));
+				
+				EurekaServerInitializerConfiguration.this.running = true;
+				
+				publish(new EurekaServerStartedEvent(getEurekaServerConfig()));
+				
+			} catch (Exception ex) {
+				log.error("Could not initialize Eureka servlet context", ex);
+			}
+		}
+	}).start();
+}
+
+/**
+ *
+ */
+location：EurekaServerBootstrap
+public void contextInitialized(ServletContext context) {
+	try {
+		// 数据中心、eureka环境配置。
+		initEurekaEnvironment();
+		
+		initEurekaServerContext();
+
+		context.setAttribute(EurekaServerContext.class.getName(), this.serverContext);
+	} catch (Throwable e) {
+		log.error("Cannot bootstrap eureka server :", e);
+		throw new RuntimeException("Cannot bootstrap eureka server :", e);
+	}
+}
+
+/**
+ * 数据中心、eureka环境配置。
+ */
+location：EurekaServerBootstrap
+protected void initEurekaEnvironment() throws Exception {
+	log.info("Setting the eureka configuration..");
+
+	// EUREKA_DATACENTER = "eureka.datacenter" 数据中心配置。
+	String dataCenter = ConfigurationManager.getConfigInstance().getString(EUREKA_DATACENTER);
+	
+	if (dataCenter == null) {
+		log.info("Eureka data center value eureka.datacenter is not set, defaulting to default");
+		ConfigurationManager.getConfigInstance().setProperty(ARCHAIUS_DEPLOYMENT_DATACENTER, DEFAULT);
+	} else {
+		ConfigurationManager.getConfigInstance().setProperty(ARCHAIUS_DEPLOYMENT_DATACENTER, dataCenter);
+	}
+	
+	// EUREKA_ENVIRONMENT = "eureka.environment"  eureka环境配置。
+	String environment = ConfigurationManager.getConfigInstance().getString(EUREKA_ENVIRONMENT);
+	
+	if (environment == null) {
+		ConfigurationManager.getConfigInstance().setProperty(ARCHAIUS_DEPLOYMENT_ENVIRONMENT, TEST);
+		log.info("Eureka environment value eureka.environment is not set, defaulting to test");
+	} else {
+		ConfigurationManager.getConfigInstance().setProperty(ARCHAIUS_DEPLOYMENT_ENVIRONMENT, environment);
+	}
+}
+
+/**
+ * 
+ */
+location：EurekaServerBootstrap
+protected void initEurekaServerContext() throws Exception {
+	JsonXStream.getInstance().registerConverter(new V1AwareInstanceInfoConverter(), XStream.PRIORITY_VERY_HIGH);
+	XmlXStream.getInstance().registerConverter(new V1AwareInstanceInfoConverter(), XStream.PRIORITY_VERY_HIGH);
+
+	// Aws相关操作。
+	if (isAws(this.applicationInfoManager.getInfo())) {
+		this.awsBinder = new AwsBinderDelegate(this.eurekaServerConfig, this.eurekaClientConfig, this.registry, this.applicationInfoManager);
+		this.awsBinder.start();
+	}
+
+	EurekaServerContextHolder.initialize(this.serverContext);
+
+	log.info("Initialized server context");
+
+	// this.registry 是 InstanceRegistry实例。
+	int registryCount = this.registry.syncUp();
+	
+	this.registry.openForTraffic(this.applicationInfoManager, registryCount);
+	EurekaMonitors.registerAllStats();
+}
+
+
+		LookupService   LeaseManaget
+			/\				/\
+			 | 				|
+			 ————————————————
+				   instanceRegistry
+					/\    	 /\
+					|	 	 ||
+		—————————————		  ------------	
+PeerAwareInstanceRegistry    AbstractInstanceRegistry(很重要)				Aware
+			/\						/\										  /\
+			||  					 |										  |
+			--			——————————————										  |
+	PeerAeareInstanceRegistryImpl(很重要)                                ApplicationContextAware
+				/\			/\													/\
+				|			|													||
+				|			————————————————————————----------------------------
+				|									||
+		AwsInstanceRegistry						InstanceRegistry
+
+LookupService：查找服务用于查找活动的实例。
+LeaseManaget：负责为特定实例创建、更新、收回、租赁。
+InstanceRegistry：实例注册方法。	
+
+	
+
+##################################################################################################################################################################
+###################################################              注册					       ###################################################################
+##################################################################################################################################################################
+/**
+ * 注册流程
+ */
+location：InstanceRegistry
+public void register(final InstanceInfo info, final boolean isReplication) {
+	handleRegistration(info, resolveInstanceLeaseDuration(info), isReplication);
+	super.register(info, isReplication);
+}
+
+/**
+ *
+ */
+location：PeerAeareInstanceRegistryImpl
+public void register(final InstanceInfo info, final boolean isReplication) {
+	int leaseDuration = Lease.DEFAULT_DURATION_IN_SECS;
+	if (info.getLeaseInfo() != null && info.getLeaseInfo().getDurationInSecs() > 0) {
+		leaseDuration = info.getLeaseInfo().getDurationInSecs();
+	}
+	super.register(info, leaseDuration, isReplication);
+	replicateToPeers(Action.Register, info.getAppName(), info.getId(), info, null, isReplication);
+}
+
+/**
+ *
+ */
+location：AbstractInstanceRegistry
+public void register(InstanceInfo registrant, int leaseDuration, boolean isReplication) {
+	try {
+		read.lock();
+		
+		Map<String, Lease<InstanceInfo>> gMap = registry.get(registrant.getAppName());
+		REGISTER.increment(isReplication);
+		if (gMap == null) {
+			final ConcurrentHashMap<String, Lease<InstanceInfo>> gNewMap = new ConcurrentHashMap<String, Lease<InstanceInfo>>();
+			gMap = registry.putIfAbsent(registrant.getAppName(), gNewMap);
+			if (gMap == null) {
+				gMap = gNewMap;
+			}
+		}
+		Lease<InstanceInfo> existingLease = gMap.get(registrant.getId());
+		
+		if (existingLease != null && (existingLease.getHolder() != null)) {
+			Long existingLastDirtyTimestamp = existingLease.getHolder().getLastDirtyTimestamp();
+			Long registrationLastDirtyTimestamp = registrant.getLastDirtyTimestamp();
+			logger.debug("Existing lease found (existing={}, provided={}", existingLastDirtyTimestamp, registrationLastDirtyTimestamp);
+
+			if (existingLastDirtyTimestamp > registrationLastDirtyTimestamp) {
+				logger.warn("There is an existing lease and the existing lease's dirty timestamp {} is greater" +
+						" than the one that is being registered {}", existingLastDirtyTimestamp, registrationLastDirtyTimestamp);
+				logger.warn("Using the existing instanceInfo instead of the new instanceInfo as the registrant");
+				registrant = existingLease.getHolder();
+			}
+		} else {
+			synchronized (lock) {
+				if (this.expectedNumberOfClientsSendingRenews > 0) {
+					this.expectedNumberOfClientsSendingRenews = this.expectedNumberOfClientsSendingRenews + 1;
+					updateRenewsPerMinThreshold();
+				}
+			}
+			logger.debug("No previous lease information found; it is new registration");
+		}
+		
+		Lease<InstanceInfo> lease = new Lease<InstanceInfo>(registrant, leaseDuration);
+		if (existingLease != null) {
+			lease.setServiceUpTimestamp(existingLease.getServiceUpTimestamp());
+		}
+		
+		gMap.put(registrant.getId(), lease);
+		synchronized (recentRegisteredQueue) {
+			recentRegisteredQueue.add(new Pair<Long, String>(System.currentTimeMillis(), registrant.getAppName() + "(" + registrant.getId() + ")"));
+		}
+		
+		if (!InstanceStatus.UNKNOWN.equals(registrant.getOverriddenStatus())) {
+			logger.debug("Found overridden status {} for instance {}. Checking to see if needs to be add to the " + "overrides", registrant.getOverriddenStatus(), registrant.getId());
+			if (!overriddenInstanceStatusMap.containsKey(registrant.getId())) {
+				logger.info("Not found overridden id {} and hence adding it", registrant.getId());
+				overriddenInstanceStatusMap.put(registrant.getId(), registrant.getOverriddenStatus());
+			}
+		}
+		InstanceStatus overriddenStatusFromMap = overriddenInstanceStatusMap.get(registrant.getId());
+		if (overriddenStatusFromMap != null) {
+			logger.info("Storing overridden status {} from map", overriddenStatusFromMap);
+			registrant.setOverriddenStatus(overriddenStatusFromMap);
+		}
+
+		InstanceStatus overriddenInstanceStatus = getOverriddenInstanceStatus(registrant, existingLease, isReplication);
+		registrant.setStatusWithoutDirty(overriddenInstanceStatus);
+
+		if (InstanceStatus.UP.equals(registrant.getStatus())) {
+			lease.serviceUp();
+		}
+		registrant.setActionType(ActionType.ADDED);
+		recentlyChangedQueue.add(new RecentlyChangedItem(lease));
+		registrant.setLastUpdatedTimestamp();
+		invalidateCache(registrant.getAppName(), registrant.getVIPAddress(), registrant.getSecureVipAddress());
+		logger.info("Registered instance {}/{} with status {} (replication={})", registrant.getAppName(), registrant.getId(), registrant.getStatus(), isReplication);
+	} finally {
+		read.unlock();
+	}
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+

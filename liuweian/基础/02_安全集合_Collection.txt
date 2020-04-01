@@ -5,7 +5,11 @@ List -->  CopyOnWriteArrayList   --  使用ReentrantLock上锁。能够保持线
 Set  -->  CopyOnWriteArraySet	 --  是基于CopyOnWriteArrayList操作的。
 
 
-CopyOnWriteArrayList：
+CopyOnWriteArrayList：【在写的时候复制】内部使用ReetrantLock进行上锁，在add、remove等操作的时候都会上锁，注意这里的操作都是通一把锁，就是说同一时刻只有一个操作能获取到锁。
+		但是读没有上锁。
+		
+CopyOnWriteArraySet：
+
 
 public boolean addIfAbsent(E e) {
 	// 获取CopyOnWriteArrayList内部维护的数组。
@@ -76,4 +80,39 @@ private boolean addIfAbsent(E e, Object[] snapshot) {
 	} finally {
 		lock.unlock();
 	}
+}
+
+/**
+ * 向List中添加元素。
+ */
+public boolean add(E var1) {
+	// 获取锁并加锁。
+	ReentrantLock var2 = this.lock;
+	var2.lock();
+
+	boolean var6;
+	try {
+	
+		// 获取这里List中的内部数组。
+		Object[] var3 = this.getArray();
+		
+		// 获取内部数组的长度。
+		int var4 = var3.length;
+		
+		// 复制原有的数组到新数组。
+		Object[] var5 = Arrays.copyOf(var3, var4 + 1);
+		
+		// 添加元素到新数组。
+		var5[var4] = var1;
+		
+		// 设置新数组为内部数组。
+		this.setArray(var5);
+		var6 = true;
+		
+	// 释放锁
+	} finally {
+		var2.unlock();
+	}
+
+	return var6;
 }
