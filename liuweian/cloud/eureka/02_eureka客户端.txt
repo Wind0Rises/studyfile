@@ -1,0 +1,466 @@
+
+一、问题
+	1、Euerka客户端，写不写@EnableDiscoveryClient都不影响？
+
+
+	2、@EnableDiscoveryClient和@EnableEurekaClient的区别？	
+
+
+	
+	
+	
+二、流程
+	1、初始化流程。
+		首先在spring-cloud-netflix-eureka-client.jar包中spring.factories文件中配置了org.springframework.boot.autoconfigure.
+	EnableAutoConfiguration，其中配置EurekaClientAutoConfiguration这个类。在EurekaClientAutoConfiguration这个类会注册EurekaClient
+	类，EurekaClient继承DiscoveryClient，在DiscoveryClient这个类中会创建一个ApplicationInfoManager.StatusChangeListener对象，
+	这个对象会调用InstanceInfoReplicator的onDemandUpdate()方法。
+	
+	2、
+		EurekaAutoServiceRegistration这个类实现了SmartLifecycle接口。在调用EurekaAutoServiceRegistration方法中会调用之前注册
+	的StatusChangeListener的notify方法，最终调用了
+	
+	
+	EurekaAutoServiceRegistration
+
+/**
+ *
+ */
+location：EurekaClientAutoConfiguration
+@Bean(destroyMethod = "shutdown")
+@ConditionalOnMissingBean(value = EurekaClient.class, search = SearchStrategy.CURRENT)
+@org.springframework.cloud.context.config.annotation.RefreshScope
+@Lazy
+public EurekaClient eurekaClient(ApplicationInfoManager manager, EurekaClientConfig config, EurekaInstanceConfig instance,
+		@Autowired(required = false) HealthCheckHandler healthCheckHandler) {
+
+	ApplicationInfoManager appManager;
+	
+	if (AopUtils.isAopProxy(manager)) {
+		appManager = ProxyUtils.getTargetObject(manager);
+	} else {
+		appManager = manager;
+	}
+	
+	CloudEurekaClient cloudEurekaClient = new CloudEurekaClient(appManager, config, this.optionalArgs, this.context);
+	
+	cloudEurekaClient.registerHealthCheck(healthCheckHandler);
+	
+	return cloudEurekaClient;
+}
+
+/**
+ *
+ */
+location：CloudEurekaClient
+public CloudEurekaClient(ApplicationInfoManager applicationInfoManager, EurekaClientConfig config, AbstractDiscoveryClientOptionalArgs<?> args,
+		ApplicationEventPublisher publisher) {
+		
+	super(applicationInfoManager, config, args);
+	this.applicationInfoManager = applicationInfoManager;
+	this.publisher = publisher;
+	this.eurekaTransportField = ReflectionUtils.findField(DiscoveryClient.class, "eurekaTransport");
+	ReflectionUtils.makeAccessible(this.eurekaTransportField);
+}
+
+/**
+ *
+ */
+location：DiscoveryClient
+public DiscoveryClient(ApplicationInfoManager applicationInfoManager, final EurekaClientConfig config, AbstractDiscoveryClientOptionalArgs args) {
+	this(applicationInfoManager, config, args, new Provider<BackupRegistry>() {
+		
+		private volatile BackupRegistry backupRegistryInstance;
+
+		@Override
+		public synchronized BackupRegistry get() {
+			if (backupRegistryInstance == null) {
+				String backupRegistryClassName = config.getBackupRegistryImpl();
+				if (null != backupRegistryClassName) {
+					try {
+						backupRegistryInstance = (BackupRegistry) Class.forName(backupRegistryClassName).newInstance();
+						logger.info("Enabled backup registry of type {}", backupRegistryInstance.getClass());
+					} catch (InstantiationException e) {
+						logger.error("Error instantiating BackupRegistry.", e);
+					} catch (IllegalAccessException e) {
+						logger.error("Error instantiating BackupRegistry.", e);
+					} catch (ClassNotFoundException e) {
+						logger.error("Error instantiating BackupRegistry.", e);
+					}
+				}
+
+				if (backupRegistryInstance == null) {
+					logger.warn("Using default backup registry implementation which does not do anything.");
+					backupRegistryInstance = new NotImplementedRegistryImpl();
+				}
+			}
+
+			return backupRegistryInstance;
+		}
+	});
+}
+
+/**
+ *
+ */
+location：DiscoveryClient
+DiscoveryClient(ApplicationInfoManager applicationInfoManager, EurekaClientConfig config, 
+	AbstractDiscoveryClientOptionalArgs args, Provider<BackupRegistry> backupRegistryProvider) {
+	
+	if (args != null) {
+		this.healthCheckHandlerProvider = args.healthCheckHandlerProvider;
+		this.healthCheckCallbackProvider = args.healthCheckCallbackProvider;
+		this.eventListeners.addAll(args.getEventListeners());
+		this.preRegistrationHandler = args.preRegistrationHandler;
+	} else {
+		this.healthCheckCallbackProvider = null;
+		this.healthCheckHandlerProvider = null;
+		this.preRegistrationHandler = null;
+	}
+	
+	this.applicationInfoManager = applicationInfoManager;
+	InstanceInfo myInfo = applicationInfoManager.getInfo();
+
+	clientConfig = config;
+	staticClientConfig = clientConfig;
+	transportConfig = config.getTransportConfig();
+	instanceInfo = myInfo;
+	if (myInfo != null) {
+		appPathIdentifier = instanceInfo.getAppName() + "/" + instanceInfo.getId();
+	} else {
+		logger.warn("Setting instanceInfo to a passed in null value");
+	}
+
+	this.backupRegistryProvider = backupRegistryProvider;
+
+	this.urlRandomizer = new EndpointUtils.InstanceInfoBasedUrlRandomizer(instanceInfo);
+	localRegionApps.set(new Applications());
+
+	fetchRegistryGeneration = new AtomicLong(0);
+
+	remoteRegionsToFetch = new AtomicReference<String>(clientConfig.fetchRegistryForRemoteRegions());
+	remoteRegionsRef = new AtomicReference<>(remoteRegionsToFetch.get() == null ? null : remoteRegionsToFetch.get().split(","));
+
+	if (config.shouldFetchRegistry()) {
+		this.registryStalenessMonitor = new ThresholdLevelsMetric(this, METRIC_REGISTRY_PREFIX + "lastUpdateSec_", new long[]{15L, 30L, 60L, 120L, 240L, 480L});
+	} else {
+		this.registryStalenessMonitor = ThresholdLevelsMetric.NO_OP_METRIC;
+	}
+
+	if (config.shouldRegisterWithEureka()) {
+		this.heartbeatStalenessMonitor = new ThresholdLevelsMetric(this, METRIC_REGISTRATION_PREFIX + "lastHeartbeatSec_", new long[]{15L, 30L, 60L, 120L, 240L, 480L});
+	} else {
+		this.heartbeatStalenessMonitor = ThresholdLevelsMetric.NO_OP_METRIC;
+	}
+
+	logger.info("Initializing Eureka in region {}", clientConfig.getRegion());
+
+	if (!config.shouldRegisterWithEureka() && !config.shouldFetchRegistry()) {
+		logger.info("Client configured to neither register nor query for data.");
+		scheduler = null;
+		heartbeatExecutor = null;
+		cacheRefreshExecutor = null;
+		eurekaTransport = null;
+		instanceRegionChecker = new InstanceRegionChecker(new PropertyBasedAzToRegionMapper(config), clientConfig.getRegion());
+
+		DiscoveryManager.getInstance().setDiscoveryClient(this);
+		DiscoveryManager.getInstance().setEurekaClientConfig(config);
+
+		initTimestampMs = System.currentTimeMillis();
+		logger.info("Discovery Client initialized at timestamp {} with initial instances count: {}", initTimestampMs, this.getApplications().size());
+
+		return;
+	}
+
+	try {
+		scheduler = Executors.newScheduledThreadPool(2, new ThreadFactoryBuilder().setNameFormat("DiscoveryClient-%d").setDaemon(true).build());
+
+		heartbeatExecutor = new ThreadPoolExecutor(1, clientConfig.getHeartbeatExecutorThreadPoolSize(), 0, TimeUnit.SECONDS,
+				new SynchronousQueue<Runnable>(), new ThreadFactoryBuilder()
+						.setNameFormat("DiscoveryClient-HeartbeatExecutor-%d").setDaemon(true).build()
+		);
+
+		cacheRefreshExecutor = new ThreadPoolExecutor(1, clientConfig.getCacheRefreshExecutorThreadPoolSize(), 0, TimeUnit.SECONDS,
+				new SynchronousQueue<Runnable>(), new ThreadFactoryBuilder()
+						.setNameFormat("DiscoveryClient-CacheRefreshExecutor-%d")
+						.setDaemon(true).build()
+		);
+
+		eurekaTransport = new EurekaTransport();
+		scheduleServerEndpointTask(eurekaTransport, args);
+
+		AzToRegionMapper azToRegionMapper;
+		
+		if (clientConfig.shouldUseDnsForFetchingServiceUrls()) {
+			azToRegionMapper = new DNSBasedAzToRegionMapper(clientConfig);
+		} else {
+			azToRegionMapper = new PropertyBasedAzToRegionMapper(clientConfig);
+		}
+		
+		if (null != remoteRegionsToFetch.get()) {
+			azToRegionMapper.setRegionsToFetch(remoteRegionsToFetch.get().split(","));
+		}
+		
+		instanceRegionChecker = new InstanceRegionChecker(azToRegionMapper, clientConfig.getRegion());
+	} catch (Throwable e) {
+		throw new RuntimeException("Failed to initialize DiscoveryClient!", e);
+	}
+
+	if (clientConfig.shouldFetchRegistry() && !fetchRegistry(false)) {
+		fetchRegistryFromBackup();
+	}
+
+	if (this.preRegistrationHandler != null) {
+		this.preRegistrationHandler.beforeRegistration();
+	}
+
+	if (clientConfig.shouldRegisterWithEureka() && clientConfig.shouldEnforceRegistrationAtInit()) {
+		try {
+			// 【【【非常重要】】】
+			if (!register()) {
+				throw new IllegalStateException("Registration error at startup. Invalid server response.");
+			}
+		} catch (Throwable th) {
+			logger.error("Registration error at startup: {}", th.getMessage());
+			throw new IllegalStateException(th);
+		}
+	}
+
+	// 【【【非常重要】】】
+	initScheduledTasks();
+
+	try {
+		Monitors.registerObject(this);
+	} catch (Throwable e) {
+		logger.warn("Cannot register timers", e);
+	}
+
+	DiscoveryManager.getInstance().setDiscoveryClient(this);
+	DiscoveryManager.getInstance().setEurekaClientConfig(config);
+
+	initTimestampMs = System.currentTimeMillis();
+	logger.info("Discovery Client initialized at timestamp {} with initial instances count: {}", initTimestampMs, this.getApplications().size());
+}
+
+/**
+ *
+ */
+location：DiscoveryClient
+private void initScheduledTasks() {
+	if (clientConfig.shouldFetchRegistry()) {
+	
+		int registryFetchIntervalSeconds = clientConfig.getRegistryFetchIntervalSeconds();
+		int expBackOffBound = clientConfig.getCacheRefreshExecutorExponentialBackOffBound();
+		scheduler.schedule(new TimedSupervisorTask("cacheRefresh", scheduler, cacheRefreshExecutor, registryFetchIntervalSeconds,
+						TimeUnit.SECONDS, expBackOffBound, new CacheRefreshThread()), registryFetchIntervalSeconds, TimeUnit.SECONDS);
+	}
+
+	if (clientConfig.shouldRegisterWithEureka()) {
+		int renewalIntervalInSecs = instanceInfo.getLeaseInfo().getRenewalIntervalInSecs();
+		int expBackOffBound = clientConfig.getHeartbeatExecutorExponentialBackOffBound();
+		logger.info("Starting heartbeat executor: " + "renew interval is: {}", renewalIntervalInSecs);
+
+		scheduler.schedule(new TimedSupervisorTask("heartbeat", scheduler, heartbeatExecutor,
+						renewalIntervalInSecs, TimeUnit.SECONDS, expBackOffBound, new HeartbeatThread()), renewalIntervalInSecs, TimeUnit.SECONDS);
+
+		// instanceInfoReplicator内部会调用【注册】
+		instanceInfoReplicator = new InstanceInfoReplicator(this, instanceInfo, clientConfig.getInstanceInfoReplicationIntervalSeconds(), 2);
+
+		statusChangeListener = new ApplicationInfoManager.StatusChangeListener() {
+		
+			@Override
+			public String getId() {
+				return "statusChangeListener";
+			}
+
+			@Override
+			public void notify(StatusChangeEvent statusChangeEvent) {
+				if (InstanceStatus.DOWN == statusChangeEvent.getStatus() || InstanceStatus.DOWN == statusChangeEvent.getPreviousStatus()) {
+					logger.warn("Saw local status change event {}", statusChangeEvent);
+				} else {
+					logger.info("Saw local status change event {}", statusChangeEvent);
+				}
+				instanceInfoReplicator.onDemandUpdate();
+			}
+		};
+
+		if (clientConfig.shouldOnDemandUpdateStatusChange()) {
+			applicationInfoManager.registerStatusChangeListener(statusChangeListener);
+		}
+
+		// 【【【重要】】】
+		instanceInfoReplicator.start(clientConfig.getInitialInstanceInfoReplicationIntervalSeconds());
+	} else {
+		logger.info("Not registering with Eureka server per configuration");
+	}
+}
+
+/**
+ *
+ */
+location：InstanceInfoReplicator
+public void start(int initialDelayMs) {
+	if (started.compareAndSet(false, true)) {
+		instanceInfo.setIsDirty();  
+		
+		// 开启新的线程执行任务。
+		Future next = scheduler.schedule(this, initialDelayMs, TimeUnit.SECONDS);
+		scheduledPeriodicRef.set(next);
+	}
+}
+
+/**
+ *
+ */
+location：InstanceInfoReplicator
+public void run() {
+	try {
+		discoveryClient.refreshInstanceInfo();
+
+		Long dirtyTimestamp = instanceInfo.isDirtyWithTime();
+		if (dirtyTimestamp != null) {
+		
+			// 【【【注册过程】】】
+			discoveryClient.register();
+			
+			instanceInfo.unsetIsDirty(dirtyTimestamp);
+		}
+	} catch (Throwable t) {
+		logger.warn("There was a problem with the instance info replicator", t);
+	} finally {
+		Future next = scheduler.schedule(this, replicationIntervalSeconds, TimeUnit.SECONDS);
+		scheduledPeriodicRef.set(next);
+	}
+}
+
+
+####################################################################################################
+####################################          注册过程         #####################################
+####################################################################################################
+
+
+
+boolean register() throws Throwable {
+	logger.info(PREFIX + "{}: registering service...", appPathIdentifier);
+	
+	EurekaHttpResponse<Void> httpResponse;
+	
+	try {
+		httpResponse = eurekaTransport.registrationClient.register(instanceInfo);
+	} catch (Exception e) {
+		logger.warn(PREFIX + "{} - registration failed {}", appPathIdentifier, e.getMessage(), e);
+		throw e;
+	}
+	
+	if (logger.isInfoEnabled()) {
+		logger.info(PREFIX + "{} - registration status: {}", appPathIdentifier, httpResponse.getStatusCode());
+	}
+	return httpResponse.getStatusCode() == Status.NO_CONTENT.getStatusCode();
+}
+
+/**
+ *
+ */
+location：EurekaHttpClientDecorator
+public EurekaHttpResponse<Void> register(final InstanceInfo info) {
+	return execute(new RequestExecutor<Void>() {
+		@Override
+		public EurekaHttpResponse<Void> execute(EurekaHttpClient delegate) {
+			return delegate.register(info);
+		}
+
+		@Override
+		public RequestType getRequestType() {
+			return RequestType.Register;
+		}
+	});
+}
+
+/**
+ *
+ */
+location：SessionedEurekaHttpClient
+protected <R> EurekaHttpResponse<R> execute(RequestExecutor<R> requestExecutor) {
+	long now = System.currentTimeMillis();
+	long delay = now - lastReconnectTimeStamp;
+	
+	if (delay >= currentSessionDurationMs) {
+	
+		logger.debug("Ending a session and starting anew");
+		lastReconnectTimeStamp = now;
+		
+		currentSessionDurationMs = randomizeSessionDuration(sessionDurationMs);
+		TransportUtils.shutdown(eurekaHttpClientRef.getAndSet(null));
+	}
+
+	EurekaHttpClient eurekaHttpClient = eurekaHttpClientRef.get();
+	
+	if (eurekaHttpClient == null) {
+		eurekaHttpClient = TransportUtils.getOrSetAnotherClient(eurekaHttpClientRef, clientFactory.newClient());
+	}
+	
+	// 这个requestExecutor是传进来的，是EurekaHttpClientDecorator类register(...)方法内定义的匿名类。
+	// 会调用匿名类的里的方法。
+	return requestExecutor.execute(eurekaHttpClient);
+}
+
+/**
+ *
+ */
+location：CloudEurekaClient
+protected <R> EurekaHttpResponse<R> execute(RequestExecutor<R> requestExecutor) {
+
+	List<EurekaEndpoint> candidateHosts = null;
+	int endpointIdx = 0;
+	for (int retry = 0; retry < numberOfRetries; retry++) {
+		EurekaHttpClient currentHttpClient = delegate.get();
+		EurekaEndpoint currentEndpoint = null;
+		if (currentHttpClient == null) {
+			if (candidateHosts == null) {
+				candidateHosts = getHostCandidates();
+				if (candidateHosts.isEmpty()) {
+					throw new TransportException("There is no known eureka server; cluster server list is empty");
+				}
+			}
+			if (endpointIdx >= candidateHosts.size()) {
+				throw new TransportException("Cannot execute request on any known server");
+			}
+
+			currentEndpoint = candidateHosts.get(endpointIdx++);
+			currentHttpClient = clientFactory.newClient(currentEndpoint);
+		}
+
+		try {
+			// 204代表响应报文中包含若干首部和一个状态行，但是没有实体的主体内容。
+			EurekaHttpResponse<R> response = requestExecutor.execute(currentHttpClient);
+			if (serverStatusEvaluator.accept(response.getStatusCode(), requestExecutor.getRequestType())) {
+				delegate.set(currentHttpClient);
+				if (retry > 0) {
+					logger.info("Request execution succeeded on retry #{}", retry);
+				}
+				return response;
+			}
+			logger.warn("Request execution failure with status code {}; retrying on another server if available", response.getStatusCode());
+		} catch (Exception e) {
+			logger.warn("Request execution failed with message: {}", e.getMessage());  // just log message as the underlying client should log the stacktrace
+		}
+
+		delegate.compareAndSet(currentHttpClient, null);
+		if (currentEndpoint != null) {
+			quarantineSet.add(currentEndpoint);
+		}
+	}
+	throw new TransportException("Retry limit reached; giving up on completing the request");
+}
+
+
+
+
+
+
+
+
+
+
+
+

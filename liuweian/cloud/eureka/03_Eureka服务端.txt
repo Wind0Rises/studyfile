@@ -1,6 +1,6 @@
 
 
-
+ApplicationResource
 
 使用@EnableEurekaServer开启服务端，EnableEurekaServer注解会导入EurekaServerMarkerConfiguration类，同时向spring注入Marker类的实例，Marker类就是开启EurekaServer的关键。
 在spring-cloud-netflix-eureka-server.jar包下，这个jar包的spring.factories配置了org.springframework.boot.autoconfigure.EnableAutoConfiguration=org.springframework.cloud.
