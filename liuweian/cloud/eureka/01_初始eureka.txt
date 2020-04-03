@@ -1,3 +1,5 @@
+服务列表维护在Server端，client会缓存并定时更新。
+
 @EnableEurekaServer：该注解会向spring容器注入一个名为eurekaServerMarkerBean，值是Marker实例的Bean，这个Marker是一个空类，用于标记的，可以看到它只是一个开关标记，用来激活EurekaServerAutoConfiguration类的。
 		
 EurekaServerAutoConfiguration：这个类就是META-INF/spring.factories中配置的类，在初始化的过程中，springboot默认会加载META-INF/spring.factories中配置的的类。EurekaServerAutoConfiguration这个类上有一个注解
@@ -17,4 +19,4 @@ EurekaServerAutoConfiguration：这个类就是META-INF/spring.factories中配�
 
 启动Spring boot项目时会在finishRefresh()方法里会对实现了Lifecycle接口的类进行处理，会调用对应Bean的start()方法。
 
-
+https://github.com/Netflix/eureka/wiki/Eureka-at-a-glance

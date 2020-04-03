@@ -226,7 +226,7 @@ DiscoveryClient(ApplicationInfoManager applicationInfoManager, EurekaClientConfi
 		}
 	}
 
-	// 【【【非常重要】】】
+	// 【【【非常重要】】】  ---> 
 	initScheduledTasks();
 
 	try {
@@ -251,6 +251,8 @@ private void initScheduledTasks() {
 	
 		int registryFetchIntervalSeconds = clientConfig.getRegistryFetchIntervalSeconds();
 		int expBackOffBound = clientConfig.getCacheRefreshExecutorExponentialBackOffBound();
+		
+		// 【【【缓存刷线】】】
 		scheduler.schedule(new TimedSupervisorTask("cacheRefresh", scheduler, cacheRefreshExecutor, registryFetchIntervalSeconds,
 						TimeUnit.SECONDS, expBackOffBound, new CacheRefreshThread()), registryFetchIntervalSeconds, TimeUnit.SECONDS);
 	}
@@ -260,6 +262,7 @@ private void initScheduledTasks() {
 		int expBackOffBound = clientConfig.getHeartbeatExecutorExponentialBackOffBound();
 		logger.info("Starting heartbeat executor: " + "renew interval is: {}", renewalIntervalInSecs);
 
+		// 【【【续约，心跳】】】
 		scheduler.schedule(new TimedSupervisorTask("heartbeat", scheduler, heartbeatExecutor,
 						renewalIntervalInSecs, TimeUnit.SECONDS, expBackOffBound, new HeartbeatThread()), renewalIntervalInSecs, TimeUnit.SECONDS);
 
@@ -289,6 +292,7 @@ private void initScheduledTasks() {
 		}
 
 		// 【【【重要】】】
+		// getInitialInstanceInfoReplicationIntervalSeconds()：延迟注册。
 		instanceInfoReplicator.start(clientConfig.getInitialInstanceInfoReplicationIntervalSeconds());
 	} else {
 		logger.info("Not registering with Eureka server per configuration");

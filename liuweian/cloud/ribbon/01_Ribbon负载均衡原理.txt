@@ -1,0 +1,219 @@
+
+########################################################################################################################################
+############################################        调用过程     #######################################################################
+########################################################################################################################################
+
+/**
+ * 服务间的调用方式一：使用RestTemplate进行服务之间的调用
+ * @return
+ */
+@GetMapping("/getMsg1")
+public String getMsg1() {
+	RestTemplate restTemplate = new RestTemplate();
+	String result = restTemplate.getForObject("http://localhost:8061/product/msg", String.class);
+	log.info("通过Order服务调用Product服务成功");
+	return result;
+}
+
+/**
+ * 服务间的调用方式二：使用LoadBalancer。
+ * @return
+ */
+@Autowired
+private LoadBalancerClient loadBalancerClient;
+
+@GetMapping("/getMsg2")
+public String getMsg2() {
+	// 通过服务名称获取到对应的ServiceInstance实例。
+	ServiceInstance serviceInstance = loadBalancerClient.choose("PRODUCT");
+	String url = String.format("http://%s:%s/product/msg", serviceInstance.getHost(), serviceInstance.getPort());
+	log.info("请求地址为：{}" , url);
+
+	RestTemplate restTemplate = new RestTemplate();
+	String result = restTemplate.getForObject(url, String.class);
+	log.info("通过Order服务调用Product服务成功");
+	return result;
+}
+
+
+/**
+ * 服务间的调用方式三：@LoadBlanced 注解 RestTemplate。  {@link com.liu.spring.cloud.config.RestTemplateConfig}
+ * @return
+ */
+
+@Autowired
+private RestTemplate restTemplate;
+
+@GetMapping("/getMsg3")
+public String getMsg3() {
+
+	String result = restTemplate.getForObject("http://PRODUCT/product/msg", String.class);
+
+	log.info("通过Order服务调用Product服务成功");
+	return result;
+}
+
+########################################################################################################################################
+############################################        负载均衡源码       #################################################################
+########################################################################################################################################
+/**
+ * RibbonLoadBalancerClient implements LoadBalancerClient
+ */
+location：RibbonLoadBalancerClient
+public ServiceInstance choose(String serviceId) {
+	return choose(serviceId, null);
+}
+
+/**
+ * serviceId：application的name。
+ */
+location：RibbonLoadBalancerClient
+public ServiceInstance choose(String serviceId, Object hint) {
+	Server server = getServer(getLoadBalancer(serviceId), hint);
+	
+	if (server == null) {
+		return null;
+	}
+	
+	return new RibbonServer(serviceId, server, isSecure(server, serviceId), serverIntrospector(serviceId).getMetadata(server));
+}
+
+/**
+ * 获取LoadBalancer
+ */
+location：RibbonLoadBalancerClient
+protected ILoadBalancer getLoadBalancer(String serviceId) {
+	return this.clientFactory.getLoadBalancer(serviceId);
+}
+
+/**
+ * 根据LoadBalance获取具体的服务，（一个应用可能有多个服务）
+ *
+ * ILoadBalancer 
+ *		AbstractLoadBalancer
+ *			NoOpLoadBalancer
+ *			BaseLoadBalancer
+ * 				DynamicServerListLoadBalancer（重要）
+ *					ZoneAwareLoadBalancer
+ */
+location：RibbonLoadBalancerClient
+protected Server getServer(ILoadBalancer loadBalancer, Object hint) {
+	
+	if (loadBalancer == null) {
+		return null;
+	}
+	
+	return loadBalancer.chooseServer(hint != null ? hint : "default");
+}
+
+
+DynamicServerListLoadBalancer：内部成员属性
+	IRule：用于配置负载均衡的策略，
+		RoundRobinRule（随机）：  ----》 WeightedResponseTimeRule（权重）、ResponseTimeWeightedRule（）
+		ClientConfigEnabledRoundRobinRule（轮询）：  ----》 BestAvailableRule（最小请求数）、PredicateBasedRule
+		RandomRule（随机）：
+		RetryRule（轮询方式重试）：
+	IClientConfig：用于配置负载均衡 的客户端
+	IPing：IPing用于向server发送 “ping”，来判断该server是否有响应, 从而判断该server是否可用。它有一个isAlive（）方法。
+
+
+
+/**
+ *
+ */
+location：ZoneAwareLoadBalancer
+public Server chooseServer(Object key) {
+	if (!ENABLED.get() || getLoadBalancerStats().getAvailableZones().size() <= 1) {
+		logger.debug("Zone aware logic disabled or there is only one zone");
+		return super.chooseServer(key);
+	}
+	Server server = null;
+	try {
+		LoadBalancerStats lbStats = getLoadBalancerStats();
+		Map<String, ZoneSnapshot> zoneSnapshot = ZoneAvoidanceRule.createSnapshot(lbStats);
+		logger.debug("Zone snapshots: {}", zoneSnapshot);
+		if (triggeringLoad == null) {
+			triggeringLoad = DynamicPropertyFactory.getInstance().getDoubleProperty("ZoneAwareNIWSDiscoveryLoadBalancer." + this.getName() + ".triggeringLoadPerServerThreshold", 0.2d);
+		}
+
+		if (triggeringBlackoutPercentage == null) {
+			triggeringBlackoutPercentage = DynamicPropertyFactory.getInstance().getDoubleProperty("ZoneAwareNIWSDiscoveryLoadBalancer." + this.getName() + ".avoidZoneWithBlackoutPercetage", 0.99999d);
+		}
+		
+		Set<String> availableZones = ZoneAvoidanceRule.getAvailableZones(zoneSnapshot, triggeringLoad.get(), triggeringBlackoutPercentage.get());
+		logger.debug("Available zones: {}", availableZones);
+		
+		if (availableZones != null &&  availableZones.size() < zoneSnapshot.keySet().size()) {
+			String zone = ZoneAvoidanceRule.randomChooseZone(zoneSnapshot, availableZones);
+			logger.debug("Zone chosen: {}", zone);
+			if (zone != null) {
+				BaseLoadBalancer zoneLoadBalancer = getLoadBalancer(zone);
+				server = zoneLoadBalancer.chooseServer(key);
+			}
+		}
+	} catch (Exception e) {
+		logger.error("Error choosing server using zone aware logic for load balancer={}", name, e);
+	}
+	if (server != null) {
+		return server;
+	} else {
+		logger.debug("Zone avoidance logic is not invoked.");
+		return super.chooseServer(key);
+	}
+}
+
+/**
+ * 	IRule：配置负载均衡的规则。
+ *		AbstractLoadBalancerRule
+ *			ClientConfigEnabledRoundRobinRule
+ *				PredicateBasedRule
+ *					ZoneAvoidanceRule
+ *					AvailabilityFilteringRule
+ */
+location：BaseLoadBalancer
+public Server chooseServer(Object key) {
+	if (counter == null) {
+		counter = createCounter();
+	}
+	counter.increment();
+	if (rule == null) {
+		return null;
+	} else {
+		try {
+			// 通过规则践行选择【】
+			return rule.choose(key);
+		} catch (Exception e) {
+			logger.warn("LoadBalancer [{}]:  Error choosing server for key {}", name, key, e);
+			return null;
+		}
+	}
+}
+
+/**
+ *
+ */
+location：PredicateBasedRule
+public Server choose(Object key) {
+	ILoadBalancer lb = getLoadBalancer();
+	Optional<Server> server = getPredicate().chooseRoundRobinAfterFiltering(lb.getAllServers(), key);
+	if (server.isPresent()) {
+		return server.get();
+	} else {
+		return null;
+	}       
+}
+
+/**
+ *
+ */
+location：AbstractServerPredicate
+public Optional<Server> chooseRoundRobinAfterFiltering(List<Server> servers, Object loadBalancerKey) {
+	// 获取可用的Server
+	List<Server> eligible = getEligibleServers(servers, loadBalancerKey);
+	if (eligible.size() == 0) {
+		return Optional.absent();
+	}
+	
+	// 获取具体的Server。
+	return Optional.of(eligible.get(incrementAndGetModulo(eligible.size())));
+}

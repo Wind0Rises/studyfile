@@ -1,6 +1,6 @@
 
 
-ApplicationResource
+
 
 使用@EnableEurekaServer开启服务端，EnableEurekaServer注解会导入EurekaServerMarkerConfiguration类，同时向spring注入Marker类的实例，Marker类就是开启EurekaServer的关键。
 在spring-cloud-netflix-eureka-server.jar包下，这个jar包的spring.factories配置了org.springframework.boot.autoconfigure.EnableAutoConfiguration=org.springframework.cloud.
@@ -165,28 +165,48 @@ public void register(final InstanceInfo info, final boolean isReplication) {
 }
 
 /**
- *
+ * 发布实例注册事件。
  */
-location：PeerAeareInstanceRegistryImpl
-public void register(final InstanceInfo info, final boolean isReplication) {
-	int leaseDuration = Lease.DEFAULT_DURATION_IN_SECS;
-	if (info.getLeaseInfo() != null && info.getLeaseInfo().getDurationInSecs() > 0) {
-		leaseDuration = info.getLeaseInfo().getDurationInSecs();
-	}
-	super.register(info, leaseDuration, isReplication);
-	replicateToPeers(Action.Register, info.getAppName(), info.getId(), info, null, isReplication);
+location：InstanceRegistry
+private void handleRegistration(InstanceInfo info, int leaseDuration, boolean isReplication) {
+	log("register " + info.getAppName() + ", vip " + info.getVIPAddress() + ", leaseDuration " + leaseDuration + ", isReplication " + isReplication);
+	publishEvent(new EurekaInstanceRegisteredEvent(this, info, leaseDuration, isReplication));
 }
 
 /**
  *
+ */
+location：PeerAeareInstanceRegistryImpl
+public void register(final InstanceInfo info, final boolean isReplication) {
+
+	// int DEFAULT_DURATION_IN_SECS = 90;
+	int leaseDuration = Lease.DEFAULT_DURATION_IN_SECS;
+	
+	// 获取租约信息 ！= null  【并且】  租约的持续时间 > 0
+	// 就是使用注册服务设定的持续时间
+	if (info.getLeaseInfo() != null && info.getLeaseInfo().getDurationInSecs() > 0) {
+		leaseDuration = info.getLeaseInfo().getDurationInSecs();
+	}
+	
+	super.register(info, leaseDuration, isReplication);
+	
+	replicateToPeers(Action.Register, info.getAppName(), info.getId(), info, null, isReplication);
+}
+
+/**
+ * 注册的处理过程。
  */
 location：AbstractInstanceRegistry
 public void register(InstanceInfo registrant, int leaseDuration, boolean isReplication) {
 	try {
 		read.lock();
 		
+		// ConcurrentHashMap<String, Map<String, Lease<InstanceInfo>>> registry = new ConcurrentHashMap<String, Map<String, Lease<InstanceInfo>>>();
+		// 使用AppName作为键。
 		Map<String, Lease<InstanceInfo>> gMap = registry.get(registrant.getAppName());
 		REGISTER.increment(isReplication);
+		
+		// 如果没有就注册。
 		if (gMap == null) {
 			final ConcurrentHashMap<String, Lease<InstanceInfo>> gNewMap = new ConcurrentHashMap<String, Lease<InstanceInfo>>();
 			gMap = registry.putIfAbsent(registrant.getAppName(), gNewMap);
@@ -194,19 +214,22 @@ public void register(InstanceInfo registrant, int leaseDuration, boolean isRepli
 				gMap = gNewMap;
 			}
 		}
+		
+		// 获取对应的租约信息。
 		Lease<InstanceInfo> existingLease = gMap.get(registrant.getId());
 		
+		// 设置了租约信息。
 		if (existingLease != null && (existingLease.getHolder() != null)) {
 			Long existingLastDirtyTimestamp = existingLease.getHolder().getLastDirtyTimestamp();
 			Long registrationLastDirtyTimestamp = registrant.getLastDirtyTimestamp();
 			logger.debug("Existing lease found (existing={}, provided={}", existingLastDirtyTimestamp, registrationLastDirtyTimestamp);
 
 			if (existingLastDirtyTimestamp > registrationLastDirtyTimestamp) {
-				logger.warn("There is an existing lease and the existing lease's dirty timestamp {} is greater" +
-						" than the one that is being registered {}", existingLastDirtyTimestamp, registrationLastDirtyTimestamp);
+				logger.warn("There is an existing lease and the existing lease's dirty timestamp {} is greater" + " than the one that is being registered {}", existingLastDirtyTimestamp, registrationLastDirtyTimestamp);
 				logger.warn("Using the existing instanceInfo instead of the new instanceInfo as the registrant");
 				registrant = existingLease.getHolder();
 			}
+			
 		} else {
 			synchronized (lock) {
 				if (this.expectedNumberOfClientsSendingRenews > 0) {
@@ -217,6 +240,7 @@ public void register(InstanceInfo registrant, int leaseDuration, boolean isRepli
 			logger.debug("No previous lease information found; it is new registration");
 		}
 		
+		// 设置服务开启的时间。
 		Lease<InstanceInfo> lease = new Lease<InstanceInfo>(registrant, leaseDuration);
 		if (existingLease != null) {
 			lease.setServiceUpTimestamp(existingLease.getServiceUpTimestamp());
@@ -234,6 +258,7 @@ public void register(InstanceInfo registrant, int leaseDuration, boolean isRepli
 				overriddenInstanceStatusMap.put(registrant.getId(), registrant.getOverriddenStatus());
 			}
 		}
+		
 		InstanceStatus overriddenStatusFromMap = overriddenInstanceStatusMap.get(registrant.getId());
 		if (overriddenStatusFromMap != null) {
 			logger.info("Storing overridden status {} from map", overriddenStatusFromMap);
@@ -249,7 +274,10 @@ public void register(InstanceInfo registrant, int leaseDuration, boolean isRepli
 		registrant.setActionType(ActionType.ADDED);
 		recentlyChangedQueue.add(new RecentlyChangedItem(lease));
 		registrant.setLastUpdatedTimestamp();
+		
+		// 缓存处理。
 		invalidateCache(registrant.getAppName(), registrant.getVIPAddress(), registrant.getSecureVipAddress());
+		
 		logger.info("Registered instance {}/{} with status {} (replication={})", registrant.getAppName(), registrant.getId(), registrant.getStatus(), isReplication);
 	} finally {
 		read.unlock();
@@ -257,15 +285,69 @@ public void register(InstanceInfo registrant, int leaseDuration, boolean isRepli
 }
 
 
+##################################################################################################################################################################
+###################################################              服务端如何提供服务的					       ###################################################
+##################################################################################################################################################################
+具体查看ApplicationResource这个类。
+注意【【【jersey】】】的使用。
 
+举例：
+	/**
+	 * 定义自己的Resources。
+	 */
+	@Singleton
+	@Path("test")
+	public class CustomResource {
 
+		@GET
+		public String jerseyFirst() {
+			return "Hello";
+		}
+		
+	}
 
+	/**
+	 * 注入ResourceConfig
+	 */
+	@Configuration
+	public class ResourceConfiguration {
+		
+		@Bean
+		public ResourceConfig resourceConfig() {
+			ResourceConfig resourceConfig = new ResourceConfig();
+			resourceConfig.register(CustomResource.class);
+			return resourceConfig;
+		} 
 
+	}
 
+	这样启动项目，就能在浏览器上访问http://..../test了。
 
+Eureka Server提供的接口
+	ApplicationsResource.class
+		* /{version}/apps/{appId}
+		* /{version}/apps
+		* /{version}/apps/delta
+		version  ---->  eureka
 
-
-
+	ApplicationResource.class
+		* {version}
+		* /{id}
+		* POST /
+		
+	InstancesResource.class	
+		* /{version}/instances/{id}
+		
+	StatusResource.class	
+		* /{version}/status
+		
+	VIPResource.calss
+		* /{version}/vips/{vipAddress}
+		
+	PeerReplicationResource.class
+		* /{version}/peerreplication/batch
+		
+	
 
 
 
