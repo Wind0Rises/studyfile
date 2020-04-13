@@ -1,0 +1,47 @@
+eureka server：8761
+配置中心为：8010
+zuul网关：8030
+order订单：8050
+product产品：8070
+
+
+1、product:
+	testController:
+		localhost:8070/product/msg       
+		localhost:8070/product/testZuulIgnore
+		
+	具体的业务：
+		localhost:8070/product/list
+		localhost:8070/product/listForOrder
+		localhost:8070/product/decreaseStock
+		localhost:8070/product/test
+	
+2、order:
+	配置中心:
+		localhost:8050/order/config/env
+		localhost:8050/order/config/common
+		localhost:8050/order/config/liu
+		
+	Hystrix:
+		localhost:8050/order/hystrixRestTemplate	  	使用RestTemplate	  -->   产品服务/product/msg
+		localhost:8050/order/hystrixFeignClient       	使用@FeignClient    -->   产品服务/product/msg
+		
+		
+	StreamRabbitMq
+		localhost:8050/order/stream/send
+		localhost:8050/order/stream/sendObject
+		
+	具体的业务：
+		localhost:8050/order/order/test					使用RestTemplate	  -->   产品服务/product/test
+		localhost:8050/order/order/feignTest    
+		localhost:8050/order/order/create
+		
+2、Zuul:
+	product  --->   myProduct
+	order    --->	myorder
+	
+	localhost:8030/myProduct
+	localhost:8030/myorder
+	
+	
+	spring.cloud.config.enabled

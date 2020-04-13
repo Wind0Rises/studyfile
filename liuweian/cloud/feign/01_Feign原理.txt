@@ -1,0 +1,527 @@
+Fegin起步依赖Ribbon和Hystrix。
+	知识要点：被@FeignClient修饰的是一个接口，但是在使用的时候是用@Autowired注入的，这里注入的是什么？这个很关键。
+
+一、总体流程：
+	总的来说 ， Feign的源码实现过程如下。
+		1、首先通过＠EnableFeignClients 注解开启 FeignClient 的功能。只有这个注解存在，才会在程序启动时开启对＠FeignClient 注解的包扫描 。
+		2、根据Feign的规则实现接口，井在接口上面加上＠Feign Client注解。
+		3、程序启动后，会进行包扫描，扫描所有的＠Feign Client的注解的类，并将这些信息注入IoC容器中。
+		4、当接口的方法被调用时，通过JDK的代理来生成具体的RequestTemplate棋根对象。
+		5、根据RequestTemplate再生成Http请求的Request对象。
+		6、Request对象交给Client去处理，其中Client的网络请求框架可以是HttpURLConnection 、HttpClient和OkHttp。
+		7、最后Client被封装到LoadBalanceClient类，这个类结合类Ribbon做到了负载均衡。
+		
+二、@FeignClien注解的使用。
+	value()和name()：是一样的，是被调用的服务的ServiceId。
+	url()：直接填写硬编码的Url地址。
+	decode404()：404是被解码，还是抛异常。
+	configuration()：指明FeignClient的配置类，默认的配置类为FeignClientsConfiguration类，在缺省的情况下，这个类注入了默认的Decoder、Encoder和Contract等配置的Bean。 
+	fallback()：为配置熔断器的处理类。
+	
+三、自定义@FeignClient的配置类。
+	
+	---  后面再补上 ---
+	定义自己的FeignClientsConfiguration，并在@FeignClient指定这个配置类。
+	
+	
+
+四、从源码解析@FeignClient工作原理。
+#########################################################################################################################################################
+#########################################        扫描所有的＠Feign Client的注解的类，并将这些信息注入IoC容器中        ###################################
+#########################################################################################################################################################
+/**
+ * FeignClientsRegistrar implements ImportBeanDefinitionRegistrar, ResourceLoaderAware, EnvironmentAware
+ * metadata：入口类上的注解。
+ * registry：这个实例也继承了BeanFactory。用于注入bean到IOC容器。
+ */
+locaction：FeignClientsRegistrar
+public void registerBeanDefinitions(AnnotationMetadata metadata, BeanDefinitionRegistry registry) {
+	registerDefaultConfiguration(metadata, registry);
+	registerFeignClients(metadata, registry);
+}
+
+/**
+ * 注册
+ */
+locaction：FeignClientsRegistrar
+private void registerDefaultConfiguration(AnnotationMetadata metadata, BeanDefinitionRegistry registry) {
+	// 获取@EnableFeignClients注解的属性值。
+	Map<String, Object> defaultAttrs = metadata.getAnnotationAttributes(EnableFeignClients.class.getName(), true);
+
+	// 判断，都是满足的。
+	if (defaultAttrs != null && defaultAttrs.containsKey("defaultConfiguration")) {
+		String name;
+		
+		// 定义bean的名称。
+		if (metadata.hasEnclosingClass()) {
+			name = "default." + metadata.getEnclosingClassName();
+		} else {
+			name = "default." + metadata.getClassName();
+		}
+		registerClientConfiguration(registry, name, defaultAttrs.get("defaultConfiguration"));
+	}
+}
+
+/**
+ * 注册 key：default.com.liu.spring.cloud.ServiceSplitOrderApplication.FeignClientSpecification
+ *     value：FeignClientSpecification.class
+ */
+locaction：FeignClientsRegistrar
+private void registerClientConfiguration(BeanDefinitionRegistry registry, Object name, Object configuration) {
+	BeanDefinitionBuilder builder = BeanDefinitionBuilder.genericBeanDefinition(FeignClientSpecification.class);
+	builder.addConstructorArgValue(name);
+	builder.addConstructorArgValue(configuration);
+	registry.registerBeanDefinition(name + "." + FeignClientSpecification.class.getSimpleName(), builder.getBeanDefinition());
+}
+
+/**
+ * @FeignClient修饰的是一个接口。
+ * 要生成代理类，注入Spring容器中。
+ */
+locaction：FeignClientsRegistrar
+public void registerFeignClients(AnnotationMetadata metadata, BeanDefinitionRegistry registry) {
+	ClassPathScanningCandidateComponentProvider scanner = getScanner();
+	scanner.setResourceLoader(this.resourceLoader);
+
+	Set<String> basePackages;
+
+	// 获取EnableFeignClients属性。
+	Map<String, Object> attrs = metadata.getAnnotationAttributes(EnableFeignClients.class.getName());
+	
+	// FeignClient类型拦截器。
+	AnnotationTypeFilter annotationTypeFilter = new AnnotationTypeFilter(FeignClient.class);
+	final Class<?>[] clients = attrs == null ? null : (Class<?>[]) attrs.get("clients");
+	
+	if (clients == null || clients.length == 0) {
+		// 添加拦截器。
+		scanner.addIncludeFilter(annotationTypeFilter);
+		// 扫描的基础包。
+		basePackages = getBasePackages(metadata);
+	} else {
+		final Set<String> clientClasses = new HashSet<>();
+		basePackages = new HashSet<>();
+		
+		for (Class<?> clazz : clients) {
+			basePackages.add(ClassUtils.getPackageName(clazz));
+			clientClasses.add(clazz.getCanonicalName());
+		}
+		
+		AbstractClassTestingTypeFilter filter = new AbstractClassTestingTypeFilter() {
+			@Override
+			protected boolean match(ClassMetadata metadata) {
+				String cleaned = metadata.getClassName().replaceAll("\\$", ".");
+				return clientClasses.contains(cleaned);
+			}
+		};
+		
+		scanner.addIncludeFilter(new AllTypeFilter(Arrays.asList(filter, annotationTypeFilter)));
+	}
+
+	for (String basePackage : basePackages) {
+		// 获取所有有@FeignClient的注解的BeanDefinition
+		Set<BeanDefinition> candidateComponents = scanner.findCandidateComponents(basePackage);
+		
+		// 遍历，
+		for (BeanDefinition candidateComponent : candidateComponents) {
+			if (candidateComponent instanceof AnnotatedBeanDefinition) {
+				AnnotatedBeanDefinition beanDefinition = (AnnotatedBeanDefinition) candidateComponent;
+				AnnotationMetadata annotationMetadata = beanDefinition.getMetadata();
+				
+				// @FeginClient是一个接口。
+				Assert.isTrue(annotationMetadata.isInterface(), "@FeignClient can only be specified on an interface");
+
+				// 获取@FeignClient的属性。
+				Map<String, Object> attributes = annotationMetadata.getAnnotationAttributes(FeignClient.class.getCanonicalName());
+
+				String name = getClientName(attributes);
+				
+				// 注册FeginClientConfiguration。
+				registerClientConfiguration(registry, name, attributes.get("configuration"));
+				
+				// 注册FeignClient。
+				registerFeignClient(registry, annotationMetadata, attributes);
+			}
+		}
+	}
+}
+
+/**
+ *
+ */
+locaction：FeignClientsRegistrar
+private void registerClientConfiguration(BeanDefinitionRegistry registry, Object name, Object configuration) {
+	BeanDefinitionBuilder builder = BeanDefinitionBuilder.genericBeanDefinition(FeignClientSpecification.class);
+	builder.addConstructorArgValue(name);
+	builder.addConstructorArgValue(configuration);
+	registry.registerBeanDefinition(name + "." + FeignClientSpecification.class.getSimpleName(), builder.getBeanDefinition());
+}
+
+/**
+ *
+ */
+locaction：FeignClientsRegistrar
+private void registerFeignClient(BeanDefinitionRegistry registry, AnnotationMetadata annotationMetadata, Map<String, Object> attributes) {
+	String className = annotationMetadata.getClassName();
+	
+	// 【【注意这个definition --->  FeignClientFactoryBean：FeignClient的Bean工厂。】】
+	BeanDefinitionBuilder definition = BeanDefinitionBuilder.genericBeanDefinition(FeignClientFactoryBean.class);
+	
+	validate(attributes);
+	
+	definition.addPropertyValue("url", getUrl(attributes));
+	definition.addPropertyValue("path", getPath(attributes));
+	String name = getName(attributes);
+	definition.addPropertyValue("name", name);
+	String contextId = getContextId(attributes);
+	definition.addPropertyValue("contextId", contextId);
+	definition.addPropertyValue("type", className);
+	definition.addPropertyValue("decode404", attributes.get("decode404"));
+	definition.addPropertyValue("fallback", attributes.get("fallback"));
+	definition.addPropertyValue("fallbackFactory", attributes.get("fallbackFactory"));
+	definition.setAutowireMode(AbstractBeanDefinition.AUTOWIRE_BY_TYPE);
+
+	String alias = contextId + "FeignClient";
+	AbstractBeanDefinition beanDefinition = definition.getBeanDefinition();
+
+	boolean primary = (Boolean) attributes.get("primary");
+
+	beanDefinition.setPrimary(primary);
+
+	String qualifier = getQualifier(attributes);
+	if (StringUtils.hasText(qualifier)) {
+		alias = qualifier;
+	}
+
+	BeanDefinitionHolder holder = new BeanDefinitionHolder(beanDefinition, className, new String[] { alias });
+	
+	BeanDefinitionReaderUtils.registerBeanDefinition(holder, registry);
+}
+
+
+/**
+ * FeignClientFactoryBean生成代理类的过程。
+ */
+location：FeignClientFactoryBean
+public Object getObject() throws Exception {
+		return getTarget();
+	}
+
+/**
+ * 
+ */
+<T> T getTarget() {
+	FeignContext context = this.applicationContext.getBean(FeignContext.class);
+	Feign.Builder builder = feign(context);
+
+	if (!StringUtils.hasText(this.url)) {
+		if (!this.name.startsWith("http")) {
+			this.url = "http://" + this.name;
+		}
+		else {
+			this.url = this.name;
+		}
+		this.url += cleanPath();
+		return (T) loadBalance(builder, context, new HardCodedTarget<>(this.type, this.name, this.url));
+	}
+	
+	if (StringUtils.hasText(this.url) && !this.url.startsWith("http")) {
+		this.url = "http://" + this.url;
+	}
+	String url = this.url + cleanPath();
+	Client client = getOptional(context, Client.class);
+	
+	if (client != null) {
+		if (client instanceof LoadBalancerFeignClient) {
+			client = ((LoadBalancerFeignClient) client).getDelegate();
+		}
+		builder.client(client);
+	}
+	
+	Targeter targeter = get(context, Targeter.class);
+	return (T) targeter.target(this, builder, context, new HardCodedTarget<>(this.type, this.name, url));
+}
+
+
+protected <T> T loadBalance(Feign.Builder builder, FeignContext context, HardCodedTarget<T> target) {
+	Client client = getOptional(context, Client.class);
+	if (client != null) {
+		builder.client(client);
+		Targeter targeter = get(context, Targeter.class);
+		return targeter.target(this, builder, context, target);
+	}
+
+	throw new IllegalStateException("No Feign Client for loadBalancing defined. Did you forget to include spring-cloud-starter-netflix-ribbon?");
+}
+
+/**
+ *
+ */
+location：DefaultTargeter
+public <T> T target(FeignClientFactoryBean factory, Feign.Builder feign, FeignContext context, Target.HardCodedTarget<T> target) {
+	return feign.target(target);
+}
+
+/**
+ *
+ */
+location：Feign.Builder
+public <T> T target(Target<T> target) {
+  return build().newInstance(target);
+}
+
+/**
+ *
+ */
+location：Feign.Builder
+public Feign build() {
+  SynchronousMethodHandler.Factory synchronousMethodHandlerFactory = new SynchronousMethodHandler.Factory(client, retryer, requestInterceptors, logger,
+		  logLevel, decode404, closeAfterDecode, propagationPolicy);
+  ParseHandlersByName handlersByName = new ParseHandlersByName(contract, options, encoder, decoder, queryMapEncoder, errorDecoder, synchronousMethodHandlerFactory);
+  return new ReflectiveFeign(handlersByName, invocationHandlerFactory, queryMapEncoder);
+}
+
+/**
+ * 情况一：
+ * 默认情况，反射生成Feign对象。
+ */
+location：ReflectiveFeign
+public <T> T newInstance(Target<T> target) {
+	Map<String, MethodHandler> nameToHandler = targetToHandlersByName.apply(target);
+	Map<Method, MethodHandler> methodToHandler = new LinkedHashMap<Method, MethodHandler>();
+	List<DefaultMethodHandler> defaultMethodHandlers = new LinkedList<DefaultMethodHandler>();
+
+	for (Method method : target.type().getMethods()) {
+		if (method.getDeclaringClass() == Object.class) {
+			continue;
+		} else if (Util.isDefault(method)) {
+			DefaultMethodHandler handler = new DefaultMethodHandler(method);
+			defaultMethodHandlers.add(handler);
+			methodToHandler.put(method, handler);
+		} else {
+			methodToHandler.put(method, nameToHandler.get(Feign.configKey(target.type(), method)));
+		}
+	}
+	
+	InvocationHandler handler = factory.create(target, methodToHandler);
+	T proxy = (T) Proxy.newProxyInstance(target.type().getClassLoader(),
+	new Class<?>[] {target.type()}, handler);
+
+	for (DefaultMethodHandler defaultMethodHandler : defaultMethodHandlers) {
+		defaultMethodHandler.bindTo(proxy);
+	}
+	return proxy;
+}
+
+/**
+ * 情况一：
+ * 引入熔断：反射生成Feign对象。
+ */
+location：HystrixTargeter
+public <T> T target(FeignClientFactoryBean factory, Feign.Builder feign, FeignContext context, Target.HardCodedTarget<T> target) {
+	if (!(feign instanceof feign.hystrix.HystrixFeign.Builder)) {
+		return feign.target(target);
+	}
+	feign.hystrix.HystrixFeign.Builder builder = (feign.hystrix.HystrixFeign.Builder) feign;
+	SetterFactory setterFactory = getOptional(factory.getName(), context, SetterFactory.class);
+	if (setterFactory != null) {
+		builder.setterFactory(setterFactory);
+	}
+	Class<?> fallback = factory.getFallback();
+	if (fallback != void.class) {
+		return targetWithFallback(factory.getName(), context, target, builder,
+				fallback);
+	}
+	Class<?> fallbackFactory = factory.getFallbackFactory();
+	if (fallbackFactory != void.class) {
+		return targetWithFallbackFactory(factory.getName(), context, target, builder,
+				fallbackFactory);
+	}
+
+	return feign.target(target);
+}
+
+
+#########################################################################################################################################################
+#########################################        调用过程       ###################################
+#########################################################################################################################################################
+
+在代理中，会使用ReflectiveFeign类的invoke接口
+
+/**
+ *
+ */
+location：ReflectiveFeign
+public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+	if ("equals".equals(method.getName())) {
+		try {
+			Object otherHandler = args.length > 0 && args[0] != null ? Proxy.getInvocationHandler(args[0]) : null;
+			return equals(otherHandler);
+		} catch (IllegalArgumentException e) {
+			return false;
+		}
+	} else if ("hashCode".equals(method.getName())) {
+		return hashCode();
+	} else if ("toString".equals(method.getName())) {
+		return toString();
+	}
+
+	return dispatch.get(method).invoke(args);
+}
+
+/**
+ *
+ */
+location：SynchronousMethodHandler
+public Object invoke(Object[] argv) throws Throwable {
+	RequestTemplate template = buildTemplateFromArgs.create(argv);
+	Retryer retryer = this.retryer.clone();
+	while (true) {
+		try {
+			return executeAndDecode(template);
+		} catch (RetryableException e) {
+		
+		try {
+			retryer.continueOrPropagate(e);
+		} catch (RetryableException th) {
+			Throwable cause = th.getCause();
+			
+			if (propagationPolicy == UNWRAP && cause != null) {
+				throw cause;
+			} else {
+				throw th;
+			}
+		}
+		if (logLevel != Logger.Level.NONE) {
+			logger.logRetry(metadata.configKey(), logLevel);
+		}
+			continue;
+	  }
+	}
+}
+
+/**
+ *
+ */
+location：SynchronousMethodHandler
+Object executeAndDecode(RequestTemplate template) throws Throwable {
+	// 构建Request。
+	Request request = targetRequest(template);
+
+	if (logLevel != Logger.Level.NONE) {
+		logger.logRequest(metadata.configKey(), logLevel, request);
+	}
+
+	Response response;
+	long start = System.nanoTime();
+	try {
+		// 执行HTTP请求。
+		response = client.execute(request, options);
+	} catch (IOException e) {
+		if (logLevel != Logger.Level.NONE) {
+			logger.logIOException(metadata.configKey(), logLevel, e, elapsedTime(start));
+		}
+		throw errorExecuting(request, e);
+	}
+	long elapsedTime = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+
+	boolean shouldClose = true;
+	try {
+		if (logLevel != Logger.Level.NONE) {
+			response = logger.logAndRebufferResponse(metadata.configKey(), logLevel, response, elapsedTime);
+		}
+		if (Response.class == metadata.returnType()) {
+			if (response.body() == null) {
+				return response;
+			}
+			if (response.body().length() == null || response.body().length() > MAX_RESPONSE_BUFFER_SIZE) {
+				shouldClose = false;
+				return response;
+			}
+		
+			byte[] bodyData = Util.toByteArray(response.body().asInputStream());
+			return response.toBuilder().body(bodyData).build();
+		}
+	  
+		if (response.status() >= 200 && response.status() < 300) {
+			if (void.class == metadata.returnType()) {
+				return null;
+			} else {
+				Object result = decode(response);
+				shouldClose = closeAfterDecode;
+				return result;
+			}
+		} else if (decode404 && response.status() == 404 && void.class != metadata.returnType()) {
+			Object result = decode(response);
+			shouldClose = closeAfterDecode;
+			return result;
+		} else {
+			throw errorDecoder.decode(metadata.configKey(), response);
+		}
+	} catch (IOException e) {
+		if (logLevel != Logger.Level.NONE) {
+			logger.logIOException(metadata.configKey(), logLevel, e, elapsedTime);
+		}
+		throw errorReading(request, response, e);
+	} finally {
+		if (shouldClose) {
+			ensureClosed(response.body());
+		}
+	}
+}
+
+/**
+ *
+ */
+location：SynchronousMethodHandler
+public Response execute(Request request, Request.Options options) throws IOException {
+	try {
+		URI asUri = URI.create(request.url());
+		String clientName = asUri.getHost();
+		URI uriWithoutHost = cleanUrl(request.url(), clientName);
+		FeignLoadBalancer.RibbonRequest ribbonRequest = new FeignLoadBalancer.RibbonRequest(this.delegate, request, uriWithoutHost);
+
+		IClientConfig requestConfig = getClientConfig(options, clientName);
+		return lbClient(clientName).executeWithLoadBalancer(ribbonRequest, requestConfig).toResponse();
+	}
+	catch (ClientException e) {
+		IOException io = findIOException(e);
+		if (io != null) {
+			throw io;
+		}
+		throw new RuntimeException(e);
+	}
+}
+
+/**
+ *
+ */
+location：AbstractLoadBalancerAwareClient
+public T executeWithLoadBalancer(final S request, final IClientConfig requestConfig) throws ClientException {
+	LoadBalancerCommand<T> command = buildLoadBalancerCommand(request, requestConfig);
+
+	try {
+		return command.submit(
+			new ServerOperation<T>() {
+				@Override
+				public Observable<T> call(Server server) {
+					URI finalUri = reconstructURIWithServer(server, request.getUri());
+					S requestForServer = (S) request.replaceUri(finalUri);
+					try {
+						return Observable.just(AbstractLoadBalancerAwareClient.this.execute(requestForServer, requestConfig));
+					} 
+					catch (Exception e) {
+						return Observable.error(e);
+					}
+				}
+			}).toBlocking().single();
+	} catch (Exception e) {
+		Throwable t = e.getCause();
+		if (t instanceof ClientException) {
+			throw (ClientException) t;
+		} else {
+			throw new ClientException(e);
+		}
+	}
+	
+}
+

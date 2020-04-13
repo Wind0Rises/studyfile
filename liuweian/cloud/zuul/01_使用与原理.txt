@@ -1,0 +1,98 @@
+zuul的复杂度大多是因为集成了hystrix，ribbon导致设置超时，线程，隔离都有一定复杂度。所以重点在设置超时时间，线程与隔离。
+
+
+一、Zuul的基本原理。
+	Zuul是通过Servlet来实现的，Zuul通过自定义的ZuulServlet（类似于Spring MVC的DispatcServlet ）来对请求进行控制。 Zuul的核心是一系列过滤器，可以在Http请求的发起和响应返回期间执行一系列的过滤器。 
+	Zuul包括以下4种过滤器 。
+		* PRE过滤器：它是在请求路由到具体的服务之前执行的，这种类型的过滤器可以做安全验证，例如身份验证、 参数验证等。
+		* ROUTING过滤器：它用于将请求路由到具体的微服务实例。在默认情况下，它使用Http Client进行网络请求。
+		* POST过滤器：它是在请求己被路由到微服务后执行的。一般情况下，用作收集统计信息、指标，以及将响应传输到客户端 。
+		* ERROR过滤器：它是在其他过滤器发生错误时执行的。
+	Zuul采取了动态读取、编译和运行这些过滤器。过滤器之间不能直接相互通信，而是通过RequestContext对象来共享数据，每个请求都会创建一个RequestContext对象 。
+	
+二、Zuul的生命周期。
+	public void service(javax.servlet.ServletRequest servletRequest, javax.servlet.ServletResponse servletResponse) throws ServletException, IOException {
+        try {
+            init((HttpServletRequest) servletRequest, (HttpServletResponse) servletResponse);
+
+            RequestContext context = RequestContext.getCurrentContext();
+			
+            context.setZuulEngineRan();
+
+            try {
+                preRoute();
+            } catch (ZuulException e) {
+                error(e);
+                postRoute();
+                return;
+            }
+			
+            try {
+                route();
+            } catch (ZuulException e) {
+                error(e);
+                postRoute();
+                return;
+            }
+			
+            try {
+                postRoute();
+            } catch (ZuulException e) {
+                error(e);
+                return;
+            }
+
+        } catch (Throwable e) {
+            error(new ZuulException(e, 500, "UNHANDLED_EXCEPTION_" + e.getClass().getName()));
+        } finally {
+            RequestContext.getCurrentContext().unset();
+        }
+    }
+	
+	1、初始化 --->  2、preRoute --->  3、route --->  4、postRoute
+	
+三、使用
+	1、基本使用
+		首先添加注解@EnableZuulProxy
+		根据需要配置请求路径与对应的服务。
+		
+	2、zuul的执行隔离策略
+		semaphore：按信号量进行隔离。默认为100。这个就是并发数。如果超过信号量，就直接返回500。（zuul里隔离是按照服务隔离，也就是一个服务一个信号量）
+		thread：按线程进行隔离。默认情况下，所有服务是公用一个线程池的zuul.thread-pool.use-separate-thread-pools(每个路由都有自己的线程池，而不是共享一个。)、zuul.thread-pool.thread-pool-key-prefix(会指定一个线程池前缀)
+			可以使用hystrix.threadpool.default.*(coresize、maximumSize等等)。可以指定为某一个服务配置特定的线程池，把default修改为服务的id。
+			
+		如果使用的是信号量隔离，那么hystrix的超时将会失效，但是ribbon或者socket本身的超时机制还是有效的，而且超时之后会释放掉信号。
+		
+		
+
+四、Zuul的路由配置。
+	zuul:
+		routes：
+			customName: 			# 这个名称是可以随便起的。
+				# 然后配置下面ZuulRoute配置类中属性。
+				
+				# 第一种通过serviceId配置。
+				path: /myorder/**   # 使用的请求地址。把myorder请求，转发到order服务上。
+				serviceId: order 	# 拦截的服务的ServiceId。
+
+
+public static class ZuulRoute {
+	private String id;
+	private String path;
+	private String serviceId;
+	private String url;
+	private boolean stripPrefix = true;
+	private Boolean retryable;
+	private Set<String> sensitiveHeaders = new LinkedHashSet();
+	private boolean customSensitiveHeaders = false;
+	
+	...
+}
+
+		
+		
+		
+		
+		
+四、Zuul与Hystrix的使用的注意事项。
+	1、
