@@ -1,0 +1,22 @@
+一、注意事项
+	1、在spring boot配置文件中，不能有重复的开头。
+	例：spring:
+			server:
+			
+		spring:
+			redis:
+	上面的写法是不对的。需要把两个spring合并到一块。
+	
+	例：spring：
+			server:
+			redis:
+	要使用上面的写法。
+	
+
+
+
+二、待处理
+	1、使用Turbine聚合监控
+	
+	
+	2、打印EndpointHandlerMapping

@@ -18,7 +18,8 @@ product产品：8070
 	
 2、order:
 	配置中心:
-		localhost:8050/order/config/env
+		localhost:9090/order/config/env
+		localhost:8050/order/config/env				cloud bus 测试
 		localhost:8050/order/config/common
 		localhost:8050/order/config/liu
 		
@@ -45,3 +46,8 @@ product产品：8070
 	
 	
 	spring.cloud.config.enabled
+	
+	
+3、Config  
+	localhost:8010/actuator/bus-refresh  						* 注意是post请求。可以使用命令curl -v -X POST http://localhost:8010/actuator/bus-refresh
+	webhook配置的地址： http://***/monitor 						* 注意spring cloud config 暂时不兼容gitee的webhook的。
