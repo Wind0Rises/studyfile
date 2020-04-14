@@ -12,17 +12,17 @@
 &ensp;idea_workspace这个目录一般是写一些测试代码的，其中包含tomcat源码模块；spring boot与redis、zookeeper整合模块；
 </font>
 
-#### &ensp;2. liu
+#### &ensp;2. temp
 <font size=4 face="宋体" color=AliceBlue>
 &ensp;这个文件夹，可以删除，主要用于公司内网与外部传送文件使用的，使用完成以后可以删除。
 </font>
 
-#### &ensp;3. liuweian
+#### &ensp;3. java
 <font size=4 face="宋体" color=AliceBlue>
 &ensp;主要是一些自己学习时候的总结以及重点内容，包括JDK基础部分、高并发、spring boot、spring cloud、jvm、mybatis、redis、quart、shiro、spring全家桶、tomcat等。
 </font>
 
-#### &ensp;4. web
+#### &ensp;4. frontEnd
 <font size=4 face="宋体" color=AliceBlue>
 &ensp;主要是一些前端的内容，暂时没有内容。
 </font>
