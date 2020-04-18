@@ -3,6 +3,7 @@ eureka server：8761
 zuul网关：8030
 order订单：8050
 product产品：8070
+zipkin：8040
 
 
 1、product:
@@ -33,7 +34,7 @@ product产品：8070
 		localhost:8050/order/stream/sendObject
 		
 	具体的业务：
-		localhost:8050/order/order/test					使用RestTemplate	  -->   产品服务/product/test
+		localhost:8050/order/order/test					
 		localhost:8050/order/order/feignTest    
 		localhost:8050/order/order/create
 		
@@ -51,3 +52,7 @@ product产品：8070
 3、Config  
 	localhost:8010/actuator/bus-refresh  						* 注意是post请求。可以使用命令curl -v -X POST http://localhost:8010/actuator/bus-refresh
 	webhook配置的地址： http://***/monitor 						* 注意spring cloud config 暂时不兼容gitee的webhook的。
+	
+	
+4、zipkin
+	

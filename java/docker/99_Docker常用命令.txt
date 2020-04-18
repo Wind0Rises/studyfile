@@ -1,0 +1,4 @@
+1、查看版本
+	docker -version
+	
+2、

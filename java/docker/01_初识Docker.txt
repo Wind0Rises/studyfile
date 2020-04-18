@@ -1,0 +1,50 @@
+一、虚拟化技术与Docker技术（容器）
+	虚拟化技术的局限：每一个虚拟机都是一个完整的操作系统，操作系统要给其分配资源，当虚拟机数量增加时，操作系统本身消耗的资源势必增多。
+	
+	
+二、容器解决了什么问题？
+	解决了开发与运维之间的矛盾
+	在开发和运维之间搭建了一个桥梁，是实现DevOps的最佳解决方案。
+	
+三、什么是容器
+	对软件和其依赖的标准化打包
+	应用之间相互隔离
+	共享同一个OS Kernel
+	可以运行在很多主流操作系统上
+	
+	
+四、Docker是什么
+	Docker是容器技术的一种实现。
+	
+五、Centos7使用yum安装Docker
+	1、检查Linux环境内核
+		uname -a
+	
+	2、更新yum
+		yum update
+		
+	3、安装需要的软件包
+		# ynm-utils：提供yum-config-manager功能的
+		# device-mapper-persistent-date和lvm2是devicemapper驱动依赖
+		yum install -y yum-utils device-mapper-persistent-data lvm2
+		
+		
+	4、设置yum源
+		yum-config-manager --add-repo http://download.docker.com/linux/centos/docker-ce.repo
+		yum-config-manager --add-repo http://mirrors.aliyun.com/docker-ce/linux/centos/docker-ce.repo
+		
+		// https://blog.csdn.net/whatday/article/details/51097456
+		
+	5、查看仓库的docker版本，
+		yum list docker-ce --showduplicates | sort -r
+		
+	6、安装Docker，
+		yum install docker-ce-版本号
+		# yum install docker-ce-18.03.1.ce
+		
+	7、启动docker
+		systemctl start docker
+		# 查看版本  docker version
+		
+		
+		
