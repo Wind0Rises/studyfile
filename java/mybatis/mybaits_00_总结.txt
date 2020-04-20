@@ -2,16 +2,55 @@
 	二级缓存：https://zhuanlan.zhihu.com/p/33179093
 
 
+一、主要的处理类。
+	SqlSessionFactoryBean：
+		创建Mybaits SQLSessionFactory。在spring application context共享一个MyBatis SQLSessionFactory。然后可以通过依赖项注入将SqlSessionFactory传递给基于MyBatis的DAO。
+		
+	SqlSessionFactory
+		从一个连接或者是数据源中创建一个SqlSession。
+		
+	SqlSession
+		对外提供了用户和数据库之间交互需要的所有方法，隐藏了底层的细节。默认实现类是DefaultSqlSession。
 
-SqlSessionFactoryBean：创建Mybaits SQLSessionFactory。在spring application context共享一个MyBatis SQLSessionFactory。然后可以通过依
-	赖项注入将SqlSessionFactory传递给基于MyBatis的DAO。
-	
-SqlSessionFactory：从一个连接或者是数据源中创建一个SqlSession。
-	
-SqlSession：对外提供了用户和数据库之间交互需要的所有方法，隐藏了底层的细节。默认实现类是DefaultSqlSession。
+	Executor
+		SqlSession向用户提供操作数据库的方法，但和数据库操作有关的职责都会委托给Executor。
 
-Executor：SqlSession向用户提供操作数据库的方法，但和数据库操作有关的职责都会委托给Executor。
+	BaseExecutor
+		BaseExecutor是一个实现了Executor接口的抽象类，定义若干抽象方法，在执行的时候，把具体的操作委托给子类进行执行。
 
-BaseExecutor：BaseExecutor是一个实现了Executor接口的抽象类，定义若干抽象方法，在执行的时候，把具体的操作委托给子类进行执行。
+	Cache
+		MyBatis中的Cache接口，提供了和缓存相关的最基本的操作，
+		
+	MapperProxy
+		MapperProxy实现类了InvocationHandler。
 
-Cache：MyBatis中的Cache接口，提供了和缓存相关的最基本的操作，
+	Executor：
+		BatchExecutor（批量）、ReuseExecutor（重复）、SimpleExecutor（默认）
+		CachingExecutor（缓存，开启二级缓存）
+
+
+主要步骤：
+	1、创建SqlSessionFactroy。
+		* 传统模式：是使用通过SqlSessionFactroyBuilder创建，这里有解析MybatisConfiguration.xml文件。
+		* 与Spring使用：直接配置SqlSessionFactoryBean，SqlSessionFactoryBean实现了InitializingBean这个接口，在afterPropertiesSet()方法中也会加载MybatisConfiguration.xml。
+		
+	2、创建SqlSession。
+		* 传统模式：通过SqlSessionFactroy去创建SqlSession。
+		* 与Spring使用：这个与在spring中是否配置了SqlSessionTemplate。如果配置了就是始终使用一个SqlSession。如果没有配置SqlSessionTemplate，如果配置了SqlSessionFactoryBean的话，那么就是一个Mapper使用一个SqlSession。
+		
+		
+		
+		
+		
+		
+		
+		
+####################
+ spring默认使用SpringManagedTransactionFactory
+ 
+ 
+ // 缓存的ID就是namespace。
+ 
+ Mybatis中的selectKey处理。
+ 
+ 只用代用getMapper(...)时才会调用newInstance(...)方法，才会创建代理类。

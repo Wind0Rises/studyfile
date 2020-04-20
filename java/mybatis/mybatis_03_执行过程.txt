@@ -68,12 +68,21 @@ public Object invoke(Object proxy, Method method, Object[] args) throws Throwabl
 		throw ExceptionUtil.unwrapThrowable(var5);
 	}
 	
+	
+	/**
+	 * MapperMethod：有两个成员变量SqlCommand command; MethodSignature method;
+	 * 一个执行方法。execute(SqlSession sqlSession, Object[] args)
+	 */
+	
 	// 如果缓存中有对应MapperMethod，就直接从缓存中取，如果没有新建一个MapperMethod，放入缓存中。
 	MapperMethod mapperMethod = this.cachedMapperMethod(method);
 		
 	return mapperMethod.execute(this.sqlSession, args);
 }
 
+/**
+ * 调用的mapperMethod如果存在，直接从缓存中获取，如果没有新建一个MapperMethod，放入缓存中。
+ */
 location：MapperProxy
 private MapperMethod cachedMapperMethod(Method method) {
 	// 从缓存中取。
@@ -88,6 +97,9 @@ private MapperMethod cachedMapperMethod(Method method) {
 	return mapperMethod;
 }
 
+/**
+ *
+ */
 location：MapperMethod
 public Object execute(SqlSession sqlSession, Object[] args) {
 	Object param;
@@ -137,6 +149,10 @@ public Object execute(SqlSession sqlSession, Object[] args) {
 	}
 }
 
+/**
+ *
+ */
+localtion：DefaultSqlSession
 public <T> T selectOne(String statement, Object parameter) {
 	List<T> list = this.selectList(statement, parameter);
 	if (list.size() == 1) {
@@ -148,18 +164,29 @@ public <T> T selectOne(String statement, Object parameter) {
 	}
 }
 
-
+/**
+ *
+ */
+localtion：DefaultSqlSession
 public <E> List<E> selectList(String statement, Object parameter) {
 	return this.selectList(statement, parameter, RowBounds.DEFAULT);
 }
 
-
+/**
+ *
+ */
+localtion：DefaultSqlSession
 public <E> List<E> selectList(String statement, Object parameter, RowBounds rowBounds) {
 	List var5;
 	try {
+		
+		// 这里的MappedStatement就是第一步解析Mapper以后生成的MappedStatement，并把其放入Configuration中。
 		// 根据statement（mapper.Mapper的名称.方法名）
 		MappedStatement ms = this.configuration.getMappedStatement(statement);
+		
+		// 默认没有
 		var5 = this.executor.query(ms, this.wrapCollection(parameter), rowBounds, Executor.NO_RESULT_HANDLER);
+		
 	} catch (Exception var9) {
 		throw ExceptionFactory.wrapException("Error querying database.  Cause: " + var9, var9);
 	} finally {
@@ -214,8 +241,10 @@ location：CachingExecutor
 public <E> List<E> query(MappedStatement ms, Object parameterObject, RowBounds rowBounds, ResultHandler resultHandler) throws SQLException {
 	// 获取sql语句。
     BoundSql boundSql = ms.getBoundSql(parameterObject);
+	
 	// 创建缓存key。
     CacheKey key = createCacheKey(ms, parameterObject, rowBounds, boundSql);
+	
     return query(ms, parameterObject, rowBounds, resultHandler, key, boundSql);
 }
 
@@ -223,23 +252,60 @@ public <E> List<E> query(MappedStatement ms, Object parameterObject, RowBounds r
  * tcm：TransactionalCacheManager
  * 
  */
+location：CachingExecutor
 public <E> List<E> query(MappedStatement ms, Object parameterObject, RowBounds rowBounds, ResultHandler resultHandler, CacheKey key, BoundSql boundSql)throws SQLException {
-    Cache cache = ms.getCache();
+    
+	// 获取这个MappedStatement的Cache。
+	Cache cache = ms.getCache();
 	
     if (cache != null) {
 		
 		flushCacheIfRequired(ms);
 		
+		// 这个操作是否使用了缓存  并且resultHandler == null。默认resultHandler是等于null的。
 		if (ms.isUseCache() && resultHandler == null) {
+		
 			ensureNoOutParams(ms, parameterObject, boundSql);
+			
 			@SuppressWarnings("unchecked")
 			List<E> list = (List<E>) tcm.getObject(cache, key);
+			
+			// 如果没有就去SimpleExecutor去查询。
 			if (list == null) {
 				list = delegate.<E> query(ms, parameterObject, rowBounds, resultHandler, key, boundSql);
 				tcm.putObject(cache, key, list);
 			}
-        return list;
+			
+			return list;
 		}
     }
+	
+	// 最后还是通过SimpleExecutor执行查询的。
     return delegate.<E> query(ms, parameterObject, rowBounds, resultHandler, key, boundSql);
 }
+
+/**
+ * isFlushCacheRequired：select都默认为false
+ */
+location：CachingExecutor
+private void flushCacheIfRequired(MappedStatement ms) {
+	Cache cache = ms.getCache();
+	if (cache != null && ms.isFlushCacheRequired()) {      
+		tcm.clear(cache);
+	}
+}
+
+/**
+ * 
+ */
+location：CachingExecutor
+private void ensureNoOutParams(MappedStatement ms, BoundSql boundSql) {
+	if (ms.getStatementType() == StatementType.CALLABLE) {
+		for (ParameterMapping parameterMapping : boundSql.getParameterMappings()) {
+			if (parameterMapping.getMode() != ParameterMode.IN) {
+				throw new ExecutorException("Caching stored procedures with OUT params is not supported.  Please configure useCache=false in " + ms.getId() + " statement.");
+			}
+		}
+	}
+}
+

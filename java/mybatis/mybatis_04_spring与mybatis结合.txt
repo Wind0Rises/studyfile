@@ -1,0 +1,574 @@
+
+
+
+MapperScannerConfigurer
+
+一、配置xml。
+	配置SqlSessionFactoryBean：SqlSessionFactoryBean内部有一个SqlSessionFactory sqlSessionFactory成员变量。SqlSessionFactoryBean接口实现类了InitializingBean接口，在afterPropertiesSet方法中，会去加载MybatisConfiguration.xml
+			并构建SqlSessionFactoryBean实例对象。
+	
+	配置MapperScannerConfigurer：其实现了BeanDefinitionRegistryPostProcessor, InitializingBean接口。在postProcessBeanDefinitionRegistry(...)方法中，会把Mapper注入到Spring容器中。
+	
+	
+	
+	接口本来是不可以注入到Spring的。ClassPathMapperScanner把条件拓宽了。类是Mapper接口，但是实际操作对象时MapperFactoryBean。通过Bean获取Mapper代理，都是通过MapperFactoryBean这个类的实例。
+	
+
+二、如何把Mapper注入到Spring中。
+	
+/**
+ *
+ */
+localtion：MapperScannerConfigurer
+public void postProcessBeanDefinitionRegistry(BeanDefinitionRegistry registry) {
+	if (this.processPropertyPlaceHolders) {
+		processPropertyPlaceHolders();
+	}
+
+	ClassPathMapperScanner scanner = new ClassPathMapperScanner(registry);
+	scanner.setAddToConfig(this.addToConfig);
+	scanner.setAnnotationClass(this.annotationClass);
+	scanner.setMarkerInterface(this.markerInterface);
+	scanner.setSqlSessionFactory(this.sqlSessionFactory);
+	scanner.setSqlSessionTemplate(this.sqlSessionTemplate);
+	scanner.setSqlSessionFactoryBeanName(this.sqlSessionFactoryBeanName);
+	scanner.setSqlSessionTemplateBeanName(this.sqlSessionTemplateBeanName);
+	scanner.setResourceLoader(this.applicationContext);
+	scanner.setBeanNameGenerator(this.nameGenerator);
+	scanner.registerFilters();
+	
+	// 
+	scanner.scan(StringUtils.tokenizeToStringArray(this.basePackage, ConfigurableApplicationContext.CONFIG_LOCATION_DELIMITERS));
+}
+
+
+/**
+ * ClassPathMapperScanner extends ClassPathBeanDefinitionScanner
+ * ClassPathBeanDefinitionScanner extends ClassPathScanningCandidateComponentProvider
+ */
+localtion：ClassPathBeanDefinitionScanner
+public int scan(String... basePackages) {
+		int beanCountAtScanStart = this.registry.getBeanDefinitionCount();
+
+		doScan(basePackages);
+
+		if (this.includeAnnotationConfig) {
+			AnnotationConfigUtils.registerAnnotationConfigProcessors(this.registry);
+		}
+
+		return (this.registry.getBeanDefinitionCount() - beanCountAtScanStart);
+	}
+
+/**
+ * mybatis-spring包中的。
+ */
+localtion：ClassPathMapperScanner
+public Set<BeanDefinitionHolder> doScan(String... basePackages) {
+	Set<BeanDefinitionHolder> beanDefinitions = super.doScan(basePackages);
+
+	if (beanDefinitions.isEmpty()) {
+		logger.warn("No MyBatis mapper was found in '" + Arrays.toString(basePackages) + "' package. Please check your configuration.");
+	} else {
+		processBeanDefinitions(beanDefinitions);
+	}
+
+	return beanDefinitions;
+}
+
+/**
+ * 
+ */
+localtion：ClassPathBeanDefinitionScanner
+protected Set<BeanDefinitionHolder> doScan(String... basePackages) {
+	Assert.notEmpty(basePackages, "At least one base package must be specified");
+	Set<BeanDefinitionHolder> beanDefinitions = new LinkedHashSet<BeanDefinitionHolder>();
+	for (String basePackage : basePackages) {
+		Set<BeanDefinition> candidates = findCandidateComponents(basePackage);
+		for (BeanDefinition candidate : candidates) {
+			ScopeMetadata scopeMetadata = this.scopeMetadataResolver.resolveScopeMetadata(candidate);
+			candidate.setScope(scopeMetadata.getScopeName());
+			String beanName = this.beanNameGenerator.generateBeanName(candidate, this.registry);
+			if (candidate instanceof AbstractBeanDefinition) {
+				postProcessBeanDefinition((AbstractBeanDefinition) candidate, beanName);
+			}
+			if (candidate instanceof AnnotatedBeanDefinition) {
+				AnnotationConfigUtils.processCommonDefinitionAnnotations((AnnotatedBeanDefinition) candidate);
+			}
+			if (checkCandidate(beanName, candidate)) {
+				BeanDefinitionHolder definitionHolder = new BeanDefinitionHolder(candidate, beanName);
+				definitionHolder = AnnotationConfigUtils.applyScopedProxyMode(scopeMetadata, definitionHolder, this.registry);
+				beanDefinitions.add(definitionHolder);
+				registerBeanDefinition(definitionHolder, this.registry);
+			}
+		}
+	}
+	return beanDefinitions;
+}
+
+/**
+ * 判断是否可以被注入到Spring容器中。
+ */
+localtion：ClassPathScanningCandidateComponentProvider
+public Set<BeanDefinition> findCandidateComponents(String basePackage) {
+	Set<BeanDefinition> candidates = new LinkedHashSet<BeanDefinition>();
+	
+	try {
+		String packageSearchPath = ResourcePatternResolver.CLASSPATH_ALL_URL_PREFIX + resolveBasePackage(basePackage) + '/' + this.resourcePattern;
+		Resource[] resources = this.resourcePatternResolver.getResources(packageSearchPath);
+		boolean traceEnabled = logger.isTraceEnabled();
+		boolean debugEnabled = logger.isDebugEnabled();
+		for (Resource resource : resources) {
+			if (traceEnabled) {
+				logger.trace("Scanning " + resource);
+			}
+			if (resource.isReadable()) {
+				try {
+					MetadataReader metadataReader = this.metadataReaderFactory.getMetadataReader(resource);
+					if (isCandidateComponent(metadataReader)) {
+						ScannedGenericBeanDefinition sbd = new ScannedGenericBeanDefinition(metadataReader);
+						sbd.setResource(resource);
+						sbd.setSource(resource);
+						if (isCandidateComponent(sbd)) {
+							if (debugEnabled) {
+								logger.debug("Identified candidate component class: " + resource);
+							}
+							candidates.add(sbd);
+						} else {
+							if (debugEnabled) {
+								logger.debug("Ignored because not a concrete top-level class: " + resource);
+							}
+						}
+					} else {
+						if (traceEnabled) {
+							logger.trace("Ignored because not matching any filter: " + resource);
+						}
+					}
+				} catch (Throwable ex) {
+					throw new BeanDefinitionStoreException(
+							"Failed to read candidate component class: " + resource, ex);
+				}
+			} else {
+				if (traceEnabled) {
+					logger.trace("Ignored because not readable: " + resource);
+				}
+			}
+		}
+	} catch (IOException ex) {
+		throw new BeanDefinitionStoreException("I/O failure during classpath scanning", ex);
+	}
+	return candidates;
+}
+
+
+/**
+ * 判断是否能够注入到Spring中。
+ */
+localtion：ClassPathMapperScanner
+protected boolean isCandidateComponent(AnnotatedBeanDefinition beanDefinition) {
+	return beanDefinition.getMetadata().isInterface() && beanDefinition.getMetadata().isIndependent();
+}
+
+
+/**
+ * 当设置的是sqlSessionFactory时，每个MapperFactoryBean中的sqlSessionTemplate是不同的，但是最终的sqlSessionFactory是相同的，
+ * 当设置的是sqlSessionTemplate时，每个MapperFactoryBean中sqlSessionTemplate就是同一个。
+ */
+location：ClassPathMapperScanner
+private void processBeanDefinitions(Set<BeanDefinitionHolder> beanDefinitions) {
+	GenericBeanDefinition definition;
+	for (BeanDefinitionHolder holder : beanDefinitions) {
+		definition = (GenericBeanDefinition) holder.getBeanDefinition();
+
+		if (logger.isDebugEnabled()) {
+			logger.debug("Creating MapperFactoryBean with name '" + holder.getBeanName()  + "' and '" + definition.getBeanClassName() + "' mapperInterface");
+		}
+
+		/**
+		 * 这里把Mapper接口对应的Class改为了MapperFactoryBean
+		 */
+		
+		// MapperFactoryBean<?> mapperFactoryBean;
+		// Mapper接口是生成Bean的原始类，但是，实际bean的类型是MapperFactoryBean
+		// getConstructorArgumentValues()：返回此Bean构造函数的参数值。
+		// addGenericArgumentValue()：添加通用参数值以按类型进行匹配。   			把Mapper接口作用对象作为new MapperFactoryBean()的参数值传入进去。
+		definition.getConstructorArgumentValues().addGenericArgumentValue(definition.getBeanClassName());
+		
+		
+		// 把所有的Mapper接口定义BeanClass类型设置为MapperFactoryBean，并设置其构造器参数为对应的Mapper接口类型
+		definition.setBeanClass(this.mapperFactoryBean.getClass());
+
+		definition.getPropertyValues().add("addToConfig", this.addToConfig);
+
+		// 为Bean设置SqlSessionFactory。
+		boolean explicitFactoryUsed = false;
+		if (StringUtils.hasText(this.sqlSessionFactoryBeanName)) {
+			definition.getPropertyValues().add("sqlSessionFactory", new RuntimeBeanReference(this.sqlSessionFactoryBeanName));
+			explicitFactoryUsed = true;
+		} else if (this.sqlSessionFactory != null) {
+			definition.getPropertyValues().add("sqlSessionFactory", this.sqlSessionFactory);
+			explicitFactoryUsed = true;
+		}
+
+		// 为Bean设置SqlSessionTemplate。
+		if (StringUtils.hasText(this.sqlSessionTemplateBeanName)) {
+			if (explicitFactoryUsed) {
+				logger.warn("Cannot use both: sqlSessionTemplate and sqlSessionFactory together. sqlSessionFactory is ignored.");
+			}
+			definition.getPropertyValues().add("sqlSessionTemplate", new RuntimeBeanReference(this.sqlSessionTemplateBeanName));
+			explicitFactoryUsed = true;
+		} else if (this.sqlSessionTemplate != null) {
+			if (explicitFactoryUsed) {
+				logger.warn("Cannot use both: sqlSessionTemplate and sqlSessionFactory together. sqlSessionFactory is ignored.");
+			}
+			definition.getPropertyValues().add("sqlSessionTemplate", this.sqlSessionTemplate);
+			explicitFactoryUsed = true;
+		}
+
+		if (!explicitFactoryUsed) {
+			if (logger.isDebugEnabled()) {
+				logger.debug("Enabling autowire by type for MapperFactoryBean with name '" + holder.getBeanName() + "'.");
+			}
+			
+			definition.setAutowireMode(AbstractBeanDefinition.AUTOWIRE_BY_TYPE);
+		}
+	}
+}
+
+
+/**
+ * MapperFactoryBean<T> extends SqlSessionDaoSupport
+ * SqlSessionDaoSupport extends DaoSupport
+ * DaoSupport implements InitializingBean 
+ *
+ * 注意：上面BeanDefinition的BeanClass设置为了MapperFactoryBean；同时也设置了SqlSessionFactory。
+ *
+ */
+
+/**
+ * 第一步：调用MapperFactoryBean的构造函数，设置了Class<T> mapperInterface；
+ */
+localtion：MapperFactoryBean
+public MapperFactoryBean(Class<T> mapperInterface) {
+	this.mapperInterface = mapperInterface;
+}
+
+
+/**
+ * 第二步设置SqlSessionFactory属性 -----> 其实是设置SqlSessionTemplate属性。
+ */ 
+localtion：SqlSessionDaoSupport
+public void setSqlSessionFactory(SqlSessionFactory sqlSessionFactory) {
+	if (!this.externalSqlSession) {
+		this.sqlSession = new SqlSessionTemplate(sqlSessionFactory);
+	}
+}
+
+/**
+ * MapperFactoryBean实际实现了InitializingBean接口。
+ */ 
+localtion：DaoSupport
+public final void afterPropertiesSet() throws IllegalArgumentException, BeanInitializationException {
+	checkDaoConfig();
+
+	try {
+		initDao();
+	} catch (Exception ex) {
+		throw new BeanInitializationException("Initialization of DAO failed", ex);
+	}
+}
+
+/**
+ * 
+ */
+localtion：MapperFactoryBean
+protected void checkDaoConfig() {
+	super.checkDaoConfig();
+
+	notNull(this.mapperInterface, "Property 'mapperInterface' is required");
+
+	Configuration configuration = getSqlSession().getConfiguration();
+	
+	if (this.addToConfig && !configuration.hasMapper(this.mapperInterface)) {
+		try {
+			configuration.addMapper(this.mapperInterface);
+		} catch (Exception e) {
+			logger.error("Error while adding the mapper '" + this.mapperInterface + "' to configuration.", e);
+			throw new IllegalArgumentException(e);
+		} finally {
+			ErrorContext.instance().reset();
+		}
+	}
+}
+
+/**
+ * 
+ */ 
+localtionSqlSessionDaoSupport
+protected void checkDaoConfig() {
+	notNull(this.sqlSession, "Property 'sqlSessionFactory' or 'sqlSessionTemplate' are required");
+}
+
+/**
+ * getBean()：调用的方法。
+ */
+location：MapperFactoryBean
+public T getObject() throws Exception {
+	return getSqlSession().getMapper(this.mapperInterface);
+}
+
+
+################################################################################################################################################################################################
+###################################################################                 获取Mapper代理类                ############################################################################
+################################################################################################################################################################################################
+/**
+ * 创建代理对象。
+ */
+location：SqlSessionTemplate
+public <T> T getMapper(Class<T> type) {
+	return getConfiguration().getMapper(type, this);
+}
+
+/**
+ * 创建代理对象。
+ */
+location：Configuration
+public <T> T getMapper(Class<T> type, SqlSession sqlSession) {
+	return mapperRegistry.getMapper(type, sqlSession);
+}
+
+/**
+ * 通过MapperProxyFactory获取代理对象。
+ */
+location：MapperRegistry
+public <T> T getMapper(Class<T> type, SqlSession sqlSession) {
+
+	// knownMappers里的东西是在MapperRegistry类的addMapper(..)方法中添加的。
+	final MapperProxyFactory<T> mapperProxyFactory = (MapperProxyFactory<T>) knownMappers.get(type);
+	if (mapperProxyFactory == null) {
+		throw new BindingException("Type " + type + " is not known to the MapperRegistry.");
+	}
+	try {
+		
+		// 【【【很重要】】】 ----> 创建代理类。
+		return mapperProxyFactory.newInstance(sqlSession);
+	} catch (Exception e) {
+		throw new BindingException("Error getting mapper instance. Cause: " + e, e);
+	}
+}
+
+
+
+
+################################################################################################################################################################################################
+###################################################################               SqlSessionTemplate调用过程                ####################################################################
+################################################################################################################################################################################################
+/**
+ *
+ */
+location：SqlSessionTemplate
+public SqlSessionTemplate(SqlSessionFactory sqlSessionFactory, ExecutorType executorType, PersistenceExceptionTranslator exceptionTranslator) {
+
+    notNull(sqlSessionFactory, "Property 'sqlSessionFactory' is required");
+    notNull(executorType, "Property 'executorType' is required");
+
+    this.sqlSessionFactory = sqlSessionFactory;
+    this.executorType = executorType;
+    this.exceptionTranslator = exceptionTranslator;
+	
+    this.sqlSessionProxy = (SqlSession) newProxyInstance(SqlSessionFactory.class.getClassLoader(), new Class[] { SqlSession.class }, new SqlSessionInterceptor());
+  }
+
+/**
+ *
+ */
+localtion：SqlSessionTemplate
+public <T> T selectOne(String statement, Object parameter) {
+	// this.sqlSessionProxy是SqlSessionInterceptor的代理对象。
+	return this.sqlSessionProxy.<T> selectOne(statement, parameter);
+}
+
+
+/**
+ * SqlSessionInterceptor implements InvocationHandler
+ * SqlSessionInterceptor是SqlSessionTemplate内部类。
+ *
+ *
+ * SqlSessionTemplate静态代理。  ------》  实际干活的，还是SqlSession。
+ */
+localtion：SqlSessionTemplate
+private class SqlSessionInterceptor implements InvocationHandler {
+
+	@Override
+	public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+	
+		// 获取SqlSession
+		SqlSession sqlSession = getSqlSession(SqlSessionTemplate.this.sqlSessionFactory, SqlSessionTemplate.this.executorType, SqlSessionTemplate.this.exceptionTranslator);
+		
+		try {
+			Object result = method.invoke(sqlSession, args);
+			
+			if (!isSqlSessionTransactional(sqlSession, SqlSessionTemplate.this.sqlSessionFactory)) {
+				// 提交事务。
+				sqlSession.commit(true);
+			}
+			return result;
+		} catch (Throwable t) {
+		
+			Throwable unwrapped = unwrapThrowable(t);
+			
+			if (SqlSessionTemplate.this.exceptionTranslator != null && unwrapped instanceof PersistenceException) {
+				closeSqlSession(sqlSession, SqlSessionTemplate.this.sqlSessionFactory);
+				sqlSession = null;
+				Throwable translated = SqlSessionTemplate.this.exceptionTranslator.translateExceptionIfPossible((PersistenceException) unwrapped);
+				if (translated != null) {
+					unwrapped = translated;
+				}
+			}
+			
+			throw unwrapped;
+		} finally {
+			// 关闭SqlSession。
+			if (sqlSession != null) {
+				closeSqlSession(sqlSession, SqlSessionTemplate.this.sqlSessionFactory);
+			}
+		}
+	}
+}
+
+/**
+ * 获取SqlSession。
+ */
+localtion：SqlSessionUtils
+public static SqlSession getSqlSession(SqlSessionFactory sessionFactory, ExecutorType executorType, PersistenceExceptionTranslator exceptionTranslator) {
+
+	notNull(sessionFactory, NO_SQL_SESSION_FACTORY_SPECIFIED);
+	notNull(executorType, NO_EXECUTOR_TYPE_SPECIFIED);
+
+	SqlSessionHolder holder = (SqlSessionHolder) TransactionSynchronizationManager.getResource(sessionFactory);
+
+	SqlSession session = sessionHolder(executorType, holder);
+	if (session != null) {
+		return session;
+	}
+
+	if (LOGGER.isDebugEnabled()) {
+		LOGGER.debug("Creating a new SqlSession");
+	}
+
+	// 打开一个SqlSession。
+	session = sessionFactory.openSession(executorType);
+
+	registerSessionHolder(sessionFactory, executorType, exceptionTranslator, session);
+
+	return session;
+}
+
+/**
+ * key：为SqlSessionFactory实例。
+ */
+localtion：TransactionSynchronizationManager
+public static Object getResource(Object key) {
+	Object actualKey = TransactionSynchronizationUtils.unwrapResourceIfNecessary(key);
+	
+	Object value = doGetResource(actualKey);
+	if (value != null && logger.isTraceEnabled()) {
+		logger.trace("Retrieved value [" + value + "] for key [" + actualKey + "] bound to thread [" + Thread.currentThread().getName() + "]");
+	}
+	
+	return value;
+}
+
+/**
+ * 这里返回null。
+ */
+localtion：SqlSessionUtils
+private static SqlSession sessionHolder(ExecutorType executorType, SqlSessionHolder holder) {
+	SqlSession session = null;
+	
+	if (holder != null && holder.isSynchronizedWithTransaction()) {
+	
+		if (holder.getExecutorType() != executorType) {
+			throw new TransientDataAccessResourceException("Cannot change the ExecutorType when there is an existing transaction");
+		}
+
+		holder.requested();
+
+		if (LOGGER.isDebugEnabled()) {
+			LOGGER.debug("Fetched SqlSession [" + holder.getSqlSession() + "] from current transaction");
+		}
+
+		session = holder.getSqlSession();
+	}
+	
+	return session;
+}
+
+/**
+ * 获取SqlSession。
+ */
+localtion：DefaultSqlSessionFactory
+public SqlSession openSession(ExecutorType execType) {
+	return openSessionFromDataSource(execType, null, false);
+}
+
+
+/**
+ * 
+ * 
+ */
+location：DefaultSqlSessionFactory。
+private SqlSession openSessionFromDataSource(ExecutorType execType, TransactionIsolationLevel level, boolean autoCommit) {
+	Transaction tx = null;
+	try {
+		// 获取Configuration的环境。
+		final Environment environment = configuration.getEnvironment();
+		
+		//
+		final TransactionFactory transactionFactory = getTransactionFactoryFromEnvironment(environment);
+		
+		// 新建一个Transaction。
+		tx = transactionFactory.newTransaction(environment.getDataSource(), level, autoCommit);
+		
+		// 获取一个执行器。每次打开session时，都会创建一个新的executor
+		// 其是根据ExecutorType类型来创建的，【【但是如果开启了二级缓存，Executor统一用CachingExecutor】】
+		final Executor executor = configuration.newExecutor(tx, execType);
+		
+		// 新建一个DefaultSqlSession
+		return new DefaultSqlSession(configuration, executor, autoCommit);
+	} catch (Exception e) {
+		closeTransaction(tx);
+		throw ExceptionFactory.wrapException("Error opening session.  Cause: " + e, e);
+	} finally {
+		ErrorContext.instance().reset();
+	}
+}
+
+
+/**
+ * 创建一个执行器。
+ * 	一个执行器包含的操作：更新，查询，刷新Statement，提价事务，回滚事务，创建缓存，清理缓存，获取事务，关闭，
+ */
+public Executor newExecutor(Transaction transaction, ExecutorType executorType) {
+	executorType = executorType == null ? defaultExecutorType : executorType;
+	executorType = executorType == null ? ExecutorType.SIMPLE : executorType;
+	
+	// 根据不同的ExecutorType创建对应的Executor实例。
+	Executor executor;
+	if (ExecutorType.BATCH == executorType) {
+		executor = new BatchExecutor(this, transaction);
+	} else if (ExecutorType.REUSE == executorType) {
+		executor = new ReuseExecutor(this, transaction);
+	} else {
+		executor = new SimpleExecutor(this, transaction);
+	}
+	
+	// 判断二级缓存是否开启。
+	if (cacheEnabled) {
+		executor = new CachingExecutor(executor);
+	}
+	
+	// 【【向插件中注入执行器】】
+	executor = (Executor) interceptorChain.pluginAll(executor);
+	
+	return executor;
+}
