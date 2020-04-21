@@ -1,3 +1,8 @@
+zookeeper最重要三大特性数据节点Znode+Watcher机制+ACL权限控制
+
+
+
+
 1、介绍一下zookeeper。
 	它是一个分布式、开源的分布式应用程序协调服务。是Apache Hadoop的一个子项目，它主要是用来解决分布式应用中经常遇到的一些数据管理问题，如：统一命名服务、状态同步服务、
 	集群管理、分布式应用配置项的管理等。
@@ -41,7 +46,9 @@
 	
 	
 崩溃恢复和消息广播
-	zkClient、Curator
+
+
+zookeeper客户端框架：zkClient、Curator
 	
 	
 5、使用zookeeper实现分布式锁。  https://www.cnblogs.com/tong-yuan/p/11619006.html
@@ -54,5 +61,7 @@
 		create /persistNode dataMessage
 			线程一： create -s -e /persistNode/thread1 thread1Message;
 			线程二： create -s -e /persistNode/thread2 thread2Message;
-	
+
+
+			
 6、比较redis和zookeeper实现分布式锁的优缺点。

@@ -32,6 +32,7 @@ public class ZkDataConfig {
         return configModel;
     }
 
+
     /**
      * 把配置文件信息同步到zookeeper上。
      * 初始化时 ---> 直接把数据库的配置文件或者网络上的配置文件同步到zookeeper上，
