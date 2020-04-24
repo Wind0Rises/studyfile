@@ -1,0 +1,31 @@
+
+
+
+UserDetailsService：
+	loadUserByUsername(String username):通过用户名获取UserDetails，这个username一般都是表单提交的username。
+	
+UserDetails：
+	实现类有：User、SocialUser、MutableUser。
+	
+	
+WebSecurityConfigurerAdapter抽象类（基础WebSecurityConfigurer<WebSecurity>）
+
+
+	SecurityConfigurerAdapter
+	SecurityConfigurerAdapter
+	WebSecurityConfigurerAdapter
+	
+
+图形验证：	
+	
+短信验证：
+
+
+
+WebSecurityConfiguration implements ImportAware, BeanClassLoaderAware
+	这个类被@Configuration修饰。内部有一个WebSecurity成员变量。
+	
+	
+	
+
+WebSecurity

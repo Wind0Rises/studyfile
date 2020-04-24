@@ -1,0 +1,365 @@
+
+/**
+ * WebSecurityConfiguration：这是一个配置类。被@Configuration修饰着。
+ * WebSecurityConfiguration implements ImportAware, BeanClassLoaderAware
+ */
+location：WebSecurityConfiguration
+@Autowired(required = false)
+public void setFilterChainProxySecurityConfigurer(ObjectPostProcessor<Object> objectPostProcessor,
+		@Value("#{@autowiredWebSecurityConfigurersIgnoreParents.getWebSecurityConfigurers()}") List<SecurityConfigurer<Filter, WebSecurity>> webSecurityConfigurers)
+		throws Exception {
+		
+	// 创建WebSecurity。
+	webSecurity = objectPostProcessor.postProcess(new WebSecurity(objectPostProcessor));
+	if (debugEnabled != null) {
+		webSecurity.debug(debugEnabled);
+	}
+
+	Collections.sort(webSecurityConfigurers, AnnotationAwareOrderComparator.INSTANCE);
+
+	Integer previousOrder = null;
+	Object previousConfig = null;
+	
+	for (SecurityConfigurer<Filter, WebSecurity> config : webSecurityConfigurers) {
+		Integer order = AnnotationAwareOrderComparator.lookupOrder(config);
+		
+		if (previousOrder != null && previousOrder.equals(order)) {
+			throw new IllegalStateException("@Order on WebSecurityConfigurers must be unique. Order of " + order + " was already used on " + previousConfig + ", so it cannot be used on "+ config + " too.");
+		}
+		
+		previousOrder = order;
+		previousConfig = config;
+	}
+	
+	for (SecurityConfigurer<Filter, WebSecurity> webSecurityConfigurer : webSecurityConfigurers) {
+		webSecurity.apply(webSecurityConfigurer);
+	}
+	
+	this.webSecurityConfigurers = webSecurityConfigurers;
+}
+
+	
+/**
+ * 创建过滤器链。
+ * DEFAULT_FILTER_NAME = "springSecurityFilterChain"
+ * WebSecurityConfigurerAdapter这个类的作用？？？？？
+ */
+location：WebSecurityConfiguration
+@Bean(name = AbstractSecurityWebApplicationInitializer.DEFAULT_FILTER_NAME)
+public Filter springSecurityFilterChain() throws Exception {
+
+	// 初始化时，private List<SecurityConfigurer<Filter, WebSecurity>> webSecurityConfigurers;
+	// 这个是自定SecurityConfigurer。
+	boolean hasConfigurers = webSecurityConfigurers != null && !webSecurityConfigurers.isEmpty();
+	
+	
+	if (!hasConfigurers) {
+		WebSecurityConfigurerAdapter adapter = objectObjectPostProcessor.postProcess(new WebSecurityConfigurerAdapter() {});
+		webSecurity.apply(adapter);
+	}
+	
+	return webSecurity.build();
+}
+
+/** 
+ * WebSecurity extends AbstractConfiguredSecurityBuilder<Filter, WebSecurity> implements SecurityBuilder<Filter>, ApplicationContextAware
+ */
+location：AbstractSecurityBuilder
+public final O build() throws Exception {
+	if (this.building.compareAndSet(false, true)) {
+		this.object = doBuild();
+		return this.object;
+	}
+	throw new AlreadyBuiltException("This object has already been built");
+}
+
+
+/** 
+ * 
+ */
+location：AbstractSecurityBuilder
+protected final O doBuild() throws Exception {
+	synchronized (configurers) {
+		buildState = BuildState.INITIALIZING;
+
+		beforeInit();
+		init();
+
+		buildState = BuildState.CONFIGURING;
+
+		beforeConfigure();
+		configure();
+
+		buildState = BuildState.BUILDING;
+
+		O result = performBuild();
+
+		buildState = BuildState.BUILT;
+
+		return result;
+	}
+}
+
+/**
+ * this：WebSecurity实例
+ */
+location：AbstractSecurityBuilder
+private void init() throws Exception {
+	Collection<SecurityConfigurer<O, B>> configurers = getConfigurers();
+
+	for (SecurityConfigurer<O, B> configurer : configurers) {
+		// 【【【这就调到自己的WebSecurityConfigurer】】】
+		configurer.init((B) this);
+	}
+
+	for (SecurityConfigurer<O, B> configurer : configurersAddedInInitializing) {
+		configurer.init((B) this);
+	}
+}
+
+/**
+ * this.configurers：这里面就是自定义的WebSecurityConfigurer
+ * WebSecurityConfigurerAdapter implements WebSecurityConfigurer<WebSecurity>
+ */
+location：AbstractSecurityBuilder
+private Collection<SecurityConfigurer<O, B>> getConfigurers() {
+	List<SecurityConfigurer<O, B>> result = new ArrayList<SecurityConfigurer<O, B>>();
+	for (List<SecurityConfigurer<O, B>> configs : this.configurers.values()) {
+		result.addAll(configs);
+	}
+	return result;
+}
+
+
+/**
+ * this：自己写的BrowserSecurityConfig。 这个类继承了WebSecurityConfigurerAdapter类。
+ * 
+ */
+location：WebSecurityConfigurerAdapter
+public void init(final WebSecurity web) throws Exception {
+
+	final HttpSecurity http = getHttp();
+	
+	/**
+	 * web.addSecurityFilterChainBuilder(http)；	===》		向WebSecurity中添加HttpSecurity。
+	 * postBuildAction(Runnable postBuildAction)； 	===》 		向WebSecurity中添加一个Runnable实例。
+	 */
+	web.addSecurityFilterChainBuilder(http).postBuildAction(new Runnable() {
+		public void run() {
+			FilterSecurityInterceptor securityInterceptor = http.getSharedObject(FilterSecurityInterceptor.class);
+			web.securityInterceptor(securityInterceptor);
+		}
+	});
+}
+
+/**
+ * http是HttpSecurity实例。
+ */
+location：WebSecurityConfigurerAdapter
+protected final HttpSecurity getHttp() throws Exception {
+	if (http != null) {
+		return http;
+	}
+
+	DefaultAuthenticationEventPublisher eventPublisher = objectPostProcessor.postProcess(new DefaultAuthenticationEventPublisher());
+	localConfigureAuthenticationBldr.authenticationEventPublisher(eventPublisher);
+
+	/**
+	 * 构建一个认证管理器。AuthenticationManager接口只有一个方法authenticate(Authentication authentication)
+	 * 
+	 * 其是ProviderManager的实例对象。
+	 */
+	AuthenticationManager authenticationManager = authenticationManager();
+	
+	authenticationBuilder.parentAuthenticationManager(authenticationManager);
+	authenticationBuilder.authenticationEventPublisher(eventPublisher);
+	Map<Class<? extends Object>, Object> sharedObjects = createSharedObjects();
+
+	// 创建HttpSecurity实例对象。
+	http = new HttpSecurity(objectPostProcessor, authenticationBuilder, sharedObjects);
+	
+	// 是否进行默认配置。
+	if (!disableDefaults) {
+		http
+			.csrf().and()
+			// 这是第一个处理的过滤器。
+			.addFilter(new WebAsyncManagerIntegrationFilter())
+			.exceptionHandling().and()
+			.headers().and()
+			.sessionManagement().and()
+			.securityContext().and()
+			.requestCache().and()
+			.anonymous().and()
+			.servletApi().and()
+			.apply(new DefaultLoginPageConfigurer<>()).and()
+			.logout();
+		ClassLoader classLoader = this.context.getClassLoader();
+		
+		List<AbstractHttpConfigurer> defaultHttpConfigurers = SpringFactoriesLoader.loadFactories(AbstractHttpConfigurer.class, classLoader);
+
+		for (AbstractHttpConfigurer configurer : defaultHttpConfigurers) {
+			http.apply(configurer);
+		}
+	}
+	
+	// 自己配置HttpSecurity
+	// 【【【这个很重要，实现自定义配置】】】
+	configure(http);
+	
+	return http;
+}
+
+/**
+ *
+ */
+location：WebSecurityConfigurerAdapter
+protected AuthenticationManager authenticationManager() throws Exception {
+	if (!authenticationManagerInitialized) {
+		configure(localConfigureAuthenticationBldr);
+		if (disableLocalConfigureAuthenticationBldr) {
+			authenticationManager = authenticationConfiguration.getAuthenticationManager();
+		} else {
+			authenticationManager = localConfigureAuthenticationBldr.build();
+		}
+		authenticationManagerInitialized = true;
+	}
+	return authenticationManager;
+}
+
+/**
+ *
+ */
+location：AuthenticationConfiguration
+public AuthenticationManager getAuthenticationManager() throws Exception {
+	if (this.authenticationManagerInitialized) {
+		return this.authenticationManager;
+	}
+	AuthenticationManagerBuilder authBuilder = authenticationManagerBuilder(this.objectPostProcessor, this.applicationContext);
+	
+	if (this.buildingAuthenticationManager.getAndSet(true)) {
+		return new AuthenticationManagerDelegator(authBuilder);
+	}
+
+	for (GlobalAuthenticationConfigurerAdapter config : globalAuthConfigurers) {
+		// 【【【很重要】】】
+		authBuilder.apply(config);
+	}
+
+	authenticationManager = authBuilder.build();
+
+	if (authenticationManager == null) {
+		authenticationManager = getAuthenticationManagerBean();
+	}
+
+	this.authenticationManagerInitialized = true;
+	return authenticationManager;
+}
+
+
+/**
+ *
+ */
+location：AbstractSecurityBuilder
+private void configure() throws Exception {
+	Collection<SecurityConfigurer<O, B>> configurers = getConfigurers();
+
+	for (SecurityConfigurer<O, B> configurer : configurers) {
+		configurer.configure((B) this);
+	}
+}
+
+
+/**
+ *
+ */
+location：WebSecurity
+protected Filter performBuild() throws Exception {
+	Assert.state(!securityFilterChainBuilders.isEmpty(), () -> "At least one SecurityBuilder<? extends SecurityFilter....");
+	
+	
+	int chainSize = ignoredRequests.size() + securityFilterChainBuilders.size();
+	List<SecurityFilterChain> securityFilterChains = new ArrayList<>(chainSize);
+	for (RequestMatcher ignoredRequest : ignoredRequests) {
+		securityFilterChains.add(new DefaultSecurityFilterChain(ignoredRequest));
+	}
+	
+	/**
+	 * List<SecurityBuilder<? extends SecurityFilterChain>> securityFilterChainBuilders = new ArrayList<SecurityBuilder<? extends SecurityFilterChain>>();
+	 * securityFilterChainBuilders 里的内容是 web.addSecurityFilterChainBuilder(http)；步骤添加的HttpSecurity实例对象。
+	 */
+	for (SecurityBuilder<? extends SecurityFilterChain> securityFilterChainBuilder : securityFilterChainBuilders) {
+		securityFilterChains.add(securityFilterChainBuilder.build());
+	}
+	
+	
+	FilterChainProxy filterChainProxy = new FilterChainProxy(securityFilterChains);
+	if (httpFirewall != null) {
+		filterChainProxy.setFirewall(httpFirewall);
+	}
+	filterChainProxy.afterPropertiesSet();
+
+	Filter result = filterChainProxy;
+	if (debugEnabled) {
+		logger.warn("==============================");
+		result = new DebugFilter(filterChainProxy);
+	}
+	postBuildAction.run();
+	return result;
+}
+
+
+
+/**
+ * this是HttpSecurity实例对象。
+ */
+location：AbstractSecurityBuilder
+public final O build() throws Exception {
+	if (this.building.compareAndSet(false, true)) {
+		this.object = doBuild();
+		return this.object;
+	}
+	throw new AlreadyBuiltException("This object has already been built");
+}
+
+/**
+ * this是HttpSecurity实例对象。
+ */
+location：AbstractSecurityBuilder
+protected final O doBuild() throws Exception {
+	synchronized (configurers) {
+		buildState = BuildState.INITIALIZING;
+		
+		// 没有做任何事情。
+		beforeInit();
+		init();
+
+		buildState = BuildState.CONFIGURING;
+
+		beforeConfigure();
+		configure();
+
+		buildState = BuildState.BUILDING;
+
+		O result = performBuild();
+
+		buildState = BuildState.BUILT;
+
+		return result;
+	}
+}
+
+/**
+ * this是HttpSecurity实例对象。
+ */
+location：AbstractSecurityBuilder
+private void init() throws Exception {
+	Collection<SecurityConfigurer<O, B>> configurers = getConfigurers();
+
+	for (SecurityConfigurer<O, B> configurer : configurers) {
+		configurer.init((B) this);
+	}
+
+	for (SecurityConfigurer<O, B> configurer : configurersAddedInInitializing) {
+		configurer.init((B) this);
+	}
+}
