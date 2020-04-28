@@ -107,6 +107,10 @@ zookeeper命令：
 				READ(r): 读权限，可以获取当前node的数据，可以list当前node所有的child nodes
 				WRITE(w): 写权限，可以向当前node写数据
 				ADMIN(a): 管理权限，可以设置当前node的permission
+				
+				
+			格式为：模式:id:
+				
 
 		综上，一个简单使用setAcl命令，则可以为：
 			setAcl /zookeeper/node1 world:anyone:cdrw

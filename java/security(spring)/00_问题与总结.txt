@@ -1,0 +1,17 @@
+一、认证流程
+
+
+二、如何自定义自己的认证。
+	1、定义自己的Filter。
+		定义自己的Filter，并继承AbstractAuthenticationProcessingFilter，实现attemptAuthentication(..)方法。
+		
+	2、定义自己的Authentication。
+		定义自己的Authentication，其需要继承AbstractAuthenticationToken类。Authentication保证这认证的主体，认证结果、授权信息。
+		
+	3、定义自己的AuthenticationProvider。
+		定义一个与自定义的Filter对应的AuthenticationProvider，该类需要实现AuthenticationProvider接口。并实现authenticate(..)方法：该方法是用于进行真正的
+		身份认证处理的。supports(...)是这个AuthenticationProvider能够处理的Authentication。
+	
+	4、定义自己的过滤器配置
+		该类需要继承SecurityConfigurerAdapter接口。在这个类中需要配置自定义过滤器位置的，过滤器成功失败的处理。把认证提供者配置配置到HttpSecurity。
+		

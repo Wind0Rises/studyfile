@@ -1,0 +1,222 @@
+
+
+
+UserDetailsService：
+	loadUserByUsername(String username):通过用户名获取UserDetails，这个username一般都是表单提交的username。
+	
+UserDetails：
+	实现类有：User、SocialUser、MutableUser。
+	
+	
+WebSecurityConfigurerAdapter抽象类（基础WebSecurityConfigurer<WebSecurity>）
+
+
+	SecurityConfigurerAdapter
+	SecurityConfigurerAdapter
+	WebSecurityConfigurerAdapter
+	
+
+图形验证：	
+	
+短信验证：
+
+
+
+WebSecurityConfiguration implements ImportAware, BeanClassLoaderAware
+	这个类被@Configuration修饰。内部有一个WebSecurity成员变量。
+	
+	
+	
+
+WebSecurity
+
+
+DefaultSecurityFilterChain implements SecurityFilterChain
+
+
+
+WebAsyncManagerIntegrationFilter extends OncePerRequestFilter
+	OncePerRequestFilter extends GenericFilterBean
+		GenericFilterBean implements Filter, BeanNameAware, EnvironmentAware, EnvironmentCapable, ServletContextAware, InitializingBean, DisposableBean
+		
+		
+		
+AuthenticationProvider的使用。
+
+
+
+AuthenticationProvider：实现类能够处理特定的认证。
+
+
+
+/**
+ * AbstractAuthenticationProcessingFilter：基于浏览器基于HTTP的身份认证处理器。其继承了Filter接口，并重写了doFilter(...)方法。
+ *
+ */
+location：AbstractAuthenticationProcessingFilter
+public void doFilter(ServletRequest req, ServletResponse res, FilterChain chain) throws IOException, ServletException {
+
+	HttpServletRequest request = (HttpServletRequest) req;
+	HttpServletResponse response = (HttpServletResponse) res;
+
+	// 判断是否是需要拦截的请求。
+	// 如果不是进入if，进行下一个Filter。
+	if (!requiresAuthentication(request, response)) {
+		chain.doFilter(request, response);
+		return;
+	}
+
+	if (logger.isDebugEnabled()) {
+		logger.debug("Request is to process authentication");
+	}
+
+	Authentication authResult;
+
+	try {
+		/** attemptAuthentication(..)：这是一个抽象的方法，有子类实现。具体的流程由子类实现。返回一个Authentication
+		 *		比如：短信认证。就实现短信认证的流程。
+		 * 
+		 *  下面有具体的认证过程。
+		 */
+		authResult = attemptAuthentication(request, response);
+		
+		/**
+		 * 获取认证的结果。
+		 */
+		if (authResult == null) {
+			return;
+		}
+		
+		// 保存session操作。
+		sessionStrategy.onAuthentication(authResult, request, response);
+		
+	} catch (InternalAuthenticationServiceException failed) {
+		logger.error("An internal error occurred while trying to authenticate the user.", failed);
+		unsuccessfulAuthentication(request, response, failed);
+		return;
+	} catch (AuthenticationException failed) {
+		unsuccessfulAuthentication(request, response, failed);
+		return;
+	}
+
+	// 成功以后是否要继续后面Filter
+	if (continueChainBeforeSuccessfulAuthentication) {
+		chain.doFilter(request, response);
+	}
+
+	successfulAuthentication(request, response, chain, authResult);
+}
+
+
+/**
+ *
+ */
+location：AbstractAuthenticationProcessingFilter
+protected void successfulAuthentication(HttpServletRequest request, HttpServletResponse response, FilterChain chain, Authentication authResult) throws IOException, ServletException {
+
+	if (logger.isDebugEnabled()) {
+		logger.debug("Authentication success. Updating SecurityContextHolder to contain: " + authResult);
+	}
+
+	// 向SecurityContext中设置结果。
+	SecurityContextHolder.getContext().setAuthentication(authResult);
+
+	// RemeberMe登录成功处理。
+	rememberMeServices.loginSuccess(request, response, authResult);
+
+	if (this.eventPublisher != null) {
+		eventPublisher.publishEvent(new InteractiveAuthenticationSuccessEvent(authResult, this.getClass()));
+	}
+
+	// 认证成功处理。这里时自己定义的认证成功处理器。CustomAuthenticationSuccessHandler。
+	successHandler.onAuthenticationSuccess(request, response, authResult);
+}
+
+
+
+
+
+
+
+
+/**
+ * 认证提供商进行认证处理。
+ */
+location：ProviderManager
+public Authentication authenticate(Authentication authentication) throws AuthenticationException {
+	Class<? extends Authentication> toTest = authentication.getClass();
+	AuthenticationException lastException = null;
+	AuthenticationException parentException = null;
+	Authentication result = null;
+	Authentication parentResult = null;
+	boolean debug = logger.isDebugEnabled();
+
+	// 获取所有的AuthenticationProvider【认证供应商】。找到特定认证的AuthenticationProvider。如果短信认证，需要有一个短信认证提供商，专门用于短信认证。
+	for (AuthenticationProvider provider : getProviders()) {
+		
+		// 判断认证提供商是否支持该认证。
+		if (!provider.supports(toTest)) {
+			continue;
+		}
+
+		if (debug) {
+			logger.debug("Authentication attempt using " + provider.getClass().getName());
+		}
+
+		try {
+			
+			// 认证提供商进行认证处理。
+			result = provider.authenticate(authentication);
+
+			if (result != null) {
+				
+				// 把认证结果，赋值到authentication中。
+				copyDetails(authentication, result);
+				break;
+			}
+			
+		} catch (AccountStatusException e) {
+			prepareException(e, authentication);
+			throw e;
+		} catch (InternalAuthenticationServiceException e) {
+			prepareException(e, authentication);
+			throw e;
+		} catch (AuthenticationException e) {
+			lastException = e;
+		}
+	}
+
+	
+	if (result == null && parent != null) {
+		try {
+			result = parentResult = parent.authenticate(authentication);
+		} catch (ProviderNotFoundException e) {
+		
+		} catch (AuthenticationException e) {
+			lastException = parentException = e;
+		}
+	}
+
+	
+	if (result != null) {
+		if (eraseCredentialsAfterAuthentication && (result instanceof CredentialsContainer)) {
+			((CredentialsContainer) result).eraseCredentials();
+		}
+
+		if (parentResult == null) {
+			eventPublisher.publishAuthenticationSuccess(result);
+		}
+		
+		return result;
+	}
+
+	if (lastException == null) {
+		lastException = new ProviderNotFoundException(messages.getMessage("ProviderManager.providerNotFound", new Object[] { toTest.getName() }, "No AuthenticationProvider found for {0}"));
+	}
+
+	if (parentException == null) {
+		prepareException(lastException, authentication);
+	}
+
+	throw lastException;
+}

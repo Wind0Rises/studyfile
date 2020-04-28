@@ -1,12 +1,26 @@
-1、介绍一下zookeeper。
+zookeeper最重要三大特性数据节点Znode+Watcher机制+ACL权限控制
+
+
+	
+崩溃恢复和消息广播
+
+
+zookeeper客户端框架：zkClient、Curator
+
+
+
+一、介绍一下zookeeper。
 	它是一个分布式、开源的分布式应用程序协调服务。是Apache Hadoop的一个子项目，它主要是用来解决分布式应用中经常遇到的一些数据管理问题，如：统一命名服务、状态同步服务、
 	集群管理、分布式应用配置项的管理等。
 	
 
-2、首先要搞懂分布式系统会存在哪些问题？
+	
+二、首先要搞懂分布式系统会存在哪些问题？
 
 
-3、paxos算法原理。
+
+
+三、paxos算法原理。
 	从二阶段提交到三阶段提交再到paxos算法。
 	
 	* 当集群中，超过半数的Acceptor接受了一个议案，那我们就可以说这个议案被选定了（Chosen）。
@@ -23,7 +37,8 @@
 				  任何编号小于Mn的提案。
 	
 	
-4、paxos算法：
+	
+、paxos算法：
 	第一阶段：
 		* proposer选择一个提案编号Mn,然后向Acceptor的某个超过半数的子集成员发送编号为Mn的Prepare请求。
 		* 如果一个Acceptor收到一个编号Mn的Prepare请求，且编号Mn大于该Acceptor已经响应的所有Prepare请求编号
@@ -39,20 +54,35 @@
 		它就可以通过这个提案。
 	
 	
-	
-崩溃恢复和消息广播
-	zkClient、Curator
+
 	
 	
-5、使用zookeeper实现分布式锁。  https://www.cnblogs.com/tong-yuan/p/11619006.html
+四、使用zookeeper实现分布式锁。  
 	* 获取锁
-		首先创建一个持久化节点persistNode，用于表示某一个锁，如果有一个线程需要获取锁，需要在持久化节点persistNode下创建一个临时顺序节点。如果持久化节点下没有
-		任何节点，该线程创建的节点为第一个节点，直接获取锁。如果又有其他线程过来获取锁，则继续创建锁，并在前一个临时节点上添加Watch。这样组成了一个等待队列。当
-		第一个线程结束以后，会删除第一个临时节点，由于第二节点监听第一个节点，当第一节点被删除后，第二节点会立即接收到通知，如此线程二就可以获取锁。
+		1、首先创建一个持久化节点persistNode，用于表示某一个锁，
+		【【【临时节点的作用：如果进程异常退出，会直接把临时节点删除。】】】
+		2、如果有一个线程需要获取锁，需要在持久化节点persistNode下创建一个临时顺序节点。如果持久化节点下没有任何节点，该线程创建的节点为第一个节点，直接获取锁。如果又有其他线程过来获取锁，则继续创建锁，并在前一个临时节点上添加Watch。这样组成了一个等待队列。当
+		3、第一个线程结束以后，会删除第一个临时节点，由于第二节点监听第一个节点，当第一节点被删除后，第二节点会立即接收到通知，如此线程二就可以获取锁。
+		
 		
 	* 命令：
 		create /persistNode dataMessage
 			线程一： create -s -e /persistNode/thread1 thread1Message;
 			线程二： create -s -e /persistNode/thread2 thread2Message;
+		
+
+	* 博客
+		https://www.cnblogs.com/tong-yuan/p/11619006.html
+			
+			
+	* 注意
+		一般情况下不用自己去实现分布式锁，Curator-recipes这个框架已经帮我们实现了，这个框架还有很多其他的高级应用。
+			
+			
+
+			
+五、Kafka与Zookeeper集群
+
 	
-6、比较redis和zookeeper实现分布式锁的优缺点。
+			
+、比较redis和zookeeper实现分布式锁的优缺点。

@@ -1,0 +1,22 @@
+
+
+二、Queues窗口
+	1、Number Of Pending Messages
+		待处理的数据
+	
+	2、Number Of Consumers 
+		消费者数量
+		
+	3、Messages Enqueued
+		入队消息数
+		
+	4、Messages Dequeued  
+		出队消息数。
+	
+	5、Views  
+	
+	
+	6、Operations  
+		send to：发送消息。
+		purge: 只是清空队列里的消息，并把消息从待处理数据中放入已经出队里。
+		delete: 删除这个queue，在列表里会消失。

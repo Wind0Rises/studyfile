@@ -34,10 +34,12 @@
 			/serviceValidate：用于让各个 service 验证用户是否登录中心服务器。
 
 		* 票据
-			TGT：Ticket Grangting Ticket，TGT是CAS为用户签发的登录票据，【拥有了TGT，用户就可以证明自己在CAS成功登录过】。TGT封装了Cookie值以及此Cookie值对应
-				的用户信息。当HTTP请求到来时，CAS以此Cookie值（TGC）为key查询缓存中有无TGT ，如果有的话，则相信用户已登录过。
+			TGT：Ticket Grangting Ticket，TGT是CAS为用户签发的登录票据，【拥有了TGT，用户就可以证明自己在CAS Server成功登录过】。TGT封装了Cookie id以及此Cookie id对应
+				的用户信息。当HTTP请求到来时，CAS以此Cookie Id（TGC）为key查询缓存中有无TGT ，如果有的话，则相信用户已登录过。
+				
 			TGC：Ticket Granting Cookie，CAS Server生成TGT放入自己的Session中，而TGC就是这个Session的唯一标识（SessionId），以Cookie形式放到浏览器端，是 CAS 
 				Server用来明确用户身份的凭证。
+				
 			ST：Service Ticket，ST是CAS为用户签发的访问某一service的票据。用户访问service时，service发现用户没有ST，则要求用户去CAS获取ST。用户向CAS发出获取ST
 				的请求，CAS发现用户有TGT，则签发一个ST，返回给用户。用户拿着ST去访问service，service拿ST去CAS验证，验证通过后，允许用户访问资源。
 			
@@ -60,22 +62,37 @@
 		
 		* 一个完成的流程
 			1、用户访问产品a，域名是http://www.a.cn。
-			2、由于用户没有携带在a服务器上登录的a cookie，所以a服务器返回http重定向，重定向的url是SSO服务器的地址，同时url的query中通过参数指明登录成功后，
-				回跳到a页面。重定向的url形如 http://sso.dxy.cn/login?service=https%3A%2F%2Fwww.a.cn。
-			3、由于SSO服务器上没有登录的TGC，TGC存放在SSO服务器上的Session，所以判读用户并没有在SSO上已经登录了，如果没有登录，给用户显示统一登录界面。用
-				户在SSO的页面上进行登录操作，并生成TGC，保存在SSO服务器上。
-			4、登录成功后，SSO服务器构建用户在SSO登录的TGT（保存TGC的session的sessionId），同时返回一个http重定向。这里注意：
-				# 重定向地址为之前写在query里的a页面。
-				# 重定向地址的query中包含sso服务器派发给产品A的ST。
-				# 重定向的http response中包含写cookie的header。这个cookie代表用户在SSO中的登录状态，它的值就是TGC。
-			5、浏览器重定向到产品 a。此时重定向的url中携带着SSO服务器生成的ST。
-			6、根据ST，a服务器向SSO服务器发送验证请求，SSO服务器验证票据的有效性。验证成功后，a服务器知道用户已经在sso登录了，于是a服务器构建用户登录session，
-				记为a session。并将cookie写入浏览器。注意，此处的cookie和session保存的是用户在a服务器的登录状态，和CAS无关。
+			
+			2、由于用户没有携带在a服务器上登录的a_cookie，所以a服务器返回http重定向，重定向的url是SSO Server的地址，同时在url存放着登录成功后回调的地址，如果登
+			   录成功就回跳到a页面。重定向的url形如 http://sso.dxy.cn/login?service=https%3A%2F%2Fwww.a.cn。
+				
+			3、TGC存放在SSO Server上的Session中，由于SSO Server上没有登录的TGC，所以判断用户并没有在SSO上登录。如果没有登录，给用户显示统一登录界面。用户在SSO
+			   的页面上进行登录操作，并生成TGC，保存在SSO服务器上。
+				
+			4、登录成功后，SSO Server会构建用户在SSO登录的TGT（保存TGC的session的sessionId），同时返回一个http重定向。这里注意：
+				# 重定向地址为之前写在URL里的a页面。
+				# 重定向地址中包含sso server派发给产品A的ST。
+				# 重定向的http response中包含cookie的header。这个cookie代表用户在SSO中的登录状态，它的值就是TGC。
+				
+				
+			5、浏览器重定向到产品a。此时重定向的url中携带着SSO Server生成的ST。
+			
+			6、根据ST，a服务器向SSO Server发送验证请求，SSO Server验证票据的有效性。验证成功后，a服务器知道用户已经在sso登录了，于是a服务器构建用户登录session，
+			   记为a_session，并a_seesion的Session id写入到响应的cookie中，然后cookie被写入浏览器。注意，此处的cookie和session保存的是用户在a服务器的登录状态，
+			   和CAS无关。
+				
+				
+			// 这里有一个很重要的地方：a和b登录的做登录的操作在sso server上，a和b的对应sso server是没有跨域问题的。
+			
 				
 			7、之后用户访问产品b，域名是 http://www.b.cn。
-			8、由于用户没有携带在b服务器上登录的b cookie，所以b服务器返回http重定向，重定向的url是SSO服务器的地址，去询问用户在SSO中的登录状态。
-			9、浏览器重定向到SSO。注意，第4步中已经向浏览器写入了携带TGC的cookie，所以此时SSO服务器可以拿到，根据TGC去查找TGT，如果找到，就判断用户已经在sso 
-				登录过了。
+			8、由于用户没有携带在b服务器上登录的b_cookie，所以b服务器返回http重定向，重定向的url是SSO服务器的地址，去询问用户在SSO中的登录状态。
+			9、浏览器重定向到SSO。注意，第4步中已经向浏览器写入了携带TGC的cookie，所以此时SSO Server可以拿到，根据TGC去查找TGT，如果找到，就判断用户已经在sso 
+			   登录过了。
+			   
 			10、SSO服务器返回一个重定向，重定向携带产品B的ST。注意，这里的ST 和第4步中的 ST是不一样的，事实上，每次生成的ST都是不一样的。
 			11、浏览器带ST重定向到b服务器，和第5步一样。
 			12、b服务器根据票据向SSO服务器发送请求，票据验证通过后，b服务器知道用户已经在sso登录了，于是生成b session，向浏览器写入 b cookie。
+			
+			
+			

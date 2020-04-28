@@ -1,4 +1,27 @@
-在tomcat的bin目录下有一个catalina.sh文件，修改该文件的JAVA_OPTS参数，在JAVA_OPTS这参数结尾加载-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=5005
-内容，然后重启tomcat。5005是调试地址。
+第一步：
+	在tomcat的bin目录下有一个catalina.sh文件，修改该文件的JAVA_OPTS参数，在JAVA_OPTS这参数结尾加载-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=5005
+	内容，然后重启tomcat。5005是调试地址。
+		例：JAVA_OPTS="$JAVA_OPTS $JSSE_OPTS -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=5005"
 
+	也可以在 CATALINA_OPTS参数中添加 -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=5005
+		例：CATALINA_OPTS="-server -Xms1024m -Xmx1024m -XX:PermSize=512m -XX:MaxPermSize=1024m -XX:NewSize=192m -XX:MaxNewSize=384m -DENV=sit 
+			-Dspring.profiles.active=sit -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=5066"
+			
+第二步：idea配置
+	Server窗口
+		Tomcat Server settings
+			Type：same file system
+			Host：same file system
+
+		Remote Connection Setting
+			Host：22.144.101.31 （服务器IP）
+			Port：5005 （上面配置的端口）
+
+	startup/connection窗口
+		Debug
+		 ||
+		 \/
+		Transport: socket
+		port；5005 （上面配置的端口）
+		
 
