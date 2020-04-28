@@ -29,11 +29,10 @@
 		yum install -y yum-utils device-mapper-persistent-data lvm2
 		
 		
-	4、设置yum源
+	4、设置yum源（二选其一，建议使用阿里的）
 		yum-config-manager --add-repo http://download.docker.com/linux/centos/docker-ce.repo
 		yum-config-manager --add-repo http://mirrors.aliyun.com/docker-ce/linux/centos/docker-ce.repo
 		
-		// https://blog.csdn.net/whatday/article/details/51097456
 		
 	5、查看仓库的docker版本，
 		yum list docker-ce --showduplicates | sort -r
@@ -48,3 +47,205 @@
 		
 		
 		
+六、docker架构和底层技术
+	docker提供了一个开发、打包、运行app的平台
+	把app和底层infrastructure隔离开来
+		
+			application
+			
+			Dokcer Engine
+			
+		Infrastructure(physical/virtual)
+	
+	
+	
+	Docker Engine: 后台进程（dockerd）、Rest API Server、CLI接口（docker）
+	
+	
+	
+	
+	Client   Docker_Host(容器和进行)     Registry
+	
+	
+	
+	
+Ubuntu image（rootfs）、Centos Image(rootfs)、Debian Image(rootfs) ====> Base Image
+								Linux Kernel
+								
+								
+	查看自己的：docker image ls
+	
+	more Dockerfile
+	
+	
+	basis image;从Docker hub中拉取。
+	
+	
+	
+	
+	vi Dockerfile;
+	
+	FROM scratch
+	ADD HelloJava.class /
+	CMD ["/hello"]
+	
+	
+	docer build -t dockerid/hello-world .
+	
+	docker history docker_id
+	
+	
+	image 只读
+	
+	
+什么是Container
+	通过Image创建Container
+	在Image layer之上建立一个Container layer。
+	类比面向对象：类(iamge)和实例(container)。
+	Image负责app的存储和分发，Container负责运行app的。 
+	
+	
+	
+	docker run
+	
+	docker run -it centos
+	
+	docker --help
+	
+	docker rm :删除的container
+	docker rmi :删除的是image
+	docker image rm 
+	
+	docker container ls  ==== docker ps -a
+	
+	docker container ls -f "status=exited"
+	
+	docker container commit
+	
+	
+	
+	
+Dockerfile 语法：
+	FROM scratch       	# 制作base image
+	FROM centos   		# 使用centos image
+	
+	LABEL maintainer="liu@163.com"
+	LABEL version="1.0"
+	LABEL description="This is description"
+	
+	LABEL Metadata不可少。相当于代码中的注释。
+	
+	
+	RUN yum update && yum install -y vim 
+		\ python-dev 							# 反斜杠是换行。
+	
+	为了避免无用的分成， 合并多条命令成一行。
+	
+	
+	WORKDIR # 设定工作目录。
+	WORKDIR /test   # 如果没有test文件夹，会自动创建test目录
+	WORKDIR demo
+	RUN pwd
+	# 上面的三条命令最后结果是：/test/demo
+	
+	用WORKDIR，不用用RUN cd！尽量使用绝对目录。
+	
+	ADD and COPY
+	ADD把文件复制到Image的根目录下。
+	
+	ADD不经可以添加文件到指定目录还能解压缩。
+	ADD test.tar.gz /  # 添加到根目录并解压缩。
+
+	WORKDIR /root
+	ADD hello test/    # /root/test/hello
+	
+	大部分情况下，COPY优于ADD。ADD除了COPY还有额外的功能（解压）！
+	添加远程文件/目录请使用curl或者wget
+	
+	
+	ENV 设置一个常量。
+	EVN MYSQL_VERSION 5.6
+	RUN apt-get install -y  mysql-server = "${MYSQL_VERSION}" && rm -rf /var/lib/apt/lists/*
+	
+	ENV 要多使用，可以增加可维护性。
+	
+	VOLUME：存储
+	 
+	EXPOSE：网络
+		EXPOSE 5000    # 暴露5000端口。
+	
+	【【【没事可以看看github的docker-library】】】
+	
+	
+	RUN：执行命令并创建新的Image Layer（层）
+	CMD：设置容器启动后默认执行的命令和参数
+	ENTRYPOINT：设置容器启动时运行的命令。
+	
+	shell格式和exec格式
+		shell格式：
+			RUN apt-get install -y vim
+			CMD echo "hello"
+			ENTRYPOINT echo "hello"
+		
+		Exec格式
+			RUN [ "apt-get", "install", "-y", "vim"]
+			CMD [ "/bin/echo", "hello"]
+			ENTRYPOINT [ "/bin/echo", "hello"]
+		
+		例子1：
+			FROM centos
+			ENV name Docker
+			ENTRYPOINT echo "hello $name"
+		
+		例子2：
+			FROM centos
+			ENV name Docker
+			ENTRYPOINT [ "/bin/echo" "hello $name" ]  # 这个无法替换$name
+		改
+			ENTRYPOINT [ "/bin/bash" "-c" "echo hello $name" ]  # 这样可打印hello docker
+	
+		
+		
+	CMD 
+		容器启动时默认执行的命令
+		如果docker run 执行了其他命令，CMD命令会被忽略
+		如果定义了多个cmd，只有最后一个会执行。
+		
+	
+	ENTRYPOINT
+		让容器以应用或服务的形式运行，
+		不会被忽略，一定会执行。
+		
+		例子：
+			
+			
+			
+image的发布
+	docker login
+	
+	docker image push REPOSITORY:TAG    == docker push REPOSITORY:TAG
+	
+	
+	
+容器操作：
+	docker exec -it CONTANIER_ID /bin/bash
+	docker exec -it CONTANIER_ID paython
+	
+	
+	docker contanier stop CONTANIER_ID  == docker stop CONTANIER_ID
+	
+	docker rm $(docker ps -aq)
+	
+	docker ps -a
+	
+	
+	docker start CONTANIER_ID或者NAME
+	
+	docker inspect
+	
+	docker logs
+	
+	
+stress 
+	
+	

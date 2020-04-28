@@ -143,3 +143,10 @@ zookeeper命令：
 
 
 
+二、zookeeper集群安装。
+	1、解压文件，复制conf目录下的zoo_sample.cfg文件，保存名为zoo.cfg.
+	2、配置zoo.cfg，
+		* 配置dataDir路径，并在dataDir路径下，创建myid文件，并编辑文件，编辑内容为zookeeper的noid（编号）；
+		* 配置server.1=localhost:2888:3888  说明：server.noid=主机名（或者是ip地址）:2888（原子广播端口）:3888（选举端口）
+
+

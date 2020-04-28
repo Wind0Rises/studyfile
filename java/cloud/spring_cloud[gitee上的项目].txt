@@ -43,7 +43,7 @@ zipkin：8040
 	order    --->	myorder
 	
 	localhost:8030/myProduct
-	localhost:8030/myorder
+	localhost:8030/myorder/order/hystrixRestTemplate
 	
 	
 	spring.cloud.config.enabled
