@@ -23,8 +23,11 @@
 			接着生成BeanName并构建BeanDefinitionHolder对象，如果需要装饰AbstractBeanDefinition进行装饰操作。
 			然后把BeanDefinition注册到BeanDefinitionRegistry（DefaultListableBeanFactory)中。
 			
+			
 		
-// 获取刷新的BeanFactory
+/**
+ * 获取刷新的BeanFactory
+ */
 location：AbstractApplicationContext
 protected ConfigurableListableBeanFactory obtainFreshBeanFactory() {
 	refreshBeanFactory();
@@ -37,19 +40,23 @@ protected ConfigurableListableBeanFactory obtainFreshBeanFactory() {
 	return beanFactory;
 }
 
-// 刷新BeanFactory。??什么情况下回去找GenericApplicationContext??
+/**
+ * 刷新BeanFactory??什么情况下回去找GenericApplicationContext??
+ */
 location：AbstractRefreshableApplicationContext
 protected final void refreshBeanFactory() throws BeansException {
 	// 判断是否已经存在BeanFactory
 	if (hasBeanFactory()) {
 		// 如果已经存在BeanFactory销毁Bean并关闭BeanFactory。
 		destroyBeans();
+		// 关闭之前的BeanFactory。
 		closeBeanFactory();
 	}
 	
 	try {
 		// 创建【DefaultListableBeanFactory】实例。
 		DefaultListableBeanFactory beanFactory = createBeanFactory();
+		
 		// 设置BeanFactory的ID
 		beanFactory.setSerializationId(getId());
 		
@@ -68,7 +75,9 @@ protected final void refreshBeanFactory() throws BeansException {
 	}
 }
 
-// 初始化时：DefaultListableBeanFactory的实例，
+/**
+ * 初始化时：DefaultListableBeanFactory的实例，
+ */
 location：DefaultListableBeanFactory
 protected DefaultListableBeanFactory createBeanFactory() {
 	// 注意DefaultListableBeanFactory对象的初始化过程。初始化getInternalParentBeanFactory()为null
@@ -76,7 +85,10 @@ protected DefaultListableBeanFactory createBeanFactory() {
 	return new DefaultListableBeanFactory(getInternalParentBeanFactory());
 }
 
-// 
+/**
+ * 是否允许覆盖BeanDefinition和是否有允许循环应用。
+ */
+location：DefaultListableBeanFactory
 protected void customizeBeanFactory(DefaultListableBeanFactory beanFactory) {
 	// allowBeanDefinitionOverriding：是否ryunxu允许覆盖注册。
 	if (this.allowBeanDefinitionOverriding != null) {
@@ -89,16 +101,29 @@ protected void customizeBeanFactory(DefaultListableBeanFactory beanFactory) {
 }
 
 
-############################### 加载过程开始   ########################################
-############################### 加载过程开始   ########################################
 
-// 不同的ApplicationContext有不同的处理方式。其他几种方式：AnnotationConfigWebApplication、GroovyWebApplicationContext、AbstractXmlApplicationContext
+
+
+
+############################################################################################################################################
+######################################################        加载BeanDifination过程开始            ########################################
+############################################################################################################################################
+
+/**
+ * 不同的ApplicationContext处理方式也会不同。
+ * 		其他几种方式：AnnotationConfigWebApplication、GroovyWebApplicationContext、AbstractXmlApplicationContext
+ */
 location：XmlWebApplicationContext
 protected void loadBeanDefinitions(DefaultListableBeanFactory beanFactory) throws BeansException, IOException {
-	// 为BeanFactory创建一个新的XmlBeanDefinitionReader实例  ==========    XmlBeanDefinitionReader中包含DefaultListableBeanFactory
+
+	/**
+	 * 为BeanFactory创建一个新的XmlBeanDefinitionReader实例  ==========    XmlBeanDefinitionReader中包含DefaultListableBeanFactory
+	 * BeanDefinitionReader：用于读取BeanDefinition。
+	 */
 	XmlBeanDefinitionReader beanDefinitionReader = new XmlBeanDefinitionReader(beanFactory);
 
 	// 用这个Context资源加载环境配置beanDefinitionReader。getEnvironment是获取XmlWebApplicationContext的环境。
+	// 设置XmlBeanDefinitionReader的属性。
 	beanDefinitionReader.setEnvironment(getEnvironment());
 	beanDefinitionReader.setResourceLoader(this);
 	beanDefinitionReader.setEntityResolver(new ResourceEntityResolver(this));
@@ -110,7 +135,9 @@ protected void loadBeanDefinitions(DefaultListableBeanFactory beanFactory) throw
 	loadBeanDefinitions(beanDefinitionReader);
 }
 
-// 加载BeanDefinition
+/**
+ * 构建
+ */
 location：XmlWebApplicationContext。
 protected void loadBeanDefinitions(XmlBeanDefinitionReader reader) throws IOException {
 	String[] configLocations = getConfigLocations();
@@ -121,7 +148,9 @@ protected void loadBeanDefinitions(XmlBeanDefinitionReader reader) throws IOExce
 	}
 }	
 
-// 获取加载资源的路径。
+/**
+ * 获取加载资源的路径。
+ */
 location：AbstractRefreshWebApplicationContext
 public String[] getConfigLocations() {
 	return super.getConfigLocations();
@@ -129,14 +158,18 @@ public String[] getConfigLocations() {
 		    ||
 			\/
 
-// configLocations就是web.xml配置的contextConfigLocation参数
+/**
+ * configLocations就是web.xml配置的contextConfigLocation参数
+ */
 location：AbstractRefreshableConfigApplicationContext			
 protected String[] getConfigLocations() {
 	return (this.configLocations != null ? this.configLocations : getDefaultConfigLocations());
 }	
 
 
-// 加载过程BeanDefinition
+/**
+ * 加载过程BeanDefinition
+ */
 location：AbstractBeanDefinitionReader
 public int loadBeanDefinitions(String location) throws BeanDefinitionStoreException {
 	return loadBeanDefinitions(location, null);
@@ -213,12 +246,10 @@ public Resource[] getResources(String locationPattern) throws IOException {
 			// 处理
 			return findPathMatchingResources(locationPattern);
 		} else {
-			// all class path resources with the given name
 			return findAllClassPathResources(locationPattern.substring(CLASSPATH_ALL_URL_PREFIX.length()));
 		}
 	} else {
-		// Generally only look for a pattern after a prefix here,
-		// and on Tomcat only after the "*/" separator for its "war:" protocol.
+		
 		int prefixEnd = (locationPattern.startsWith("war:") ? locationPattern.indexOf("*/") + 1 : locationPattern.indexOf(":") + 1);
 		if (getPathMatcher().isPattern(locationPattern.substring(prefixEnd))) {
 			// a file pattern

@@ -6,17 +6,18 @@
 	
 	ExceptionTranslationFilter  FilterSecurityInterceptor
 	
-1、WebAsyncManagerIntegrationFilter：将Security上下文与Spring Web中用于处理异步请求映射的WebAsyncManager进行集成。
+1、WebAsyncManagerIntegrationFilter：将Security上下文与Spring Web中用于处理异步请求映射的WebAsyncManager进行集成。doFilter(..)执行的事OncePerRequestFilter。
 
-2、SecurityContextPersistenceFilter：在每次请求处理之前将该请求相关的安全上下文信息加载到 SecurityContextHolder 中，然后在该次请求处理完成之后，
+2、SecurityContextPersistenceFilter：在每次请求处理之前将该请求相关的安全上下文信息加载到SecurityContextHolder中，然后在该次请求处理完成之后，
 		将SecurityContextHolder中关于这次请求的信息存储到一个“仓储”中，然后将SecurityContextHolder 中的信息清除，例如在Session中维护一个用户的
 		安全信息就是这个过滤器处理的。
 
-3、HeaderWriterFilter：用于将头信息加入响应中。
+3、HeaderWriterFilter：用于将头信息加入响应中。doFilter(..)执行的事OncePerRequestFilter。
 
 4、CsrfFilter：用于处理跨站请求伪造。
 
 5、LogoutFilter：用于处理退出登录。
+
 
 6、UsernamePasswordAuthenticationFilter：用于处理基于表单的登录请求，从表单中获取用户名和密码。默认情况下处理来自 /login 的请求。从表单中获取用
 		户名和密码时，默认使用的表单name值为username和password，这两个值可以通过设置这个过滤器的usernameParameter和passwordParameter两个参数的值
@@ -24,7 +25,9 @@
 
 7、DefaultLoginPageGeneratingFilter：如果没有配置登录页面，那系统初始化时就会配置这个过滤器，并且用于在需要进行登录时生成一个登录表单页面。
 
+
 8、BasicAuthenticationFilter：检测和处理http basic认证。
+
 
 9、RequestCacheAwareFilter：用来处理请求的缓存。
 
@@ -40,3 +43,561 @@
 
 15、RememberMeAuthenticationFilter：当用户没有登录而直接访问资源时, 从cookie里找出用户的信息, 如果Spring Security能够识别出用户提供的remember me cookie, 
 		用户将不必填写用户名和密码, 而是直接登录进入系统，该过滤器默认不开启。
+
+		
+		
+		
+Authentication：一旦通过了AuthenticationManager.authenticate(Authentication)方法的请求，就代表认证请求或已认证主体的令牌。一旦请求被认证通过，
+	Authentication通常被保存在一个thread-local SecurityContext中，可以通过SecurityContextHolder进行管理。Authentication通常保存着认证的主体信息
+	和认证结果、授权信息。
+		
+	getAuthorities()：有AuthenticationManager设置，用于指示以授予主体的权限。获取授予主体的权限。
+	getCredentials()：证明主体正确的凭证。这个通常是一个密码，但也可以是与AuthenticationManager相关的任何密码凭证。
+	getPrincipal()：将被认证的主体的身份。如果使用用户名和密码进行身份验证请求，则为用户名。
+	getDetails()：存储有关身份验证请求的其他详细信息。
+	isAuthenticated()：
+	setAuthenticated(boolean isAuthenticated)：设置
+		
+		
+####################################################################################################################		
+###############################       SecurityContextPersistenceFilter           ###################################		
+####################################################################################################################		
+/**
+ *
+ */
+location：SecurityContextPersistenceFilter		
+public void doFilter(ServletRequest req, ServletResponse res, FilterChain chain) throws IOException, ServletException {
+	HttpServletRequest request = (HttpServletRequest) req;
+	HttpServletResponse response = (HttpServletResponse) res;
+
+	if (request.getAttribute(FILTER_APPLIED) != null) {
+		chain.doFilter(request, response);
+		return;
+	}
+
+	final boolean debug = logger.isDebugEnabled();
+
+	request.setAttribute(FILTER_APPLIED, Boolean.TRUE);
+	
+	if (forceEagerSessionCreation) {
+		HttpSession session = request.getSession();
+		if (debug && session.isNew()) {
+			logger.debug("Eagerly created session: " + session.getId());
+		}
+	}
+
+	HttpRequestResponseHolder holder = new HttpRequestResponseHolder(request, response);
+	SecurityContext contextBeforeChainExecution = repo.loadContext(holder);
+
+	try {
+		SecurityContextHolder.setContext(contextBeforeChainExecution);
+		chain.doFilter(holder.getRequest(), holder.getResponse());
+
+	} finally {
+		SecurityContext contextAfterChainExecution = SecurityContextHolder.getContext();
+		SecurityContextHolder.clearContext();
+		repo.saveContext(contextAfterChainExecution, holder.getRequest(), holder.getResponse());
+		request.removeAttribute(FILTER_APPLIED);
+		if (debug) {
+			logger.debug("SecurityContextHolder now cleared, as request processing completed");
+		}
+	}
+}		
+		
+		
+####################################################################################################################		
+#####################################             LogoutFilter           ###########################################		
+####################################################################################################################
+/**
+ *
+ */
+location：LogoutFilter	
+public void doFilter(ServletRequest req, ServletResponse res, FilterChain chain) throws IOException, ServletException {
+
+	// 获取请求响应信息。
+	HttpServletRequest request = (HttpServletRequest) req;
+	HttpServletResponse response = (HttpServletResponse) res;
+
+	if (requiresLogout(request, response)) {
+		
+		// 获取认证信息。
+		Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+
+		if (logger.isDebugEnabled()) {
+			logger.debug("Logging out user '" + auth + "' and transferring to logout destination");
+		}
+
+		// 登出操作
+		this.handler.logout(request, response, auth);
+
+		// 登出成功操作
+		logoutSuccessHandler.onLogoutSuccess(request, response, auth);
+
+		return;
+	}
+
+	// 如果不是登出操作，进入下一个过滤器。
+	chain.doFilter(request, response);
+}	
+
+/**
+ * 判断是否是退出操作。
+ *
+ * 这个登出操作的logoutRequestMatcher是什么配置的？
+ */
+location：LogoutFilter
+protected boolean requiresLogout(HttpServletRequest request, HttpServletResponse response) {
+	return logoutRequestMatcher.matches(request);
+}
+
+
+####################################################################################################################		
+#####################################             SmsCodeAuthenticationFilter           ############################
+####################################################################################################################
+/**
+ * this是SmsCodeAuthenticationFilter
+ */
+location：AbstractAuthenticationProcessingFilter
+public void doFilter(ServletRequest req, ServletResponse res, FilterChain chain) throws IOException, ServletException {
+
+	HttpServletRequest request = (HttpServletRequest) req;
+	HttpServletResponse response = (HttpServletResponse) res;
+
+	// 判断是否是短信认证请求。
+	if (!requiresAuthentication(request, response)) {
+		chain.doFilter(request, response);
+		return;
+	}
+
+	/**
+	 * 进行短信认证操作。
+	 */
+	if (logger.isDebugEnabled()) {
+		logger.debug("Request is to process authentication");
+	}
+
+	Authentication authResult;
+
+	try {
+	
+		authResult = attemptAuthentication(request, response);
+		if (authResult == null) {
+			return;
+		}
+		sessionStrategy.onAuthentication(authResult, request, response);
+		
+	} catch (InternalAuthenticationServiceException failed) {
+		logger.error("An internal error occurred while trying to authenticate the user.", failed);
+		unsuccessfulAuthentication(request, response, failed);
+		return;
+	} catch (AuthenticationException failed) {
+		unsuccessfulAuthentication(request, response, failed);
+		return;
+	}
+
+	// 
+	if (continueChainBeforeSuccessfulAuthentication) {
+		chain.doFilter(request, response);
+	}
+
+	successfulAuthentication(request, response, chain, authResult);
+}		
+
+
+####################################################################################################################		
+#####################################             SmsCodeAuthenticationFilter           ############################
+####################################################################################################################
+/**
+ * this是UsernamePasswordAuthenticationFilter
+ */
+location：AbstractAuthenticationProcessingFilter
+public void doFilter(ServletRequest req, ServletResponse res, FilterChain chain) throws IOException, ServletException {
+
+	HttpServletRequest request = (HttpServletRequest) req;
+	HttpServletResponse response = (HttpServletResponse) res;
+
+	if (!requiresAuthentication(request, response)) {
+		chain.doFilter(request, response);
+		return;
+	}
+
+	if (logger.isDebugEnabled()) {
+		logger.debug("Request is to process authentication");
+	}
+
+	Authentication authResult;
+
+	try {
+		authResult = attemptAuthentication(request, response);
+		
+		if (authResult == null) {
+			return;
+		}
+		
+		sessionStrategy.onAuthentication(authResult, request, response);
+	} catch (InternalAuthenticationServiceException failed) {
+		logger.error("An internal error occurred while trying to authenticate the user.", failed);
+		unsuccessfulAuthentication(request, response, failed);
+
+		return;
+	} catch (AuthenticationException failed) {
+		unsuccessfulAuthentication(request, response, failed);
+		return;
+	}
+
+	if (continueChainBeforeSuccessfulAuthentication) {
+		chain.doFilter(request, response);
+	}
+
+	successfulAuthentication(request, response, chain, authResult);
+}		
+		
+####################################################################################################################		
+#####################################             SmsCodeAuthenticationFilter           ############################
+####################################################################################################################
+/**
+ * this是ValidateCodeFilter
+ */
+location：OncePerRequestFilter	
+public final void doFilter(ServletRequest request, ServletResponse response, FilterChain filterChain) throws ServletException, IOException {
+
+	if (!(request instanceof HttpServletRequest) || !(response instanceof HttpServletResponse)) {
+		throw new ServletException("OncePerRequestFilter just supports HTTP requests");
+	}
+	
+	HttpServletRequest httpRequest = (HttpServletRequest) request;
+	HttpServletResponse httpResponse = (HttpServletResponse) response;
+
+	String alreadyFilteredAttributeName = getAlreadyFilteredAttributeName();
+	boolean hasAlreadyFilteredAttribute = request.getAttribute(alreadyFilteredAttributeName) != null;
+
+	if (skipDispatch(httpRequest) || shouldNotFilter(httpRequest)) {
+		filterChain.doFilter(request, response);
+	} else if (hasAlreadyFilteredAttribute) {
+
+		if (DispatcherType.ERROR.equals(request.getDispatcherType())) {
+			doFilterNestedErrorDispatch(httpRequest, httpResponse, filterChain);
+			return;
+		}
+		
+		filterChain.doFilter(request, response);
+		
+	} else {
+		request.setAttribute(alreadyFilteredAttributeName, Boolean.TRUE);
+		try {
+			doFilterInternal(httpRequest, httpResponse, filterChain);
+		} finally {
+			request.removeAttribute(alreadyFilteredAttributeName);
+		}
+	}
+}	
+
+
+####################################################################################################################		
+#####################################             RequestCacheAwareFilter           ################################
+####################################################################################################################
+/**
+ * this是RequestCacheAwareFilter
+ */
+location：RequestCacheAwareFilter
+public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain) throws IOException, ServletException {
+
+	HttpServletRequest wrappedSavedRequest = requestCache.getMatchingRequest((HttpServletRequest) request, (HttpServletResponse) response);
+
+	chain.doFilter(wrappedSavedRequest == null ? request : wrappedSavedRequest, response);
+}
+
+
+####################################################################################################################		
+##############################         SecurityContextHolderAwareRequestFilter      ################################
+####################################################################################################################
+/**
+ * this是SecurityContextHolderAwareRequestFilter
+ */
+location：SecurityContextHolderAwareRequestFilter
+public void doFilter(ServletRequest req, ServletResponse res, FilterChain chain) throws IOException, ServletException {
+	chain.doFilter(this.requestFactory.create((HttpServletRequest) req, (HttpServletResponse) res), res);
+}
+
+####################################################################################################################		
+##############################             RememberMeAuthenticationFilter           ################################
+####################################################################################################################
+/**
+ * this是RememberMeAuthenticationFilter
+ */
+location：RememberMeAuthenticationFilter
+public void doFilter(ServletRequest req, ServletResponse res, FilterChain chain) throws IOException, ServletException {
+	HttpServletRequest request = (HttpServletRequest) req;
+	HttpServletResponse response = (HttpServletResponse) res;
+
+	// 获取是否有认证通过的Authentication
+	if (SecurityContextHolder.getContext().getAuthentication() == null) {
+		Authentication rememberMeAuth = rememberMeServices.autoLogin(request, response);
+
+		
+		if (rememberMeAuth != null) {
+			try {
+				rememberMeAuth = authenticationManager.authenticate(rememberMeAuth);
+
+				SecurityContextHolder.getContext().setAuthentication(rememberMeAuth);
+
+				onSuccessfulAuthentication(request, response, rememberMeAuth);
+
+				if (logger.isDebugEnabled()) {
+					logger.debug("SecurityContextHolder populated with remember-me token: '" + SecurityContextHolder.getContext().getAuthentication() + "'");
+				}
+
+				if (this.eventPublisher != null) {
+					eventPublisher.publishEvent(new InteractiveAuthenticationSuccessEvent(SecurityContextHolder.getContext().getAuthentication(), this.getClass()));
+				}
+
+				if (successHandler != null) {
+					successHandler.onAuthenticationSuccess(request, response, rememberMeAuth);
+
+					return;
+				}
+
+			} catch (AuthenticationException authenticationException) {
+				if (logger.isDebugEnabled()) {
+					logger.debug("SecurityContextHolder not populated with remember-me token, as " + "AuthenticationManager rejected Authentication returned by RememberMeServices: '"
+									+ rememberMeAuth + "'; invalidating remember-me token", authenticationException);
+				}
+
+				rememberMeServices.loginFail(request, response);
+
+				onUnsuccessfulAuthentication(request, response, authenticationException);
+			}
+		}
+
+		chain.doFilter(request, response);
+		
+	} else {
+		if (logger.isDebugEnabled()) {
+			logger.debug("SecurityContextHolder not populated with remember-me token, as it already contained: '" + SecurityContextHolder.getContext().getAuthentication() + "'");
+		}
+
+		chain.doFilter(request, response);
+	}
+}
+
+
+####################################################################################################################		
+##################################             SessionManagementFilter           ###################################
+####################################################################################################################
+/**
+ * this是SessionManagementFilter
+ */
+location：SessionManagementFilter
+public void doFilter(ServletRequest req, ServletResponse res, FilterChain chain) throws IOException, ServletException {
+
+	HttpServletRequest request = (HttpServletRequest) req;
+	HttpServletResponse response = (HttpServletResponse) res;
+
+	if (request.getAttribute(FILTER_APPLIED) != null) {
+		chain.doFilter(request, response);
+		return;
+	}
+
+	request.setAttribute(FILTER_APPLIED, Boolean.TRUE);
+
+	if (!securityContextRepository.containsContext(request)) {
+		Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+
+		if (authentication != null && !trustResolver.isAnonymous(authentication)) {
+			try {
+				sessionAuthenticationStrategy.onAuthentication(authentication, request, response);
+			} catch (SessionAuthenticationException e) {
+				logger.debug("SessionAuthenticationStrategy rejected the authentication object", e);
+				SecurityContextHolder.clearContext();
+				failureHandler.onAuthenticationFailure(request, response, e);
+
+				return;
+			}
+			
+			securityContextRepository.saveContext(SecurityContextHolder.getContext(), request, response);
+		} else {
+			if (request.getRequestedSessionId() != null && !request.isRequestedSessionIdValid()) {
+				if (logger.isDebugEnabled()) {
+					logger.debug("Requested session ID " + request.getRequestedSessionId() + " is invalid.");
+				}
+
+				if (invalidSessionStrategy != null) {
+					invalidSessionStrategy.onInvalidSessionDetected(request, response);
+					return;
+				}
+			}
+		}
+	}
+
+	chain.doFilter(request, response);
+}
+
+####################################################################################################################		
+##################################             ExceptionTranslationFilter           ################################
+####################################################################################################################
+/**
+ * this是ExceptionTranslationFilter
+ */
+location：ExceptionTranslationFilter
+public void doFilter(ServletRequest req, ServletResponse res, FilterChain chain) throws IOException, ServletException {
+	HttpServletRequest request = (HttpServletRequest) req;
+	HttpServletResponse response = (HttpServletResponse) res;
+
+	try {
+		chain.doFilter(request, response);
+
+		logger.debug("Chain processed normally");
+	} catch (IOException ex) {
+		throw ex;
+	} catch (Exception ex) {
+		Throwable[] causeChain = throwableAnalyzer.determineCauseChain(ex);
+		RuntimeException ase = (AuthenticationException) throwableAnalyzer.getFirstThrowableOfType(AuthenticationException.class, causeChain);
+
+		if (ase == null) {
+			ase = (AccessDeniedException) throwableAnalyzer.getFirstThrowableOfType(AccessDeniedException.class, causeChain);
+		}
+
+		if (ase != null) {
+			if (response.isCommitted()) {
+				throw new ServletException("Unable to handle the Spring Security Exception because the response is already committed.", ex);
+			}
+			handleSpringSecurityException(request, response, chain, ase);
+		} else {
+			if (ex instanceof ServletException) {
+				throw (ServletException) ex;
+			} else if (ex instanceof RuntimeException) {
+				throw (RuntimeException) ex;
+			}
+			
+			throw new RuntimeException(ex);
+		}
+	}
+}
+
+####################################################################################################################		
+##################################             FilterSecurityInterceptor           ################################
+####################################################################################################################
+/**
+ * this是FilterSecurityInterceptor
+ */
+location：FilterSecurityInterceptor
+public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain) throws IOException, ServletException {
+	FilterInvocation fi = new FilterInvocation(request, response, chain);
+	invoke(fi);
+}
+
+public void invoke(FilterInvocation fi) throws IOException, ServletException {
+	if ((fi.getRequest() != null) && (fi.getRequest().getAttribute(FILTER_APPLIED) != null) && observeOncePerRequest) {
+		fi.getChain().doFilter(fi.getRequest(), fi.getResponse());
+	} else {
+		if (fi.getRequest() != null && observeOncePerRequest) {
+			fi.getRequest().setAttribute(FILTER_APPLIED, Boolean.TRUE);
+		}
+
+		InterceptorStatusToken token = super.beforeInvocation(fi);
+
+		try {
+			fi.getChain().doFilter(fi.getRequest(), fi.getResponse());
+		} finally {
+			super.finallyInvocation(token);
+		}
+		super.afterInvocation(token, null);
+	}
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/**
+ *
+ */
+location：AbstractAuthenticationProcessingFilter
+protected AuthenticationManager getAuthenticationManager() {
+	return authenticationManager;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+####################################################################################################################		
+#############################################             授权流程           #######################################
+####################################################################################################################
+
+UserDetailsService接口
+	UserDetails loadUserByUsername(String username):根据username获取对应的UserDetails信息。
+	
+UserDetails接口的主要实现类有User。授权过程从构建User对象开始。
+
+/**
+ * authorities这个就是授权内容。
+ */
+location：User
+public User(String username, String password, Collection<? extends GrantedAuthority> authorities) {
+	this(username, password, true, true, true, true, authorities);
+}
+
+
+AuthorityUtils.commaSeparatedStringToAuthorityList("admin");
+
+/**
+ * 
+ */
+location：AuthorityUtils
+public static List<GrantedAuthority> commaSeparatedStringToAuthorityList(String authorityString) {
+	return createAuthorityList(StringUtils.tokenizeToStringArray(authorityString, ","));
+}
+
+
+/**
+ *  
+ */
+location：AuthorityUtils
+public static List<GrantedAuthority> createAuthorityList(String... roles) {
+	List<GrantedAuthority> authorities = new ArrayList<>(roles.length);
+	
+	for (String role : roles) {
+		authorities.add(new SimpleGrantedAuthority(role));
+	}
+	
+	return authorities;
+}
+
+
+注解类：EnableGlobalMethodSecurity
+		开启prePostEnabled：
+			@PreAuthorize 在方法调用之前,基于表达式的计算结果来限制对方法的访问。
+			@PostAuthorize 允许方法调用,但是如果表达式计算结果为false,将抛出一个安全性异常。
+			@PostFilter 允许方法调用,但必须按照表达式来过滤方法的结果。
+			@PreFilter 允许方法调用,但必须在进入方法之前过滤输入值。
+			
+		开启：securedEnabled
+			@Secured
+			
+		开启：jsr250Enabled
+			@RolesAllowed

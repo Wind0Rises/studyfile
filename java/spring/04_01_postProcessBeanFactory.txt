@@ -11,8 +11,14 @@ refresh()
 	beanPostProcessors：ServletContextAwareProcessor
 	ignoredDependencyInterfaces：ServletContextAware、ServletConfigAware
 	resolvableDependencies：ServletRequest、ServletResponse、HttpSession、WebRequest
+	
+	
+	
+	asdasd3324
 
-// BeanFactory后置处理过程。
+/**
+ * BeanFactory后置处理过程。
+ */
 location；AbstractRefreshableWebApplicationContext
 protected void postProcessBeanFactory(ConfigurableListableBeanFactory beanFactory) {
 	// beanFactory：为内部创建的BeanFactory。
