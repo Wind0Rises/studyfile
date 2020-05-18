@@ -1,0 +1,685 @@
+
+
+一、描述
+
+
+
+二、重要的类。
+	1、Configuration：
+		属性：
+			Set<String> lazyLoadTriggerMethods：
+			ExecutorType defaultExecutorType：默认为SIMPLE
+			AutoMappingBehavior autoMappingBehavior：默认为PARTIAL
+			AutoMappingUnknownColumnBehavior autoMappingUnknownColumnBehavior：默认为NONE。
+			Properties variables = new Properties();
+			ReflectorFactory reflectorFactory = new DefaultReflectorFactory():
+			ObjectFactory objectFactory = new DefaultObjectFactory():
+			ObjectWrapperFactory objectWrapperFactory = new DefaultObjectWrapperFactory();
+			
+			MapperRegistry mapperRegistry = new MapperRegistry(this);
+			InterceptorChain interceptorChain = new InterceptorChain();
+			TypeHandlerRegistry typeHandlerRegistry = new TypeHandlerRegistry();
+			TypeAliasRegistry typeAliasRegistry = new TypeAliasRegistry();
+			LanguageDriverRegistry languageRegistry = new LanguageDriverRegistry();
+			
+			// MappedStatement对象对应Mapper.xml配置文件中的一个select/update/insert/delete节点，描述的就是一条SQL语句
+			Map<String, MappedStatement> mappedStatements = new StrictMap<MappedStatement>("Mapped Statements collection");
+			// 缓存。
+			Map<String, Cache> caches = new StrictMap<Cache>("Caches collection");
+			// 返回结果。
+			Map<String, ResultMap> resultMaps = new StrictMap<ResultMap>("Result Maps collection");
+			// 参数集合。
+			Map<String, ParameterMap> parameterMaps = new StrictMap<ParameterMap>("Parameter Maps collection");
+			Map<String, KeyGenerator> keyGenerators = new StrictMap<KeyGenerator>("Key Generators collection");
+			
+			// 已经加载过的mapper.xml文件的名称。
+			Set<String> loadedResources = new HashSet<String>();
+			Map<String, XNode> sqlFragments = new StrictMap<XNode>("XML fragments parsed from previous mappers");
+			
+			Collection<XMLStatementBuilder> incompleteStatements = new LinkedList<XMLStatementBuilder>();
+			Collection<CacheRefResolver> incompleteCacheRefs = new LinkedList<CacheRefResolver>();
+			Collection<ResultMapResolver> incompleteResultMaps = new LinkedList<ResultMapResolver>();
+			Collection<MethodResolver> incompleteMethods = new LinkedList<MethodResolver>();
+			其他：defaultStatementTimeout、defaultFetchSize
+
+
+三、附录。
+
+	1、测试类。
+		public class MybatisTest {
+			
+			private SqlSessionFactory sqlSessionFactory = null;
+			private final static String fileName = "mapperConfiguration.xml";
+			
+			@Before
+			public void beforeMethod() throws Exception {
+
+				Reader reader = null;
+				String relativelyPath=System.getProperty("user.dir") + "\\src\\main\\resources\\";
+
+				File file = new File(relativelyPath + fileName);
+				if(!file.exists()) {
+					System.out.println("文件不存在");
+					throw new Exception();
+				}
+				
+				InputStream inputStream = new FileInputStream(file);
+				reader = new InputStreamReader(inputStream);
+				
+				if(reader != null) {
+					System.out.println("创建SqlSessionFactory成功");
+					sqlSessionFactory = new SqlSessionFactoryBuilder().build(reader);
+				}
+				reader.close();
+			}
+
+			/**
+			 * 主要流程。
+			 */
+			@Test
+			public void test(){
+				SqlSession sqlSession = sqlSessionFactory.openSession();
+				UserMapper userMapper = sqlSession.getMapper(UserMapper.class);
+				User user = userMapper.selectUserBySeq(1);
+				System.out.println(user.getUserName());
+			} 
+		}
+	
+	
+	2、config.xml文件模板
+		<?xml version="1.0" encoding="UTF-8" ?>
+		<!DOCTYPE configuration PUBLIC "-//mybatis.org//DTD Config 3.0//EN" "http://mybatis.org/dtd/mybatis-3-config.dtd">
+		<configuration>
+
+			<properties resource="db.properties"></properties>
+			
+			<settings>
+				<!-- 打印查询语句 -->
+				<setting name="logImpl" value="STDOUT_LOGGING" />
+				
+				<!-- 控制全局缓存（二级缓存）-->
+				<setting name="cacheEnabled" value="true"/>
+				
+				<!-- 延迟加载的全局开关。当开启时，所有关联对象都会延迟加载。默认 false  -->
+				<setting name="lazyLoadingEnabled" value="true"/>
+				
+				<!-- 当开启时，任何方法的调用都会加载该对象的所有属性。默认 false，可通过select标签的 fetchType来覆盖-->
+				<setting name="aggressiveLazyLoading" value="false"/>
+				
+				<!--  Mybatis 创建具有延迟加载能力的对象所用到的代理工具，默认JAVASSIST -->
+				<setting name="proxyFactory" value="CGLIB" />
+				
+				<!-- STATEMENT级别的缓存，使一级缓存，只针对当前执行的这一statement有效 -->
+				 <setting name="localCacheScope" value="STATEMENT"/>
+				<setting name="localCacheScope" value="SESSION"/>
+			</settings>
+
+			<typeAliases>
+				<typeAlias alias="blog" type="com.wuzz.domain.Blog" />
+			</typeAliases>
+
+			<typeHandlers>
+				<typeHandler handler="com.wuzz.type.MyTypeHandler"></typeHandler>
+			</typeHandlers>
+
+			<!-- 对象工厂 -->
+			<objectFactory type="com.wuzz.objectfactory.GPObjectFactory">
+				<property name="wuzz" value="666"/>
+			</objectFactory
+
+			<plugins>
+				<plugin interceptor="com.wuzz.interceptor.SQLInterceptor">
+					<property name="wuzz" value="betterme" />
+				</plugin>
+				<plugin interceptor="com.wuzz.interceptor.MyPageInterceptor">
+				</plugin>
+			</plugins>
+
+			<environments default="development">
+				<environment id="development">
+					<transactionManager type="JDBC"/><!-- 单独使用时配置成MANAGED没有事务 -->
+					<dataSource type="POOLED">
+						<property name="driver" value="${jdbc.driver}"/>
+						<property name="url" value="${jdbc.url}"/>
+						<property name="username" value="${jdbc.username}"/>
+						<property name="password" value="${jdbc.password}"/>
+					</dataSource>
+				</environment>
+			</environments>
+
+			<mappers>
+				<mapper resource="BlogMapper.xml"/>
+				<mapper resource="BlogMapperExt.xml"/>
+			</mappers>
+
+		</configuration>
+
+
+
+
+四、源码。
+
+#################################################################################################
+#                    	     第一部分：创建SqlSessionFactory                       				#
+#################################################################################################
+/**
+ * 构建SqlSessionFactory
+ *
+ * Reader读取的资源。
+ */
+location：SqlSessionFactoryBuilder
+public SqlSessionFactory build(Reader reader) {
+	return this.build((Reader)reader, (String)null, (Properties)null);
+}
+
+/**
+ * 通过XMLConfigBuilder解析对应的mybatis-config.xml配置文件，并构建一个SQLSessionFactory对象。
+ */
+location：SqlSessionFactoryBuilder
+public SqlSessionFactory build(Reader reader, String environment, Properties properties) {
+	SqlSessionFactory var5;
+	try {
+		XMLConfigBuilder parser = new XMLConfigBuilder(reader, environment, properties);
+		var5 = this.build(parser.parse());
+	} catch (Exception var14) {
+		throw ExceptionFactory.wrapException("Error building SqlSession.", var14);
+	} finally {
+		ErrorContext.instance().reset();
+
+		try {
+			reader.close();
+		} catch (IOException var13) {
+			// ....
+		}
+	}
+	return var5;
+}
+
+
+#####################
+#     1、1准备阶段	#
+#####################
+/**
+ * 构建一个XMLConfigBuilder实例对象。
+ */
+location：XMLConfigBuilder
+public XMLConfigBuilder(Reader reader, String environment, Properties props) {
+	// XMLConfigBuilder中的parser是XPathParser
+	this(new XPathParser(reader, true, props, new XMLMapperEntityResolver()), environment, props);
+}
+
+/**
+ * 构建一个XPathParser实例对象。
+ */
+location：XPathParser
+public XPathParser(Reader reader, boolean validation, Properties variables, EntityResolver entityResolver) {
+	/**
+	 * reader：资源；validation：是否开启验证。variables：mybatis-config.xml 中<propteries>标签定义的键位对集合
+	 * entityResolver：用于加载本地dtd文件
+	 */
+	commonConstructor(validation, variables, entityResolver);
+	this.document = createDocument(new InputSource(reader));
+}
+
+/**
+ * XPathParser公共构造函数。
+ */
+location：XPathParser
+private void commonConstructor(boolean validation, Properties variables, EntityResolver entityResolver) {
+	this.validation = validation;
+	this.entityResolver = entityResolver;
+	this.variables = variables;
+	XPathFactory factory = XPathFactory.newInstance();
+	this.xpath = factory.newXPath();
+}
+
+/**
+ * 把mybatis-config.xml解析为一个Document对象。
+ */
+location：XPathParser
+private Document createDocument(InputSource inputSource) {
+	try {
+		DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+		factory.setValidating(validation);
+
+		factory.setNamespaceAware(false);
+		factory.setIgnoringComments(true);
+		factory.setIgnoringElementContentWhitespace(false);
+		factory.setCoalescing(false);
+		factory.setExpandEntityReferences(true);
+
+		DocumentBuilder builder = factory.newDocumentBuilder();
+		builder.setEntityResolver(entityResolver);
+		builder.setErrorHandler(new ErrorHandler() {
+			@Override
+			public void error(SAXParseException exception) throws SAXException {
+			  throw exception;
+			}
+
+			@Override
+			public void fatalError(SAXParseException exception) throws SAXException {
+			  throw exception;
+			}
+
+			@Override
+			public void warning(SAXParseException exception) throws SAXException {
+			}
+		});
+		
+		return builder.parse(inputSource);
+	} catch (Exception e) {
+		throw new BuilderException("Error creating document instance.  Cause: " + e, e);
+	}
+}
+
+/**
+ * 
+ */
+location：XMLConfigBuilder
+private XMLConfigBuilder(XPathParser parser, String environment, Properties props) {
+	super(new Configuration());
+	ErrorContext.instance().resource("SQL Mapper Configuration");
+	this.configuration.setVariables(props);
+	this.parsed = false;
+	this.environment = environment;
+	this.parser = parser;
+}
+
+/**
+ * BaseBuilder
+ * 			XMLConfigBuilder
+ *	
+ * 
+ */
+location：BaseBuilder
+public BaseBuilder(Configuration configuration) {
+	this.configuration = configuration;
+	this.typeAliasRegistry = this.configuration.getTypeAliasRegistry();
+	this.typeHandlerRegistry = this.configuration.getTypeHandlerRegistry();
+}
+
+#########################
+#     1、2解析过程		#
+#########################
+/**
+ * parser是XPathParser实例对象。
+ * 解析Mybatis-Configuration.xml文件。 返回一个Configuration。
+ */
+location：XMLConfigBuilder
+public Configuration parse() {
+	if (this.parsed) {
+		throw new BuilderException("Each XMLConfigBuilder can only be used once.");
+	} else {
+		this.parsed = true;
+		this.parseConfiguration(this.parser.evalNode("/configuration"));
+		return this.configuration;
+	}
+}
+
+/**
+ * 获取对应元素的节点。
+ */
+location：XPathParser
+public XNode evalNode(String expression) {
+	return evalNode(document, expression);
+}
+
+/**
+ * 具体解析Mybatis-Configuration.xml文件。
+ *
+ * properties、settings、typeAliases、plugins、objectFactory....标签解析。
+ */
+location：XMLConfigBuilder
+private void parseConfiguration(XNode root) {
+	try {
+	
+		propertiesElement(root.evalNode("properties"));
+		
+		Properties settings = settingsAsProperties(root.evalNode("settings"));
+		loadCustomVfs(settings);
+		
+		typeAliasesElement(root.evalNode("typeAliases"));
+		
+		pluginElement(root.evalNode("plugins"));
+		
+		objectFactoryElement(root.evalNode("objectFactory"));
+		objectWrapperFactoryElement(root.evalNode("objectWrapperFactory"));
+		reflectorFactoryElement(root.evalNode("reflectorFactory"));
+		settingsElement(settings);
+		
+		environmentsElement(root.evalNode("environments"));
+		databaseIdProviderElement(root.evalNode("databaseIdProvider"));
+		typeHandlerElement(root.evalNode("typeHandlers"));
+		
+		
+		// 【【【很重要】】】
+		mapperElement(root.evalNode("mappers"));
+	} catch (Exception e) {
+		throw new BuilderException("Error parsing SQL Mapper Configuration. Cause: " + e, e);
+	}
+}
+
+/**
+ * 创建SqlSessionFactory
+ */
+location：SqlSessionFactoryBuilder
+public SqlSessionFactory build(Configuration config) {
+	return new DefaultSqlSessionFactory(config);
+}
+
+
+/**
+ * ☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆
+ * ☆  解析config.xml => settings	 ☆
+ * ☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆
+ */
+location：XMLConfigBuilder
+private Properties settingsAsProperties(XNode context) {
+	if (context == null) {
+		return new Properties();
+	}
+	Properties props = context.getChildrenAsProperties();
+	
+	MetaClass metaConfig = MetaClass.forClass(Configuration.class, localReflectorFactory);
+	for (Object key : props.keySet()) {
+		if (!metaConfig.hasSetter(String.valueOf(key))) {
+			throw new BuilderException("The setting " + key + " is not known.  Make sure you spelled it correctly (case sensitive).");
+		}
+	}
+	return props;
+}
+
+/**
+ * 把<setting>标签一键值对保存到Properties中。
+ */
+location：XNode
+public Properties getChildrenAsProperties() {
+	Properties properties = new Properties();
+	for (XNode child : getChildren()) {
+		String name = child.getStringAttribute("name");
+		String value = child.getStringAttribute("value");
+		if (name != null && value != null) {
+			properties.setProperty(name, value);
+		}
+	}
+	return properties;
+}
+
+/**
+ * ☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆
+ * ☆  解析config.xml => typeAliases ☆
+ * ☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆
+ */
+/**
+ *  解析typeAliases标签并注册到Configuration中。
+ */
+location：XMLConfigBuilder
+private void typeAliasesElement(XNode parent) {
+	if (parent != null) {
+		for (XNode child : parent.getChildren()) {
+			if ("package".equals(child.getName())) {
+				String typeAliasPackage = child.getStringAttribute("name");
+				configuration.getTypeAliasRegistry().registerAliases(typeAliasPackage);
+			} else {
+				String alias = child.getStringAttribute("alias");
+				String type = child.getStringAttribute("type");
+				try {
+					Class<?> clazz = Resources.classForName(type);
+					if (alias == null) {
+						typeAliasRegistry.registerAlias(clazz);
+					} else {
+						typeAliasRegistry.registerAlias(alias, clazz);
+					}
+				} catch (ClassNotFoundException e) {
+					throw new BuilderException("Error registering typeAlias for '" + alias + "'. Cause: " + e, e);
+				}
+			}
+		}
+	}
+}
+
+/**
+ * ☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆
+ * ☆  解析config.xml => plugins	 ☆   什么是其作用的??
+ * ☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆
+ */
+/**
+ *  解析plugins标签。其类似拦截器。
+ */
+location：XMLConfigBuilder
+private void pluginElement(XNode parent) throws Exception {
+	if (parent != null) {
+		for (XNode child : parent.getChildren()) {
+			String interceptor = child.getStringAttribute("interceptor");
+			Properties properties = child.getChildrenAsProperties();
+			Interceptor interceptorInstance = (Interceptor) resolveClass(interceptor).newInstance();
+			interceptorInstance.setProperties(properties);
+			configuration.addInterceptor(interceptorInstance);
+		}
+	}
+}
+
+
+/**
+ * ☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆
+ * ☆  解析config.xml => objectFactory	 	 ☆   
+ * ☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆
+ */
+/**
+ *  解析objectFactory
+ */
+location：XMLConfigBuilder
+private void objectFactoryElement(XNode context) throws Exception {
+	if (context != null) {
+			String type = context.getStringAttribute("type");
+			Properties properties = context.getChildrenAsProperties();
+			ObjectFactory factory = (ObjectFactory) resolveClass(type).newInstance();
+			factory.setProperties(properties);
+			configuration.setObjectFactory(factory);
+	}
+}
+
+
+
+/**
+ * ☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆
+ * ☆  解析config.xml => objectWrapperFactory	 	 ☆   
+ * ☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆
+ */
+/**
+ *  解析objectWrapperFactory
+ */
+location：XMLConfigBuilder
+private void objectWrapperFactoryElement(XNode context) throws Exception {
+	if (context != null) {
+		String type = context.getStringAttribute("type");
+		ObjectWrapperFactory factory = (ObjectWrapperFactory) resolveClass(type).newInstance();
+		configuration.setObjectWrapperFactory(factory);
+	}
+}
+
+
+
+/**
+ * ☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆
+ * ☆  解析config.xml => reflectorFactory	 ☆ 
+ * ☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆
+ */
+/**
+ *  解析reflectorFactory
+ */
+location：XMLConfigBuilder
+private void reflectorFactoryElement(XNode context) throws Exception {
+	if (context != null) {
+			String type = context.getStringAttribute("type");
+			ReflectorFactory factory = (ReflectorFactory) resolveClass(type).newInstance();
+			configuration.setReflectorFactory(factory);
+	}
+}
+
+/**
+ * ☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆
+ * ☆  解析config.xml =>  environments		 ☆ 
+ * ☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆
+ */
+/**
+ *  解析environments
+ */
+location：XMLConfigBuilder
+private void environmentsElement(XNode context) throws Exception {
+	if (context != null) {
+		if (environment == null) {
+			environment = context.getStringAttribute("default");
+		}
+		
+		for (XNode child : context.getChildren()) {
+			String id = child.getStringAttribute("id");
+			if (isSpecifiedEnvironment(id)) {
+				TransactionFactory txFactory = transactionManagerElement(child.evalNode("transactionManager"));
+				DataSourceFactory dsFactory = dataSourceElement(child.evalNode("dataSource"));
+				DataSource dataSource = dsFactory.getDataSource();
+				Environment.Builder environmentBuilder = new Environment.Builder(id).transactionFactory(txFactory).dataSource(dataSource);
+				configuration.setEnvironment(environmentBuilder.build());
+			}
+		}
+	}
+}
+  
+
+/**
+ * ☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆
+ * ☆  解析config.xml =>  databaseIdProvider ☆ 
+ * ☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆
+ */
+/**
+ *  解析databaseIdProvider
+ */
+location：XMLConfigBuilder
+private void databaseIdProviderElement(XNode context) throws Exception {
+	DatabaseIdProvider databaseIdProvider = null;
+	if (context != null) {
+		String type = context.getStringAttribute("type");
+	  
+		if ("VENDOR".equals(type)) {
+			type = "DB_VENDOR";
+		}
+		Properties properties = context.getChildrenAsProperties();
+		databaseIdProvider = (DatabaseIdProvider) resolveClass(type).newInstance();
+		databaseIdProvider.setProperties(properties);
+	}
+	
+	Environment environment = configuration.getEnvironment();
+	if (environment != null && databaseIdProvider != null) {
+		String databaseId = databaseIdProvider.getDatabaseId(environment.getDataSource());
+		configuration.setDatabaseId(databaseId);
+	}
+} 
+ 
+
+/**
+ * ☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆
+ * ☆  解析config.xml =>   mappers			 ☆    ##################################  重要  ############################
+ * ☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆
+ */
+/**
+ * 解析mybatisConfiguraton.xml中的mappers标签
+ * this.mapperElement(root.evalNode("mappers"));
+ */
+location：XMLConfigBuilder
+private void mapperElement(XNode parent) throws Exception {
+	if (parent != null) {
+		Iterator i$ = parent.getChildren().iterator();
+
+		while(true) {
+			while(i$.hasNext()) {
+				XNode child = (XNode)i$.next();
+				String resource;
+				
+				/**
+				 * 判断是否是package标签。
+				 */
+				if ("package".equals(child.getName())) {
+					resource = child.getStringAttribute("name");
+					this.configuration.addMappers(resource);
+				} else {
+					resource = child.getStringAttribute("resource");
+					String url = child.getStringAttribute("url");
+					String mapperClass = child.getStringAttribute("class");
+					XMLMapperBuilder mapperParser;
+					InputStream inputStream;
+					
+					/**
+					 * resource、url、mapperClass只能有一个不为空，
+					 */
+					if (resource != null && url == null && mapperClass == null) {
+						ErrorContext.instance().resource(resource);
+						inputStream = Resources.getResourceAsStream(resource);
+						mapperParser = new XMLMapperBuilder(inputStream, this.configuration, resource, this.configuration.getSqlFragments());
+						mapperParser.parse();
+					} else if (resource == null && url != null && mapperClass == null) {
+						ErrorContext.instance().resource(url);
+						inputStream = Resources.getUrlAsStream(url);
+						mapperParser = new XMLMapperBuilder(inputStream, this.configuration, url, this.configuration.getSqlFragments());
+						mapperParser.parse();
+					} else {
+						if (resource != null || url != null || mapperClass == null) {
+							throw new BuilderException("A mapper element may only specify a url, resource or class, but not more than one.");
+						}
+
+						Class<?> mapperInterface = Resources.classForName(mapperClass);
+						this.configuration.addMapper(mapperInterface);
+					}
+				}
+			}
+
+			return;
+		}
+	}
+}
+
+/**
+ * 在Configuration类中MapperRegistry mapperRegistry = new MapperRegistry(this);
+ */
+location：Configuration
+public void addMappers(String packageName) {
+	mapperRegistry.addMappers(packageName);
+}
+
+/**
+ * 
+ */
+location：MapperRegistry
+public void addMappers(String packageName) {
+	addMappers(packageName, Object.class);
+}
+
+
+/**
+ * 解析mappers标签下的mapper标签。
+ * 这个superType默认为Object.class。
+ */
+localtion：MapperRegistry
+public void addMappers(String packageName, Class<?> superType) {
+	/*
+	 * ResolverUtil
+	 *	内部属性Set<Class<? extends T>> matches = new HashSet();
+	 *          ClassLoader
+	 */
+	ResolverUtil<Class<?>> resolverUtil = new ResolverUtil();
+	
+	// 把包下的类（Class对象）都保存在ResolverUtil对象的成员变量matches中，matches是一个set集合。
+	resolverUtil.find(new IsA(superType), packageName);
+	
+	// 获取上一步保存的结果。
+	Set<Class<? extends Class<?>>> mapperSet = resolverUtil.getClasses();
+	
+	// 遍历。
+	Iterator i$ = mapperSet.iterator();
+	while(i$.hasNext()) {
+		Class<?> mapperClass = (Class)i$.next();
+		
+		// 添加mapper操作。
+		this.addMapper(mapperClass);
+	}
+
+}

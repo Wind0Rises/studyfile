@@ -1,142 +1,49 @@
-#########################################################################################################################################################
-################################################                       Mybait  Test                       ###############################################
-#########################################################################################################################################################
-public class MybatisTest {
-	
-	private SqlSessionFactory sqlSessionFactory = null;
-	
-	private final static String fileName = "mapperConfiguration.xml";
-	
-	@Before
-	public void beforeMethod() throws Exception {
 
-		Reader reader = null;
-		String relativelyPath=System.getProperty("user.dir") + "\\src\\main\\resources\\";
 
-		File file = new File(relativelyPath + fileName);
-		if(!file.exists()) {
-			System.out.println("文件不存在");
-			throw new Exception();
-		}
+一、描述
+	1、 一个Mapper.java  =====>  对应一个MapperAnnotationBuilder【属性MapperBuilderAssistant】 ======> 对应一个MapperBuilderAssistant【是MapperAnnotationBuilder属性】。
+			MapperBuilderAssistant：
+				属性：	
+					String currentNamespace;
+					final String resource;
+					Cache currentCache;
+					boolean unresolvedCacheRef; 
+					
+	2、cache-ref、cache、@CacheNamespace、@CacheNamespaceRef.
+		1)、cache标签会覆盖cache-ref标签
+		2)、@CacheNamespace会覆盖cache标签
+		3)、@CacheNamespaceRef会覆盖@CacheNamespace
 		
-		InputStream inputStream = new FileInputStream(file);
-		reader = new InputStreamReader(inputStream);
-		
-		if(reader != null) {
-			System.out.println("创建SqlSessionFactory成功");
-			sqlSessionFactory = new SqlSessionFactoryBuilder().build(reader);
-		}
+	3、
+		一个select、update、insert、delete对应一个XMLStatementBuilder    =====>  对应一个MappedStatement。
 
-		reader.close();
-	}
+二、重要的类。
+	1、MapperBuilderAssistant
 
-	@Test
-	public void test(){
-		SqlSession sqlSession = sqlSessionFactory.openSession();
-		UserMapper userMapper = sqlSession.getMapper(UserMapper.class);
-		User user = userMapper.selectUserBySeq(1);
-		System.out.println(user.getUserName());
-	} 
+	2、XMLStatementBuilder
 	
-}
+	3、MappedStatement
+
+三、其他
+	1、缓存注解
+		@CacheNamespace：
+		@CacheNamespaceRef：
+	
+
+	2、
 
 
+四、源码。
 
-
-
-
-#########################################################################################################################################################
-################################################                       创建SqlSessionFactory                       ######################################
-#########################################################################################################################################################
-/**
- * 构建SqlSessionFactory
- */
-location：SqlSessionFactoryBuilder
-public SqlSessionFactory build(Reader reader) {
-	return this.build((Reader)reader, (String)null, (Properties)null);
-}
+#################################################################################################
+#                    	   第一部分：<mappers><mapper package=".."....             				#
+#################################################################################################
 
 /**
- *
+ * ☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆
+ * ☆  解析config.xml =>   mappers			 ☆    ##################################  重要  ############################
+ * ☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆
  */
-location：SqlSessionFactoryBuilder
-public SqlSessionFactory build(Reader reader, String environment, Properties properties) {
-	SqlSessionFactory var5;
-	try {
-		XMLConfigBuilder parser = new XMLConfigBuilder(reader, environment, properties);
-		var5 = this.build(parser.parse());
-	} catch (Exception var14) {
-		throw ExceptionFactory.wrapException("Error building SqlSession.", var14);
-	} finally {
-		ErrorContext.instance().reset();
-
-		try {
-			reader.close();
-		} catch (IOException var13) {
-		}
-
-	}
-
-	return var5;
-}
-
-/**
- * 解析Mybatis-Configuration.xml文件。
- */
-location：XMLConfigBuilder
-public Configuration parse() {
-	if (this.parsed) {
-		throw new BuilderException("Each XMLConfigBuilder can only be used once.");
-	} else {
-		this.parsed = true;
-		this.parseConfiguration(this.parser.evalNode("/configuration"));
-		return this.configuration;
-	}
-}
-
-/**
- * 具体解析Mybatis-Configuration.xml文件。
- */
-location：XMLConfigBuilder
-private void parseConfiguration(XNode root) {
-	try {
-	
-		propertiesElement(root.evalNode("properties"));
-		
-		Properties settings = settingsAsProperties(root.evalNode("settings"));
-		loadCustomVfs(settings);
-		
-		typeAliasesElement(root.evalNode("typeAliases"));
-		
-		pluginElement(root.evalNode("plugins"));
-		
-		objectFactoryElement(root.evalNode("objectFactory"));
-		objectWrapperFactoryElement(root.evalNode("objectWrapperFactory"));
-		reflectorFactoryElement(root.evalNode("reflectorFactory"));
-		settingsElement(settings);
-		
-		environmentsElement(root.evalNode("environments"));
-		databaseIdProviderElement(root.evalNode("databaseIdProvider"));
-		typeHandlerElement(root.evalNode("typeHandlers"));
-		
-		
-		// 【【【很重要】】】
-		mapperElement(root.evalNode("mappers"));
-	} catch (Exception e) {
-		throw new BuilderException("Error parsing SQL Mapper Configuration. Cause: " + e, e);
-	}
-}
-
-/**
- * 创建SqlSessionFactory
- */
-location：SqlSessionFactoryBuilder
-public SqlSessionFactory build(Configuration config) {
-	return new DefaultSqlSessionFactory(config);
-}
-
-
-
 /**
  * 解析mybatisConfiguraton.xml中的mappers标签
  * this.mapperElement(root.evalNode("mappers"));
@@ -150,6 +57,10 @@ private void mapperElement(XNode parent) throws Exception {
 			while(i$.hasNext()) {
 				XNode child = (XNode)i$.next();
 				String resource;
+				
+				/**
+				 * 判断是否是package标签。
+				 */
 				if ("package".equals(child.getName())) {
 					resource = child.getStringAttribute("name");
 					this.configuration.addMappers(resource);
@@ -159,6 +70,10 @@ private void mapperElement(XNode parent) throws Exception {
 					String mapperClass = child.getStringAttribute("class");
 					XMLMapperBuilder mapperParser;
 					InputStream inputStream;
+					
+					/**
+					 * resource、url、mapperClass只能有一个不为空，
+					 */
 					if (resource != null && url == null && mapperClass == null) {
 						ErrorContext.instance().resource(resource);
 						inputStream = Resources.getResourceAsStream(resource);
@@ -186,12 +101,37 @@ private void mapperElement(XNode parent) throws Exception {
 }
 
 /**
+ * 在Configuration类中MapperRegistry mapperRegistry = new MapperRegistry(this);
+ */
+location：Configuration
+public void addMappers(String packageName) {
+	mapperRegistry.addMappers(packageName);
+}
+
+/**
+ * 
+ */
+location：MapperRegistry
+public void addMappers(String packageName) {
+	addMappers(packageName, Object.class);
+}
+
+
+/**
  * 解析mappers标签下的mapper标签。
  * 这个superType默认为Object.class。
+ *
+ * 1、把对应的Mapper.java对象加载并保存在ResolverUtil实例对象的matches属性中。
+ * 2、遍历matches中的对象，更具Mapper.java的class对象构建一个MapperProxyFactory实例对象，并把MapperProxyFactory对象保存在MapperRegister的knownMappers属性中
+ * 3、通过MapperAnnotationBuilder加载对应mapper.xml文件并解析。
  */
-localtion：MapperRegistry
+location：MapperRegistry
 public void addMappers(String packageName, Class<?> superType) {
-	// ResolverUtil：内部属性Set<Class<? extends T>> matches = new HashSet();和ClassLoader
+	/*
+	 * ResolverUtil
+	 *	内部属性Set<Class<? extends T>> matches = new HashSet();
+	 *          ClassLoader
+	 */
 	ResolverUtil<Class<?>> resolverUtil = new ResolverUtil();
 	
 	// 把包下的类（Class对象）都保存在ResolverUtil对象的成员变量matches中，matches是一个set集合。
@@ -214,7 +154,7 @@ public void addMappers(String packageName, Class<?> superType) {
 /**
  * 把包下的类（Class对象）都保存在MapperRegistry对象名为matches的set集合中。
  */
-localtion：ResolverUtil
+location：ResolverUtil
 public ResolverUtil<T> find(ResolverUtil.Test test, String packageName) {
 	// 获取包路径。
 	String path = this.getPackagePath(packageName);
@@ -246,7 +186,7 @@ public ResolverUtil<T> find(ResolverUtil.Test test, String packageName) {
 /**
  * 加载mapper接口类。并保存到ResolverUtil的成员变量matches中，matches是一个set集合。
  */
-localtion：ResolverUtil
+location：ResolverUtil
 protected void addIfMatching(Test test, String fqn) {
 	try {
 		String externalName = fqn.substring(0, fqn.indexOf('.')).replace('/', '.');
@@ -267,7 +207,7 @@ protected void addIfMatching(Test test, String fqn) {
 }
 
 
-localtion：ResolverUtil.IsA
+location：ResolverUtil.IsA
 public boolean matches(Class<?> type) {
 	// parent是对应的Class。
 	return type != null && parent.isAssignableFrom(type);
@@ -277,7 +217,7 @@ public boolean matches(Class<?> type) {
 ##################################################################
 ###############   最终都是通过class添加Mapper   ##################
 ##################################################################
-localtion：MapperRegistry
+location：MapperRegistry
 public <T> void addMapper(Class<T> type) {
 	// 判断class是否是接口。
 	if (type.isInterface()) {
@@ -313,7 +253,9 @@ public <T> void addMapper(Class<T> type) {
 			
 			// 构建MapperAnnotationBuilder对象。
 			MapperAnnotationBuilder parser = new MapperAnnotationBuilder(this.config, type);
+			
 			parser.parse();
+			
 			loadCompleted = true;
 			
 		} finally {
@@ -326,9 +268,31 @@ public <T> void addMapper(Class<T> type) {
 }
 
 /**
+ * 一个Mapper.java（Mapper.xml）文件对应一个MapperAnnotationBuilder
+ *
+ * MapperBuilderAssistant：【MapperBuilderAssistant extends BaseBuilder 】
+ *		属性：
+ *			String currentNamespace
+ *			String resource：mapper.java文件。
+ *			Cache currentCache
+ *			boolean unresolvedCacheRef
+ *			Configuration configuration
+ *			TypeAliasRegistry typeAliasRegistry
+ *			TypeHandlerRegistry typeHandlerRegistry
+ *			
+ */
+location：MapperAnnotationBuilder
+public MapperAnnotationBuilder(Configuration configuration, Class<?> type) {
+	String resource = type.getName().replace('.', '/') + ".java (best guess)";
+	this.assistant = new MapperBuilderAssistant(configuration, resource);
+	this.configuration = configuration;
+	this.type = type;
+}
+
+/**
  *
  */
-localtion：MapperAnnotationBuilder
+location：MapperAnnotationBuilder
 public void parse() {
 	// 获取mapper接口对象的全限定名。
     String resource = type.toString();
@@ -338,14 +302,29 @@ public void parse() {
 	
 		// 加载mapper.xml文件，并解析文件。
 		loadXmlResource();
+		
+		// 把加载解析过的文件方法Configuration中loadedResources集合中。
 		configuration.addLoadedResource(resource);
+		
+		// 设置其对应的命名空间。
 		assistant.setCurrentNamespace(type.getName());
+		
+		/**
+		 * 缓存相关的。@CacheNamespace
+		 */
 		parseCache();
+		
+		/**
+		 * @CacheNamespaceRef
+		 */
 		parseCacheRef();
+		
+		
 		Method[] methods = type.getMethods();
+		
 		for (Method method : methods) {
 			try {
-				if (!method.isBridge()) { // issue #237
+				if (!method.isBridge()) {
 					parseStatement(method);
 				}
 			} catch (IncompleteElementException e) {
@@ -365,10 +344,122 @@ public boolean isResourceLoaded(String resource) {
     return loadedResources.contains(resource);
 }
 
+
+问题：这里会覆盖xml中配置的cache吗？？？
+/**
+ * 接口上是否使用@CacheNamespace、并对@CacheNamespace注解进行处理。
+ * 如果有使用，MapperBuilderAssistant设置缓存。
+ */
+location：MapperAnnotationBuilder
+private void parseCache() {
+	CacheNamespace cacheDomain = type.getAnnotation(CacheNamespace.class);
+	
+	if (cacheDomain != null) {
+		Integer size = cacheDomain.size() == 0 ? null : cacheDomain.size();
+		Long flushInterval = cacheDomain.flushInterval() == 0 ? null : cacheDomain.flushInterval();
+		Properties props = convertToProperties(cacheDomain.properties());
+		assistant.useNewCache(cacheDomain.implementation(), cacheDomain.eviction(), flushInterval, size, cacheDomain.readWrite(), cacheDomain.blocking(), props);
+	}
+}
+
+
+/**
+ * 接口上是否使用@CacheNamespaceRef、并对@CacheNamespaceRef注解进行处理。
+ */
+location：MapperAnnotationBuilder
+private void parseCacheRef() {
+	CacheNamespaceRef cacheDomainRef = type.getAnnotation(CacheNamespaceRef.class);
+	
+	if (cacheDomainRef != null) {
+	
+		// 获取value和name。
+		Class<?> refType = cacheDomainRef.value();
+		String refName = cacheDomainRef.name();
+		if (refType == void.class && refName.isEmpty()) {
+			throw new BuilderException("Should be specified either value() or name() attribute in the @CacheNamespaceRef");
+		}
+		if (refType != void.class && !refName.isEmpty()) {
+			throw new BuilderException("Cannot use both value() and name() attribute in the @CacheNamespaceRef");
+		}
+		String namespace = (refType != void.class) ? refType.getName() : refName;
+		
+		try {
+			assistant.useCacheRef(namespace);
+		} catch (IncompleteElementException e) {
+			configuration.addIncompleteCacheRef(new CacheRefResolver(assistant, namespace));
+		}
+	}
+}
+
+/**
+ * 设置Cache。
+ */
+location：MapperBuilderAssistant
+public Cache useNewCache(Class<? extends Cache> typeClass, Class<? extends Cache> evictionClass,
+      Long flushInterval, Integer size, boolean readWrite,
+      boolean blocking, Properties props) {
+    Cache cache = new CacheBuilder(currentNamespace)
+        .implementation(valueOrDefault(typeClass, PerpetualCache.class))
+        .addDecorator(valueOrDefault(evictionClass, LruCache.class))
+        .clearInterval(flushInterval)
+        .size(size)
+        .readWrite(readWrite)
+        .blocking(blocking)
+        .properties(props)
+        .build();
+    configuration.addCache(cache);
+    currentCache = cache;
+    return cache;
+  }
+
+/**
+ * 接口上是否使用@CacheNamespaceRef、并对@CacheNamespaceRef注解进行处理。
+ *
+ *
+ *
+ */
+location：MapperBuilderAssistant
+public Cache useCacheRef(String namespace) {
+	if (namespace == null) {
+		throw new BuilderException("cache-ref element requires a namespace attribute.");
+	}
+	
+	try {
+		unresolvedCacheRef = true;
+		
+		// 获取应用的Cache。
+		Cache cache = configuration.getCache(namespace);
+		if (cache == null) {
+			throw new IncompleteElementException("No cache for namespace '" + namespace + "' could be found.");
+		}
+		
+		/**☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆
+		 * ☆		把MapperBuilderAssistant的currentCache改为引用的namespace对应的Cache。				 ☆
+		 * ☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆
+		 */
+		currentCache = cache;
+		
+		unresolvedCacheRef = false;
+		
+		return cache;
+	} catch (IllegalArgumentException e) {
+		throw new IncompleteElementException("No cache for namespace '" + namespace + "' could be found.", e);
+	}
+}
+
+
+
+
+
+
+###########################################################################################################################################################################################
+###########################################################                    解析Mapper.xml文件                   #######################################################################
+###########################################################################################################################################################################################
+
 /**
  * 加载对应mapper.xml文件。
  */
-location：
+location：MapperAnnotationBuilder
 private void loadXmlResource() {
     // 判断资源是否被加载过了。
 	if (!configuration.isResourceLoaded("namespace:" + type.getName())) {
@@ -381,9 +472,13 @@ private void loadXmlResource() {
 		try {
 			inputStream = Resources.getResourceAsStream(type.getClassLoader(), xmlResource);
 		} catch (IOException e) {
-			// ignore, resource is not required
+			
 		}
+		
 		if (inputStream != null) {
+			/**
+			 * Map<String, XNode> sqlFragments = new StrictMap<>("XML fragments parsed from previous mappers")
+			 */
 			XMLMapperBuilder xmlParser = new XMLMapperBuilder(inputStream, assistant.getConfiguration(), xmlResource, configuration.getSqlFragments(), type.getName());
 			xmlParser.parse();
 		}
@@ -391,9 +486,47 @@ private void loadXmlResource() {
 }
 
 
-###########################################################################################################################################################################################
-###########################################################                    解析Mapper.xml文件                   #######################################################################
-###########################################################################################################################################################################################
+/** 
+ * 构建一个XMLMapperBuilder实例对象
+ */
+location：XMLMapperBuilder
+public XMLMapperBuilder(InputStream inputStream, Configuration configuration, String resource, Map<String, XNode> sqlFragments, String namespace) {
+	this(inputStream, configuration, resource, sqlFragments);
+	this.builderAssistant.setCurrentNamespace(namespace);
+}
+
+/**
+ * 构建一个XMLMapperBuilder实例对象
+ */
+location：XMLMapperBuilder
+public XMLMapperBuilder(InputStream inputStream, Configuration configuration, String resource, Map<String, XNode> sqlFragments) {
+	this(new XPathParser(inputStream, true, configuration.getVariables(), new XMLMapperEntityResolver()), configuration, resource, sqlFragments);
+}
+
+
+/**
+ * 构建一个XMLMapperBuilder实例对象
+ */
+location：XMLMapperBuilder
+private XMLMapperBuilder(XPathParser parser, Configuration configuration, String resource, Map<String, XNode> sqlFragments) {
+	super(configuration);
+	this.builderAssistant = new MapperBuilderAssistant(configuration, resource);
+	this.parser = parser;
+	this.sqlFragments = sqlFragments;
+	this.resource = resource;
+}
+
+/**
+ * 
+ */
+location：BaseBuilder
+public BaseBuilder(Configuration configuration) {
+	this.configuration = configuration;
+	this.typeAliasRegistry = this.configuration.getTypeAliasRegistry();
+	this.typeHandlerRegistry = this.configuration.getTypeHandlerRegistry();
+}
+
+
 /**
  * 解析mapper.xml过程。宏观的。
  */
@@ -419,6 +552,12 @@ public void parse() {
 
 /**
  * 具体的解析mapper.xml操作。
+ *		1、获取命名空间。
+ *		2、为BuilderAssistantAssistant实例设置对应的命名空间
+ *		
+ *		
+ *		
+ *		
  */
 location：XMLMapperBuilder
 private void configurationElement(XNode context) {
@@ -455,14 +594,17 @@ private void configurationElement(XNode context) {
     }
 }
 
-###################################    cache-ref   ##################################################################
+##################################
+#		    cache-ref  			 #
+##################################
 /**
- * cache-ref标签处理。
+ * 1、向Configuration中添加CacheRef
+ * 2、为BuilderAssistantAssistant中的currentCache修改为应用的命名空间对应的Cache
  */
 location：XMLMapperBuilder
 private void cacheRefElement(XNode context) {
 	if (context != null) {
-		// 向configuration中添加cacheRef
+		// 向configuration中添加cacheRef。 Map<String, String> cacheRefMap = new HashMap<>()
 		configuration.addCacheRef(builderAssistant.getCurrentNamespace(), context.getStringAttribute("namespace"));
 		
 		// 构建CacheRefResolver实例；其成员变量MapperBuilderAssistant assistant；String cacheRefNamespace；都是final类型的。
@@ -477,8 +619,19 @@ private void cacheRefElement(XNode context) {
 	}
 }
 
+
 /**
- * 
+ *  构建一个CacheRefResolver实例。
+ */
+location：CacheRefResolver
+public CacheRefResolver(MapperBuilderAssistant assistant, String cacheRefNamespace) {
+	this.assistant = assistant;
+	this.cacheRefNamespace = cacheRefNamespace;
+}
+
+
+/**
+ * 把MapperBuilderAssistant的currentCache改为引用的namespace对应的Cache。
  */
 location：CacheRefResolver
 public Cache resolveCacheRef() {
@@ -486,47 +639,56 @@ public Cache resolveCacheRef() {
 }
 
 /**
- * 
+ * 把MapperBuilderAssistant的currentCache改为引用的namespace对应的Cache。
  */
 location：MapperBuilderAssistant
 public Cache useCacheRef(String namespace) {
 	if (namespace == null) {
 		throw new BuilderException("cache-ref element requires a namespace attribute.");
 	}
+	
 	try {
 		unresolvedCacheRef = true;
 		
-		// 这里就是获取configuration中给定的namespace的缓存。
+		// 获取应用的Cache。
 		Cache cache = configuration.getCache(namespace);
 		if (cache == null) {
 			throw new IncompleteElementException("No cache for namespace '" + namespace + "' could be found.");
 		}
 		
-		// 更新MapperBuilderAssistant中的currentCache。	
+		/**
+		 * ☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆
+		 * ☆		把MapperBuilderAssistant的currentCache改为引用的namespace对应的Cache。				 ☆
+		 * ☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆
+		 */
 		currentCache = cache;
+		
 		unresolvedCacheRef = false;
+		
 		return cache;
 	} catch (IllegalArgumentException e) {
 		throw new IncompleteElementException("No cache for namespace '" + namespace + "' could be found.", e);
 	}
 }
 
-###################################    cache   ##################################################################
+
+#####################################
+# 				cache				#
+#####################################
 /**
  *
  */
-localtion：XMLMapperBuilder
+location：XMLMapperBuilder
 private void cacheElement(XNode context) throws Exception {
 	if (context != null) {
 		// 获取类型，一般不指定，默认为perpetual。
 		String type = context.getStringAttribute("type", "PERPETUAL");
+		
 		// 获取对应的缓存类。
 		Class<? extends Cache> typeClass = typeAliasRegistry.resolveAlias(type);
 		
-		
-		// 获取缓存的回收策略。
+		// 获取缓存的回收策略。获取对应的缓存类。
 		String eviction = context.getStringAttribute("eviction", "LRU");
-		// 获取对应的缓存类。
 		Class<? extends Cache> evictionClass = typeAliasRegistry.resolveAlias(eviction);
 		
 		// 获取缓存刷新间隔。缓存多长时间清空一次，默认不清空，设置一个毫秒值.
@@ -538,18 +700,19 @@ private void cacheElement(XNode context) throws Exception {
 		// 只读的缓存会给所有调用者返回缓存对象的相同实例。因此这些对象不能被修改。这提供了很重要的性能优势。可读写的缓存会返回缓存对象的拷贝(通过序列化)。默认为false，这样安全。
 		boolean readWrite = !context.getBooleanAttribute("readOnly", false);
 		
-		// 
 		boolean blocking = context.getBooleanAttribute("blocking", false);
 		Properties props = context.getChildrenAsProperties();
+		
+		// 使用新缓存。
 		builderAssistant.useNewCache(typeClass, evictionClass, flushInterval, size, readWrite, blocking, props);
 	}
 }
 
 
 /** 
- * 根据缓存条件构建缓存对象。
+ * 根据缓存条件构建缓存对象。并把MapperBuilderAssistant的currentCache设置为刚创建的cache。
  */
-localtion：MapperBuilderAssistant
+location：MapperBuilderAssistant
 public Cache useNewCache(Class<? extends Cache> typeClass, Class<? extends Cache> evictionClass, Long flushInterval,
       Integer size, boolean readWrite, boolean blocking, Properties props) {
 	 
@@ -574,7 +737,7 @@ public Cache useNewCache(Class<? extends Cache> typeClass, Class<? extends Cache
 /**
  * 构建一个Cache。
  */
-localtion：CacheBuilder
+location：CacheBuilder
 public Cache build() {
 	setDefaultImplementations();
 	Cache cache = newBaseCacheInstance(implementation, id);
@@ -595,7 +758,7 @@ public Cache build() {
 /**
  * 设置默认的实现。
  */
-localtion：CacheBuilder
+location：CacheBuilder
 private void setDefaultImplementations() {
 	if (implementation == null) {
 		implementation = PerpetualCache.class;
@@ -605,11 +768,14 @@ private void setDefaultImplementations() {
 	}
 }
 
-###################################    parameterMap   ##################################################################
+###################################     
+#			parameterMap  		  #
+###################################
+
 /**
  * 构建parameterMap。id为名称。
  */
-localtion：XMLMapperBuilder
+location：XMLMapperBuilder
 private void parameterMapElement(List<XNode> list) throws Exception {
 	for (XNode parameterMapNode : list) {
 		String id = parameterMapNode.getStringAttribute("id");
@@ -636,25 +802,92 @@ private void parameterMapElement(List<XNode> list) throws Exception {
 		builderAssistant.addParameterMap(id, parameterClass, parameterMappings);
 	}
 }
-###################################    resultMap   ##################################################################
 
 
-###################################    sql   ##################################################################
+###################################
+#	  		resultMap			  #
+###################################
+/**
+ * /mapper/resultMap
+ */
+location：XMLMapperBuilder
+private void resultMapElements(List<XNode> list) throws Exception {
+	for (XNode resultMapNode : list) {
+		try {
+			resultMapElement(resultMapNode);
+		} catch (IncompleteElementException e) {
+		
+		}
+	}
+}
 
 
-###################################    select|insert|update|delete   ##################################################################
+
+
+###################################
+#				SQL				  #        
+###################################
+/**
+ * /mapper/sql
+ */
+location：XMLMapperBuilder
+private void sqlElement(List<XNode> list) {
+	if (configuration.getDatabaseId() != null) {
+		sqlElement(list, configuration.getDatabaseId());
+	}
+	sqlElement(list, null);
+}
+
+/**
+ * 保存sql到
+ */
+location：XMLMapperBuilder
+private void sqlElement(List<XNode> list, String requiredDatabaseId) {
+	
+	for (XNode context : list) {
+		String databaseId = context.getStringAttribute("databaseId");
+		String id = context.getStringAttribute("id");
+		id = builderAssistant.applyCurrentNamespace(id, false);
+		
+		if (databaseIdMatchesCurrent(id, databaseId, requiredDatabaseId)) {
+			sqlFragments.put(id, context);
+		}
+	
+
+
+
+
+
+
+
+#####################################################     
+#			select|insert|update|delete  			#
+#####################################################
 /**
  * 构建Statement。
  */ 
 location：XMLMapperBuilder
 private void buildStatementFromContext(List<XNode> list) {
+
     if (configuration.getDatabaseId() != null) {
 		buildStatementFromContext(list, configuration.getDatabaseId());
     }
     buildStatementFromContext(list, null);
 }
 
+
 /**
+ * 一个select、update、insert、delete对应一个XMLStatementBuilder    =====>  对应一个MappedStatement。
+ *
+ * XMLStatementBuilder：
+ *		成员变量：
+ *			MapperBuilderAssistant builderAssistant; (一个Mapper.java)
+ *			XNode context;
+ *			String requiredDatabaseId;
+ *			Configuration configuration;
+ *			TypeAliasRegistry typeAliasRegistry;
+ *			TypeHandlerRegistry typeHandlerRegistry;
+ *	
  * 构建Statement。
  */ 
 location：XMLMapperBuilder
@@ -666,8 +899,6 @@ private void buildStatementFromContext(List<XNode> list, String requiredDatabase
 		final XMLStatementBuilder statementParser = new XMLStatementBuilder(configuration, builderAssistant, context, requiredDatabaseId);
 		
 		try {
-			
-			// 
 			statementParser.parseStatementNode();
 		} catch (IncompleteElementException e) {
 			configuration.addIncompleteStatement(statementParser);
@@ -676,6 +907,10 @@ private void buildStatementFromContext(List<XNode> list, String requiredDatabase
 }
 
 /**
+ *	构建一个MappedStatement
+ *
+ *
+ *
  *
  */
 location：XMLStatementBuilder
@@ -701,27 +936,39 @@ public void parseStatementNode() {
 	String resultType = context.getStringAttribute("resultType");
 	String lang = context.getStringAttribute("lang");
 	
+	/**
+	 * 获取对应的LanguageDriver
+	 */ 
 	LanguageDriver langDriver = getLanguageDriver(lang);
 
 	Class<?> resultTypeClass = resolveClass(resultType);
+	
 	
 	String resultSetType = context.getStringAttribute("resultSetType");
 	StatementType statementType = StatementType.valueOf(context.getStringAttribute("statementType", StatementType.PREPARED.toString()));
 	ResultSetType resultSetTypeEnum = resolveResultSetType(resultSetType);
 
+	
 	// 获取标签的名称，看是什么操作。UNKNOWN, INSERT, UPDATE, DELETE, SELECT, FLUSH;
 	String nodeName = context.getNode().getNodeName();
 	SqlCommandType sqlCommandType = SqlCommandType.valueOf(nodeName.toUpperCase(Locale.ENGLISH));
+	// 是否是select操作。
 	boolean isSelect = sqlCommandType == SqlCommandType.SELECT;
 	
-	// 获取flushCache、useCache、resultOrdered参数。
+	
+	// 获取flushCache、useCache、resultOrdered参数。刷新缓存标志、使用缓存标志。
 	boolean flushCache = context.getBooleanAttribute("flushCache", !isSelect);
 	boolean useCache = context.getBooleanAttribute("useCache", isSelect);
 	boolean resultOrdered = context.getBooleanAttribute("resultOrdered", false);
 
 
-	// XMLIncludeTransformer只有两个成员变量Configuration configuration;MapperBuilderAssistant builderAssistant;
-	// 对include标签的处理。在解析之前导入碎片。
+	/**
+	 * XMLIncludeTransformer只有两个成员变量
+	 *		Configuration configuration;
+	 *		MapperBuilderAssistant builderAssistant;
+	 *
+	 * 对include标签的处理。在解析之前导入碎片。
+	 */
 	XMLIncludeTransformer includeParser = new XMLIncludeTransformer(configuration, builderAssistant);
 	includeParser.applyIncludes(context.getNode());
 
@@ -755,13 +1002,49 @@ public void parseStatementNode() {
 
 
 
-########################################################################################################
-##########################                   SQL 处理              #####################################
-########################################################################################################
+
+################## 1、LanguageDriver
+
 /**
+ *  获取对应的LanguageDriver。
+ */
+location：XMLStatementBuilder
+private LanguageDriver getLanguageDriver(String lang) {
+	Class<? extends LanguageDriver> langClass = null;
+	if (lang != null) {
+		langClass = resolveClass(lang);
+	}
+	return builderAssistant.getLanguageDriver(langClass);
+}
+
+/**
+ * 
+ */
+location：BaseBuilder
+protected <T> Class<? extends T> resolveClass(String alias) {
+	if (alias == null) {
+		return null;
+	}
+	try {
+		return resolveAlias(alias);
+	} catch (Exception e) {
+		throw new BuilderException("Error resolving class. Cause: " + e, e);
+	}
+}
+
+
+
+
+################## 2、SqlSource
+
+/**
+ * 
+ * SqlSource：
+ * 
+ * 
  * 构建SqlSource
  */
-localtion：RawLanguageDriver
+location：RawLanguageDriver
 public SqlSource createSqlSource(Configuration configuration, XNode script, Class<?> parameterType) {
 	SqlSource source = super.createSqlSource(configuration, script, parameterType);
 	checkIsNotDynamic(source);
@@ -769,9 +1052,9 @@ public SqlSource createSqlSource(Configuration configuration, XNode script, Clas
 }
 
 /**
- * 构建SqlSource
+ * 构建SqlSource。  RawLanguageDriver extends XMLLanguageDriver
  */
-localtion：XMLLanguageDriver
+location：XMLLanguageDriver
 public SqlSource createSqlSource(Configuration configuration, XNode script, Class<?> parameterType) {
 	XMLScriptBuilder builder = new XMLScriptBuilder(configuration, script, parameterType);
 	return builder.parseScriptNode();
@@ -780,7 +1063,7 @@ public SqlSource createSqlSource(Configuration configuration, XNode script, Clas
 /**
  * context要处理的节点。
  */
-localtion：XMLScriptBuilder
+location：XMLScriptBuilder
 public XMLScriptBuilder(Configuration configuration, XNode context, Class<?> parameterType) {
 	super(configuration);
 	this.context = context;
@@ -791,7 +1074,7 @@ public XMLScriptBuilder(Configuration configuration, XNode context, Class<?> par
 /**
  * 初始化要处理的节点。
  */
-localtion：XMLScriptBuilder
+location：XMLScriptBuilder
 private void initNodeHandlerMap() {
 	nodeHandlerMap.put("trim", new TrimHandler());
 	nodeHandlerMap.put("where", new WhereHandler());
@@ -807,7 +1090,7 @@ private void initNodeHandlerMap() {
 /**
  * 
  */
-localtion：XMLScriptBuilder
+location：XMLScriptBuilder
 public SqlSource parseScriptNode() {
 	MixedSqlNode rootSqlNode = parseDynamicTags(context);
 	SqlSource sqlSource = null;
@@ -825,7 +1108,7 @@ public SqlSource parseScriptNode() {
 /**
  *  解析动态标签。
  */
-localtion：XMLScriptBuilder
+location：XMLScriptBuilder
 protected MixedSqlNode parseDynamicTags(XNode node) {
 	List<SqlNode> contents = new ArrayList<SqlNode>();
 	
@@ -867,6 +1150,66 @@ protected MixedSqlNode parseDynamicTags(XNode node) {
 
 
 
+
+
+################## 3、applyIncludes
+/**
+ *
+ */
+location：XMLIncludeTransformer
+public void applyIncludes(Node source) {
+	Properties variablesContext = new Properties();
+	Properties configurationVariables = configuration.getVariables();
+	if (configurationVariables != null) {
+		variablesContext.putAll(configurationVariables);
+	}
+	applyIncludes(source, variablesContext, false);
+}
+
+/**
+ *
+ */
+location：XMLIncludeTransformer
+private void applyIncludes(Node source, final Properties variablesContext, boolean included) {
+	
+	if (source.getNodeName().equals("include")) {
+		Node toInclude = findSqlFragment(getStringAttribute(source, "refid"), variablesContext);
+		
+		Properties toIncludeContext = getVariablesContext(source, variablesContext);
+		applyIncludes(toInclude, toIncludeContext, true);
+		if (toInclude.getOwnerDocument() != source.getOwnerDocument()) {
+			toInclude = source.getOwnerDocument().importNode(toInclude, true);
+		}
+		source.getParentNode().replaceChild(toInclude, source);
+		
+		while (toInclude.hasChildNodes()) {
+			toInclude.getParentNode().insertBefore(toInclude.getFirstChild(), toInclude);
+		}
+		toInclude.getParentNode().removeChild(toInclude);
+		
+	} else if (source.getNodeType() == Node.ELEMENT_NODE) {
+		if (included && !variablesContext.isEmpty()) {
+			NamedNodeMap attributes = source.getAttributes();
+			for (int i = 0; i < attributes.getLength(); i++) {
+				Node attr = attributes.item(i);
+				attr.setNodeValue(PropertyParser.parse(attr.getNodeValue(), variablesContext));
+			}
+		}
+	
+		NodeList children = source.getChildNodes();
+		for (int i = 0; i < children.getLength(); i++) {
+			applyIncludes(children.item(i), variablesContext, included);
+		}
+		
+	} else if (included && source.getNodeType() == Node.TEXT_NODE && !variablesContext.isEmpty()) {
+		source.setNodeValue(PropertyParser.parse(source.getNodeValue(), variablesContext));
+	}
+}
+
+  
+  
+################## 4、addMappedStatement
+
 /**
  * 构建一个MappedStatement，并保存到Configuration实例对象中。
  */
@@ -887,8 +1230,11 @@ public MappedStatement addMappedStatement(String id, SqlSource sqlSource, Statem
 	boolean isSelect = sqlCommandType == SqlCommandType.SELECT;
 
 
-	// MappedStatement类中有一个Builder内部类
-	// Builder内部类有一个成语变量。private MappedStatement mappedStatement = new MappedStatement();
+	/** 
+	 * MappedStatement类中有一个Builder内部类
+	 * Builder内部类有一个成语变量。private MappedStatement mappedStatement = new MappedStatement();
+	 *
+	 */
 	MappedStatement.Builder statementBuilder = new MappedStatement.Builder(configuration, id, sqlSource, sqlCommandType);
 	statementBuilder.resource(resource);
 	statementBuilder.fetchSize(fetchSize);
@@ -908,6 +1254,10 @@ public MappedStatement addMappedStatement(String id, SqlSource sqlSource, Statem
 	// 设置缓存。
 	setStatementCache(isSelect, flushCache, useCache, currentCache, statementBuilder);
 
+	/** 
+	 * 构建一个MappedStatement对象，并把这个对象保存到Configuration中
+	 *
+	 */
 	MappedStatement statement = statementBuilder.build();
 	
 	// 把构建出来的MappedStatement放入Configuration中。
@@ -916,6 +1266,8 @@ public MappedStatement addMappedStatement(String id, SqlSource sqlSource, Statem
 	
 	return statement;
 }
+
+
 
 
 /**
@@ -930,3 +1282,10 @@ private void setStatementCache(boolean isSelect, boolean flushCache, boolean use
 	statementBuilder.cache(cache);
 }
 
+/**
+ * 添加MappedStatement到Configuration中。
+ */
+location：Configuration
+public void addMappedStatement(MappedStatement ms) {
+	mappedStatements.put(ms.getId(), ms);
+}

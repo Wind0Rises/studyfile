@@ -1,22 +1,39 @@
-通过SqlSessionFactory创建一个SqlSession。SqlSession中主要包含Configuration、Executor、是否自动提交。
 
-TransactionFactory  -->  ManagedTransaction
-Executor  -->  DefaultSqlSession
+一、主要描述
+	通过SqlSessionFactory创建一个SqlSession。SqlSession中主要包含Configuration、Executor、是否自动提交。
 
-ExecutorType：
-	SIMPLE：该模式下它为每个语句的执行创建一个新的预处理语句，单条提交sql；默认模式。
-	REUSE：REUSE是可重用执行器，重用对象是Statement（即该执行器会缓存同一个sql的Statement，省去Statement的重新创建，优化性能）（即会重用预处理语句）。
-	BATCH：BATCH执行器会重用预处理语句，并执行批量更新。
+	
+	
+	
+	
+	
+二、主要的类。
+	TransactionFactory  -->  ManagedTransaction
+	Executor  -->  DefaultSqlSession
 
-ManagedTransaction：内部维持着一个DataSource、TransactionIsolationLevel【这个事务等级和数据库的事务等级是一样的。】、Connection、boolean closeConnection这个四个参数
-					重要的方法都是和事务相关的：getConnection();commit();rollback();close();
+	ExecutorType：
+		SIMPLE：该模式下它为每个语句的执行创建一个新的预处理语句，单条提交sql；默认模式。
+		REUSE：REUSE是可重用执行器，重用对象是Statement（即该执行器会缓存同一个sql的Statement，省去Statement的重新创建，优化性能）（即会重用预处理语句）。
+		BATCH：BATCH执行器会重用预处理语句，并执行批量更新。
 
-// 打开SqlSession。
+	ManagedTransaction：内部维持着一个DataSource、TransactionIsolationLevel【这个事务等级和数据库的事务等级是一样的。】、Connection、boolean closeConnection这个四个参数
+						重要的方法都是和事务相关的：getConnection();commit();rollback();close();
+
+						
+						
+三、源码。
+/**
+ * 打开SqlSession。
+ */
 location：DefaultSqlSessionFactory。
 public SqlSession openSession() {
 	return openSessionFromDataSource(configuration.getDefaultExecutorType(), null, false);
 }
 
+
+/**
+ *
+ */
 location：DefaultSqlSessionFactory。
 private SqlSession openSessionFromDataSource(ExecutorType execType, TransactionIsolationLevel level, boolean autoCommit) {
 	Transaction tx = null;
@@ -30,8 +47,12 @@ private SqlSession openSessionFromDataSource(ExecutorType execType, TransactionI
 		// 新建一个Transaction。
 		tx = transactionFactory.newTransaction(environment.getDataSource(), level, autoCommit);
 		
-		// 获取一个执行器。每次打开session时，都会创建一个新的executor
-		// 其是根据ExecutorType类型来创建的，【【但是如果开启了二级缓存，Executor统一用CachingExecutor】】
+		/**
+		 * 获取一个执行器。每次打开session时，都会创建一个新的executor
+		 * 其是根据ExecutorType类型来创建的，
+		 * 
+		 *
+		 */
 		final Executor executor = configuration.newExecutor(tx, execType);
 		
 		// 新建一个DefaultSqlSession
@@ -81,12 +102,20 @@ public Executor newExecutor(Transaction transaction, ExecutorType executorType) 
 		executor = new SimpleExecutor(this, transaction);
 	}
 	
-	// 判断二级缓存是否开启。
+	/**
+	 * ☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆
+	 * ☆ 							判断二级缓存是否开启。							   ☆
+	 * ☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆
+	 */
 	if (cacheEnabled) {
 		executor = new CachingExecutor(executor);
 	}
 	
-	// 【【向插件中注入执行器】】
+	/**
+	 * ☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆
+	 * ☆ 							向插件中注入执行器							   ☆
+	 * ☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆
+	 */
 	executor = (Executor) interceptorChain.pluginAll(executor);
 	
 	return executor;

@@ -14,7 +14,6 @@ refresh()
 	
 	
 	
-	asdasd3324
 
 /**
  * BeanFactory后置处理过程。

@@ -1,0 +1,483 @@
+
+
+
+
+四、源码
+#########################################################################################
+#                          第一部分：解析完成Mapper.xml文件。							#
+#########################################################################################
+/**
+ * 解析mapper.xml过程。宏观的。
+ */
+location：XMLMapperBuilder
+public void parse() {
+	// 判断资源是否被加载过了。
+    if (!configuration.isResourceLoaded(resource)) {
+	
+		// 解析对应的Mapper.xml文件。
+		configurationElement(parser.evalNode("/mapper"));
+		
+		// 把加载过的资源记录在Configuration中。
+		configuration.addLoadedResource(resource);
+		
+		// 
+		bindMapperForNamespace();
+    }
+
+    parsePendingResultMaps();
+    parsePendingChacheRefs();
+    parsePendingStatements();
+}
+
+
+/**
+ * xml配置的namespace是否有对应的java文件，
+ *
+ * 
+ */
+location：XMLMapperBuilder
+private void bindMapperForNamespace() {
+	String namespace = builderAssistant.getCurrentNamespace();
+	
+	if (namespace != null) {
+		Class<?> boundType = null;
+		
+		try {
+			boundType = Resources.classForName(namespace);
+		} catch (ClassNotFoundException e) {
+			
+		}
+		
+		if (boundType != null) {
+			/**
+			 * Configuration是否已经处理过对应的mapper.java了。
+			 */
+			if (!configuration.hasMapper(boundType)) {
+				configuration.addLoadedResource("namespace:" + namespace);
+				configuration.addMapper(boundType);
+			}
+		}
+	}
+}
+
+/**
+ * 
+ *
+ */
+location：XMLMapperBuilder
+private void parsePendingResultMaps() {
+
+	Collection<ResultMapResolver> incompleteResultMaps = configuration.getIncompleteResultMaps();
+	
+	synchronized (incompleteResultMaps) {
+		Iterator<ResultMapResolver> iter = incompleteResultMaps.iterator();
+		while (iter.hasNext()) {
+			try {
+				iter.next().resolve();
+				iter.remove();
+			} catch (IncompleteElementException e) {
+				
+			}
+		}
+	}
+}
+
+
+/**
+ * 
+ *
+ */
+location：ResultMapResolver
+public ResultMap resolve() {
+	return assistant.addResultMap(this.id, this.type, this.extend, this.discriminator, this.resultMappings, this.autoMapping);
+}
+
+
+public ResultMap addResultMap(String id, Class<?> type, String extend, Discriminator discriminator, List<ResultMapping> resultMappings, Boolean autoMapping) {
+	id = applyCurrentNamespace(id, false);
+	extend = applyCurrentNamespace(extend, true);
+
+	if (extend != null) {
+		if (!configuration.hasResultMap(extend)) {
+			throw new IncompleteElementException("Could not find a parent resultmap with id '" + extend + "'");
+		}
+		
+		ResultMap resultMap = configuration.getResultMap(extend);
+		List<ResultMapping> extendedResultMappings = new ArrayList<>(resultMap.getResultMappings());
+		extendedResultMappings.removeAll(resultMappings);
+		
+		boolean declaresConstructor = false;
+		for (ResultMapping resultMapping : resultMappings) {
+			if (resultMapping.getFlags().contains(ResultFlag.CONSTRUCTOR)) {
+				declaresConstructor = true;
+				break;
+			}
+		}
+		if (declaresConstructor) {
+			Iterator<ResultMapping> extendedResultMappingsIter = extendedResultMappings.iterator();
+			
+			while (extendedResultMappingsIter.hasNext()) {
+				if (extendedResultMappingsIter.next().getFlags().contains(ResultFlag.CONSTRUCTOR)) {
+					extendedResultMappingsIter.remove();
+				}
+			}
+		}
+		resultMappings.addAll(extendedResultMappings);
+	}
+	ResultMap resultMap = new ResultMap.Builder(configuration, id, type, resultMappings, autoMapping).discriminator(discriminator).build();
+	
+	configuration.addResultMap(resultMap);
+	
+	return resultMap;
+}
+
+
+
+
+/**
+ * 
+ *
+ */
+location：XMLMapperBuilder
+private void parsePendingCacheRefs() {
+	Collection<CacheRefResolver> incompleteCacheRefs = configuration.getIncompleteCacheRefs();
+	synchronized (incompleteCacheRefs) {
+		Iterator<CacheRefResolver> iter = incompleteCacheRefs.iterator();
+		while (iter.hasNext()) {
+			try {
+				iter.next().resolveCacheRef();
+				iter.remove();
+			} catch (IncompleteElementException e) {
+				
+			}
+		}
+	}
+}
+
+/**
+ * 
+ *
+ */
+location：CacheRefResolver
+public Cache resolveCacheRef() {
+	return assistant.useCacheRef(cacheRefNamespace);
+}
+
+
+/**
+ * 
+ *
+ */
+location：MapperBuilderAssistant
+public Cache useCacheRef(String namespace) {
+	if (namespace == null) {
+		throw new BuilderException("cache-ref element requires a namespace attribute.");
+	}
+	try {
+		unresolvedCacheRef = true;
+		Cache cache = configuration.getCache(namespace);
+		if (cache == null) {
+			throw new IncompleteElementException("No cache for namespace '" + namespace + "' could be found.");
+		}
+		currentCache = cache;
+		unresolvedCacheRef = false;
+		return cache;
+	} catch (IllegalArgumentException e) {
+		throw new IncompleteElementException("No cache for namespace '" + namespace + "' could be found.", e);
+	}
+}
+
+
+
+/**
+ * 
+ *
+ */
+location：XMLMapperBuilder
+private void parsePendingStatements() {
+	Collection<XMLStatementBuilder> incompleteStatements = configuration.getIncompleteStatements();
+		synchronized (incompleteStatements) {
+		Iterator<XMLStatementBuilder> iter = incompleteStatements.iterator();
+		while (iter.hasNext()) {
+			try {
+				iter.next().parseStatementNode();
+				iter.remove();
+			} catch (IncompleteElementException e) {
+				
+			}
+		}
+	}
+}
+
+/**
+ *	构建一个MappedStatement
+ *
+ */
+location：XMLStatementBuilder
+public void parseStatementNode() {
+	String id = context.getStringAttribute("id");
+	String databaseId = context.getStringAttribute("databaseId");
+
+	if (!databaseIdMatchesCurrent(id, databaseId, this.requiredDatabaseId)) {
+		return;
+	}
+
+	// 获取fetchSize、timeout、parameterMap参数。
+	Integer fetchSize = context.getIntAttribute("fetchSize");
+	Integer timeout = context.getIntAttribute("timeout");
+	String parameterMap = context.getStringAttribute("parameterMap");
+	
+	// 获取parameterType参数。
+	String parameterType = context.getStringAttribute("parameterType");
+	Class<?> parameterTypeClass = resolveClass(parameterType);
+	
+	// 获取resultMap、resultType、lang参数。
+	String resultMap = context.getStringAttribute("resultMap");
+	String resultType = context.getStringAttribute("resultType");
+	String lang = context.getStringAttribute("lang");
+	
+	/**
+	 * 获取对应的LanguageDriver
+	 */ 
+	LanguageDriver langDriver = getLanguageDriver(lang);
+
+	Class<?> resultTypeClass = resolveClass(resultType);
+	
+	
+	String resultSetType = context.getStringAttribute("resultSetType");
+	StatementType statementType = StatementType.valueOf(context.getStringAttribute("statementType", StatementType.PREPARED.toString()));
+	ResultSetType resultSetTypeEnum = resolveResultSetType(resultSetType);
+
+	
+	// 获取标签的名称，看是什么操作。UNKNOWN, INSERT, UPDATE, DELETE, SELECT, FLUSH;
+	String nodeName = context.getNode().getNodeName();
+	SqlCommandType sqlCommandType = SqlCommandType.valueOf(nodeName.toUpperCase(Locale.ENGLISH));
+	// 是否是select操作。
+	boolean isSelect = sqlCommandType == SqlCommandType.SELECT;
+	
+	
+	// 获取flushCache、useCache、resultOrdered参数。刷新缓存标志、使用缓存标志。
+	boolean flushCache = context.getBooleanAttribute("flushCache", !isSelect);
+	boolean useCache = context.getBooleanAttribute("useCache", isSelect);
+	boolean resultOrdered = context.getBooleanAttribute("resultOrdered", false);
+
+
+	/**
+	 * XMLIncludeTransformer只有两个成员变量
+	 *		Configuration configuration;
+	 *		MapperBuilderAssistant builderAssistant;
+	 *
+	 * 对include标签的处理。在解析之前导入碎片。
+	 */
+	XMLIncludeTransformer includeParser = new XMLIncludeTransformer(configuration, builderAssistant);
+	includeParser.applyIncludes(context.getNode());
+
+	// 处理selectKey标签。
+	processSelectKeyNodes(id, parameterTypeClass, langDriver);
+
+	// 创建SqlSource，其只有一个方法BoundSql getBoundSql(Object parameterObject);
+	SqlSource sqlSource = langDriver.createSqlSource(configuration, context, parameterTypeClass);
+	
+	// 获取resultSets、keyProperty、keyColumn属性。
+	String resultSets = context.getStringAttribute("resultSets");
+	String keyProperty = context.getStringAttribute("keyProperty");
+	String keyColumn = context.getStringAttribute("keyColumn");
+	
+	
+	// id为方法名，也就是标签的id。String SELECT_KEY_SUFFIX = "!selectKey";
+	KeyGenerator keyGenerator;
+	String keyStatementId = id + SelectKeyGenerator.SELECT_KEY_SUFFIX;
+	keyStatementId = builderAssistant.applyCurrentNamespace(keyStatementId, true);
+	
+	if (configuration.hasKeyGenerator(keyStatementId)) {
+		keyGenerator = configuration.getKeyGenerator(keyStatementId);
+	} else {
+		keyGenerator = context.getBooleanAttribute("useGeneratedKeys", configuration.isUseGeneratedKeys() && SqlCommandType.INSERT.equals(sqlCommandType)) ? new Jdbc3KeyGenerator() : new NoKeyGenerator();
+	}
+
+
+	builderAssistant.addMappedStatement(id, sqlSource, statementType, sqlCommandType, fetchSize, timeout, parameterMap, parameterTypeClass, resultMap, resultTypeClass,
+		resultSetTypeEnum, flushCache, useCache, resultOrdered,  keyGenerator, keyProperty, keyColumn, databaseId, langDriver, resultSets);
+}
+
+
+
+
+
+
+
+#########################################################################################
+#                          第二部分：解析完成Mapper.xml文件。							#
+#########################################################################################
+/**
+ *
+ */
+location：MapperAnnotationBuilder
+public void parse() {
+	// 获取mapper接口对象的全限定名。
+    String resource = type.toString();
+	
+	// 判断资源是否已经加载过了。
+    if (!configuration.isResourceLoaded(resource)) {
+	
+		// 加载mapper.xml文件，并解析文件。
+		loadXmlResource();
+		
+		// 把加载解析过的文件方法Configuration中loadedResources集合中。
+		configuration.addLoadedResource(resource);
+		
+		// 设置其对应的命名空间。
+		assistant.setCurrentNamespace(type.getName());
+		
+		/**
+		 * 缓存相关的。@CacheNamespace
+		 */
+		parseCache();
+		
+		/**
+		 * @CacheNamespaceRef
+		 */
+		parseCacheRef();
+		
+		
+		Method[] methods = type.getMethods();
+		
+		for (Method method : methods) {
+			try {
+				if (!method.isBridge()) {
+					parseStatement(method);
+				}
+			} catch (IncompleteElementException e) {
+				configuration.addIncompleteMethod(new MethodResolver(this, method));
+			}
+		}
+    }
+    parsePendingMethods();
+}
+
+
+/**
+ *
+ */
+location：MethodResolver
+public MethodResolver(MapperAnnotationBuilder annotationBuilder, Method method) {
+	this.annotationBuilder = annotationBuilder;
+	this.method = method;
+}
+
+
+
+/**
+ *
+ */
+location：Configuration
+public void addIncompleteMethod(MethodResolver builder) {
+	incompleteMethods.add(builder);
+}
+
+
+
+/**
+ *
+ */
+location：MapperAnnotationBuilder
+private void parsePendingMethods() {
+	Collection<MethodResolver> incompleteMethods = configuration.getIncompleteMethods();
+	synchronized (incompleteMethods) {
+		Iterator<MethodResolver> iter = incompleteMethods.iterator();
+		while (iter.hasNext()) {
+			try {
+				iter.next().resolve();
+				iter.remove();
+			} catch (IncompleteElementException e) {
+				
+			}
+		}
+	}
+}
+
+
+/**
+ *
+ */
+location：MethodResolver
+public void resolve() {
+	annotationBuilder.parseStatement(method);
+}
+
+/**
+ *
+ */
+location：MapperAnnotationBuilder
+void parseStatement(Method method) {
+	Class<?> parameterTypeClass = getParameterType(method);
+	LanguageDriver languageDriver = getLanguageDriver(method);
+	SqlSource sqlSource = getSqlSourceFromAnnotations(method, parameterTypeClass, languageDriver);
+	
+	if (sqlSource != null) {
+		Options options = method.getAnnotation(Options.class);
+		final String mappedStatementId = type.getName() + "." + method.getName();
+		Integer fetchSize = null;
+		Integer timeout = null;
+		StatementType statementType = StatementType.PREPARED;
+		ResultSetType resultSetType = null;
+		SqlCommandType sqlCommandType = getSqlCommandType(method);
+		boolean isSelect = sqlCommandType == SqlCommandType.SELECT;
+		boolean flushCache = !isSelect;
+		boolean useCache = isSelect;
+
+		KeyGenerator keyGenerator;
+		String keyProperty = null;
+		String keyColumn = null;
+		
+		if (SqlCommandType.INSERT.equals(sqlCommandType) || SqlCommandType.UPDATE.equals(sqlCommandType)) {
+			SelectKey selectKey = method.getAnnotation(SelectKey.class);
+			if (selectKey != null) {
+				keyGenerator = handleSelectKeyAnnotation(selectKey, mappedStatementId, getParameterType(method), languageDriver);
+				keyProperty = selectKey.keyProperty();
+			} else if (options == null) {
+				keyGenerator = configuration.isUseGeneratedKeys() ? Jdbc3KeyGenerator.INSTANCE : NoKeyGenerator.INSTANCE;
+			} else {
+				keyGenerator = options.useGeneratedKeys() ? Jdbc3KeyGenerator.INSTANCE : NoKeyGenerator.INSTANCE;
+				keyProperty = options.keyProperty();
+				keyColumn = options.keyColumn();
+			}
+		} else {
+			keyGenerator = NoKeyGenerator.INSTANCE;
+		}
+
+		if (options != null) {
+			if (FlushCachePolicy.TRUE.equals(options.flushCache())) {
+				flushCache = true;
+			} else if (FlushCachePolicy.FALSE.equals(options.flushCache())) {
+				flushCache = false;
+			}
+			useCache = options.useCache();
+			fetchSize = options.fetchSize() > -1 || options.fetchSize() == Integer.MIN_VALUE ? options.fetchSize() : null;
+			timeout = options.timeout() > -1 ? options.timeout() : null;
+			statementType = options.statementType();
+			resultSetType = options.resultSetType();
+		}
+
+		String resultMapId = null;
+		ResultMap resultMapAnnotation = method.getAnnotation(ResultMap.class);
+		if (resultMapAnnotation != null) {
+			String[] resultMaps = resultMapAnnotation.value();
+			StringBuilder sb = new StringBuilder();
+			for (String resultMap : resultMaps) {
+				if (sb.length() > 0) {
+					sb.append(",");
+				}
+				sb.append(resultMap);
+			}
+			resultMapId = sb.toString();
+		} else if (isSelect) {
+			resultMapId = parseResultMap(method);
+		}
+
+		assistant.addMappedStatement(mappedStatementId, sqlSource, statementType, sqlCommandType, fetchSize,
+		timeout, null, parameterTypeClass, resultMapId, getReturnType(method),
+		resultSetType, flushCache, useCache, false, keyGenerator, keyProperty,
+		keyColumn, null, languageDriver, options != null ? nullOrEmpty(options.resultSets()) : null);
+	}
+}

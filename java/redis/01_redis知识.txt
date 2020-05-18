@@ -2,6 +2,11 @@ redis-server redis.conf
 	windows下的redis默认加载redis.windows-service.conf文件。
 
 
+	
+	
+	
+	
+
 string:
 	普通字符串操作。
 	
