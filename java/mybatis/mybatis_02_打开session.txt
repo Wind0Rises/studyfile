@@ -20,8 +20,13 @@
 						重要的方法都是和事务相关的：getConnection();commit();rollback();close();
 
 						
+
+
+
 						
 三、源码。
+
+
 /**
  * 打开SqlSession。
  */
@@ -30,33 +35,45 @@ public SqlSession openSession() {
 	return openSessionFromDataSource(configuration.getDefaultExecutorType(), null, false);
 }
 
+/**
+ * 默认是SIMPLE。
+ */
+location：Configuration
+public ExecutorType getDefaultExecutorType() {
+	return defaultExecutorType;
+}
+
 
 /**
- *
+ * 01、获取对应的环境。
+ * 
+ * 
+ * 
  */
 location：DefaultSqlSessionFactory。
 private SqlSession openSessionFromDataSource(ExecutorType execType, TransactionIsolationLevel level, boolean autoCommit) {
 	Transaction tx = null;
 	try {
+	
+	
 		// 获取Configuration的环境。
 		final Environment environment = configuration.getEnvironment();
 		
-		//
+		// 创建TransactionFactory。
 		final TransactionFactory transactionFactory = getTransactionFactoryFromEnvironment(environment);
 		
 		// 新建一个Transaction。
 		tx = transactionFactory.newTransaction(environment.getDataSource(), level, autoCommit);
 		
 		/**
-		 * 获取一个执行器。每次打开session时，都会创建一个新的executor
-		 * 其是根据ExecutorType类型来创建的，
-		 * 
-		 *
+		 * 获取一个执行器。每次打开session时，都会创建一个新的executor，其是根据ExecutorType类型来创建的。
+		 * 注意：具体的是创建什么类型的，和是否开启二级缓存、ExecutorType都有关系。
 		 */
 		final Executor executor = configuration.newExecutor(tx, execType);
 		
 		// 新建一个DefaultSqlSession
 		return new DefaultSqlSession(configuration, executor, autoCommit);
+		
 	} catch (Exception e) {
 		closeTransaction(tx);
 		throw ExceptionFactory.wrapException("Error opening session.  Cause: " + e, e);
@@ -78,6 +95,16 @@ private TransactionFactory getTransactionFactoryFromEnvironment(Environment envi
 	return environment.getTransactionFactory();
 }
 
+/**
+ * 创建一个事务。需要的参数：数据源；事务等级；是否自动提交。
+ * 
+ * 属性值：
+ * 		DataSource dataSource：数据源。
+ * 		TransactionIsolationLevel level：事务等级。
+ * 		Connection connection：是否提交。
+ * 		boolean closeConnection：关闭连接。
+ *
+ */
 location：ManagedTransactionFactory
 public Transaction newTransaction(DataSource ds, TransactionIsolationLevel level, boolean autoCommit) {
     return new ManagedTransaction(ds, level, closeConnection);
@@ -87,6 +114,8 @@ public Transaction newTransaction(DataSource ds, TransactionIsolationLevel level
 /**
  * 创建一个执行器。
  * 	一个执行器包含的操作：更新，查询，刷新Statement，提价事务，回滚事务，创建缓存，清理缓存，获取事务，关闭，
+ *
+ * CachingExecutor：使用的是装饰器模式。
  */
 public Executor newExecutor(Transaction transaction, ExecutorType executorType) {
 	executorType = executorType == null ? defaultExecutorType : executorType;
@@ -119,4 +148,22 @@ public Executor newExecutor(Transaction transaction, ExecutorType executorType) 
 	executor = (Executor) interceptorChain.pluginAll(executor);
 	
 	return executor;
+}
+
+
+/**
+ *  构建一个DefaultSqlSession对象。
+ *
+ *	Configuration configuration;
+ *	Executor executor;
+ *	boolean autoCommit;
+ *	boolean dirty;
+ *	List<Cursor<?>> cursorList;
+ */
+location：DefaultSqlSession
+public DefaultSqlSession(Configuration configuration, Executor executor, boolean autoCommit) {
+	this.configuration = configuration;
+	this.executor = executor;
+	this.dirty = false;
+	this.autoCommit = autoCommit;
 }

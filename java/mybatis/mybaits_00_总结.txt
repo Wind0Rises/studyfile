@@ -1,8 +1,57 @@
 博客：
 	二级缓存：https://zhuanlan.zhihu.com/p/33179093
 
-
-一、主要的处理类。
+	
+一、主要步骤：
+	1、创建SqlSessionFactroy。
+		* 传统模式：是使用通过SqlSessionFactroyBuilder创建，这里有解析MybatisConfiguration.xml文件。
+		* 与Spring使用：直接配置SqlSessionFactoryBean，SqlSessionFactoryBean实现了InitializingBean这个接口，在afterPropertiesSet()方法中也会加载MybatisConfiguration.xml。
+		
+	2、创建SqlSession。
+		* 传统模式：通过SqlSessionFactroy去创建SqlSession。
+		* 与Spring使用：这个与在spring中是否配置了SqlSessionTemplate。如果配置了就是始终使用一个SqlSession。如果没有配置SqlSessionTemplate，如果配置了SqlSessionFactoryBean的话，那么就是一个Mapper使用一个SqlSession。
+		
+		
+		
+		
+	3、<cache>、<cache-ref>、@CacheNamespace、@CacheNamespaceRef使用问题。
+		
+		
+		
+二、主要流程
+	1)、创建SqlSessionFactory
+		1、通过SqlSessionFactoryBuilder的build(Reader reader)方法构建一个SqlSessionFactory。
+		2、加载并解析mybaits-configuration.xml文件，把mybaits-configuration.xml的内容解析并保存到Configuration实例对象中。
+		3、这里以<mappers><mapper package="...">为例。加载package配置的.class文件，并保存到一个Set<Class>集合中。然后遍历这个set集合，判断是否Class是否是接口，
+		   然后包装成一个MapperProxyFactory保存到Configuration中。
+		4、构建一个MapperAnnotationBuilder实例对象保存一个Class对应的Mapper.xml文件。每一Mapper.xml都会构建一个XMLMapperBuilder实例对象。解析mapper.xml文件，
+		   处理Cache、各种Map、Sql、和增删改查操作。对于增删改查操作每一个操作都会构建一个XMLStatementBuilder，这个就是用来解析增删改查标签的。对于增删改查
+		   解析都会保存到MappedStatement实例对象，并把这个MappedStatement对象保存到Configuration实例中。
+		   MapperBuilderAssistant？的作用。
+	
+	
+	
+	2)、创建SqlSession
+		1、获取Environment参数。
+		2、根据Environment参数创建TransactionFactory实例。
+		3、根据TransactionFactory创建Transaction。
+		4、根据Transaction和ExecutorType创建Executor。【注意】：这里是否开启二级缓存也会有印象。
+		5、创建默认的SqlSession，DefaultSqlSession实例。
+		
+		
+		
+	3)、执行过程
+		
+		
+		
+		
+		
+		
+		
+		
+	
+	
+二、主要的处理类。
 	SqlSessionFactoryBean：
 		创建Mybaits SQLSessionFactory。在spring application context共享一个MyBatis SQLSessionFactory。然后可以通过依赖项注入将SqlSessionFactory传递给基于MyBatis的DAO。
 		
@@ -29,19 +78,23 @@
 		CachingExecutor（缓存，开启二级缓存）
 
 
-主要步骤：
-	1、创建SqlSessionFactroy。
-		* 传统模式：是使用通过SqlSessionFactroyBuilder创建，这里有解析MybatisConfiguration.xml文件。
-		* 与Spring使用：直接配置SqlSessionFactoryBean，SqlSessionFactoryBean实现了InitializingBean这个接口，在afterPropertiesSet()方法中也会加载MybatisConfiguration.xml。
-		
-	2、创建SqlSession。
-		* 传统模式：通过SqlSessionFactroy去创建SqlSession。
-		* 与Spring使用：这个与在spring中是否配置了SqlSessionTemplate。如果配置了就是始终使用一个SqlSession。如果没有配置SqlSessionTemplate，如果配置了SqlSessionFactoryBean的话，那么就是一个Mapper使用一个SqlSession。
+	XMLMapperBuilder：
+		属性：
+			XPathParser parser：用于解析mapper.xml
+			MapperBuilderAssistant builderAssistant：保存命名空间、缓存、resource、configuration等信息。
+			Map<String, XNode> sqlFragments：保存SQL语句的。
+			String resource：保存资源使用的。
 		
 		
-		
-		
-		
+	MapperBuilderAssistant
+		属性：	
+			String currentNamespace;
+			final String resource;
+			Cache currentCache;
+			boolean unresolvedCacheRef;
+			Configuration configuration;
+			TypeAliasRegistry typeAliasRegistry;
+			TypeHandlerRegistry typeHandlerRegistry;
 		
 		
 		

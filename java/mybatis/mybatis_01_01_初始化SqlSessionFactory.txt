@@ -196,6 +196,15 @@ public SqlSessionFactory build(Reader reader, String environment, Properties pro
 }
 
 
+/**
+ * 默认构建一个DefaultSqlSessionFactory实例。
+ */
+location：SqlSessionFactoryBuilder
+public SqlSessionFactory build(Configuration config) {
+	return new DefaultSqlSessionFactory(config);
+}
+
+
 #####################
 #     1、1准备阶段	#
 #####################
@@ -273,7 +282,7 @@ private Document createDocument(InputSource inputSource) {
 }
 
 /**
- * 
+ *  在构建XMLConfigBuilder的时候会new Configuration()，并保存到XMLConfigBuilder的Configuration字段上。
  */
 location：XMLConfigBuilder
 private XMLConfigBuilder(XPathParser parser, String environment, Properties props) {
@@ -288,8 +297,7 @@ private XMLConfigBuilder(XPathParser parser, String environment, Properties prop
 /**
  * BaseBuilder
  * 			XMLConfigBuilder
- *	
- * 
+ * 构建一个XMLConfigBuilder
  */
 location：BaseBuilder
 public BaseBuilder(Configuration configuration) {
@@ -298,8 +306,10 @@ public BaseBuilder(Configuration configuration) {
 	this.typeHandlerRegistry = this.configuration.getTypeHandlerRegistry();
 }
 
+
+
 #########################
-#     1、2解析过程		#
+#     1、2解析过程		#																	XMLConfigBuilder中保存一个Configuration实例对象。
 #########################
 /**
  * parser是XPathParser实例对象。
@@ -357,14 +367,6 @@ private void parseConfiguration(XNode root) {
 	} catch (Exception e) {
 		throw new BuilderException("Error parsing SQL Mapper Configuration. Cause: " + e, e);
 	}
-}
-
-/**
- * 创建SqlSessionFactory
- */
-location：SqlSessionFactoryBuilder
-public SqlSessionFactory build(Configuration config) {
-	return new DefaultSqlSessionFactory(config);
 }
 
 
@@ -425,6 +427,10 @@ private void typeAliasesElement(XNode parent) {
 				String type = child.getStringAttribute("type");
 				try {
 					Class<?> clazz = Resources.classForName(type);
+					
+					/**
+					 * typeAliasRegistry是从Configuration中获取的。
+					 */
 					if (alias == null) {
 						typeAliasRegistry.registerAlias(clazz);
 					} else {

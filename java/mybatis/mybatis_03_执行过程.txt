@@ -8,23 +8,39 @@
 StudentMapper studentMapper = sqlSession.getMapper(StudentMapper.class);
 
 
+
+/**
+ * 获取对应的Mapper.java的代理对象。
+ */
 location：DefaultSqlSession
 public <T> T getMapper(Class<T> type) {
 	return this.configuration.getMapper(type, this);
 }
 
 
+/**
+ * 获取对应的Mapper.java的代理对象。
+ */
 public <T> T getMapper(Class<T> type, SqlSession sqlSession) {
 	// 从注册表中获取Mapper
 	return this.mapperRegistry.getMapper(type, sqlSession);
 }
 
+
+/**
+ * 从Configuration中的MapperRegister中获取对应的Mapper.java的代理对象。
+ */
 location：MapperRegistry
 public <T> T getMapper(Class<T> type, SqlSession sqlSession) {
-	// 通过Class获取对应额MapperProxyFactory。
+	/**
+	 * 通过Class获取对应的MapperProxyFactory。knownMappers中的数据是在解析mapper.xml的时候放入的，
+	 * 通过addMapper(..)方法添加的。MapperProxyFactory中保存着对应的mapper.java的Class信息。
+	 */
 	MapperProxyFactory<T> mapperProxyFactory = (MapperProxyFactory)this.knownMappers.get(type);
 	
-	// MapperProxyFactory是否已经注册。
+	/**
+	 * MapperProxyFactory是否已经注册。
+	 */
 	if (mapperProxyFactory == null) {
 		throw new BindingException("Type " + type + " is not known to the MapperRegistry.");
 	} else {
@@ -36,24 +52,42 @@ public <T> T getMapper(Class<T> type, SqlSession sqlSession) {
 	}
 }
 
+
+/**
+ * 获取Mapper.java的代理类。
+ */
 location：MapperProxyFactory
 public T newInstance(SqlSession sqlSession) {
 	/**
 	 * MapperProxy实现了InvocationHandler接口，其原理就是是用了JDK的动态代理。被代理对象就是Mapper接口。
+	 * 创建一个代理mapper。
 	 */
-	// 创建一个代理mapper。
 	MapperProxy<T> mapperProxy = new MapperProxy(sqlSession, this.mapperInterface, this.methodCache);
+	
 	return this.newInstance(mapperProxy);
 }
 
-// 生产代理对象。
+/** 
+ * 生产代理对象。
+ */
+location：MapperProxyFactory
 protected T newInstance(MapperProxy<T> mapperProxy) {
 	return (T) Proxy.newProxyInstance(mapperInterface.getClassLoader(), new Class[] { mapperInterface }, mapperProxy);
 }
 
+
+
+
+
 ####################################################################################################################
 #######################################             调用过程           #############################################
 ####################################################################################################################
+/** 
+ * 【注意：】
+ *		MapperProxy这里的invoke方法，就是在mapper.java被调用是要
+ *
+ *
+ */
 location：MapperProxy
 public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
 	try {
@@ -89,13 +123,106 @@ private MapperMethod cachedMapperMethod(Method method) {
 	MapperMethod mapperMethod = (MapperMethod)this.methodCache.get(method);
 	
 	if (mapperMethod == null) {
-		// 新建一个MapperMethod对象，并放入缓存中。
+		/**
+		 * 新建一个MapperMethod对象，并放入缓存中。
+		 * 一个方法的创建MapperMethod。
+		 */
 		mapperMethod = new MapperMethod(this.mapperInterface, method, this.sqlSession.getConfiguration());
 		this.methodCache.put(method, mapperMethod);
 	}
-
+	
 	return mapperMethod;
 }
+
+
+/**
+ * MapperMethod：
+ *		属性：
+ *			SqlCommand command：其是MapperMethod内部类
+ *			MethodSignature method：其是MapperMethod内部类
+ *
+ * 构建一个MapperMethod
+ */
+location：MapperMethod
+public MapperMethod(Class<?> mapperInterface, Method method, Configuration config) {
+	this.command = new SqlCommand(config, mapperInterface, method);
+	this.method = new MethodSignature(config, mapperInterface, method);
+}
+
+
+/**
+ * SqlCommand
+ *		属性：
+ *			String name：对应的MappedStatement的Id
+ *			SqlCommandType type：sql命令的类型。
+ *	
+ *
+ * 构建SqlCommand。
+ */
+location：SqlCommand
+public SqlCommand(Configuration configuration, Class<?> mapperInterface, Method method) {
+	final String methodName = method.getName();
+	final Class<?> declaringClass = method.getDeclaringClass();
+	
+	/**
+	 * 获取给定mapper.java，给定方法对应的MappedStatement。
+	 */
+	MappedStatement ms = resolveMappedStatement(mapperInterface, methodName, declaringClass, configuration);
+	
+	if (ms == null) {
+		if(method.getAnnotation(Flush.class) != null){
+			name = null;
+			type = SqlCommandType.FLUSH;
+		} else {
+			throw new BindingException("Invalid bound statement (not found): " + mapperInterface.getName() + "." + methodName);
+		}
+	} else {
+		name = ms.getId();
+		type = ms.getSqlCommandType();
+		
+		if (type == SqlCommandType.UNKNOWN) {
+			throw new BindingException("Unknown execution method for: " + name);
+		}
+	}
+}
+
+
+/**
+ * 获取给定mapper.java，给定方法对应的MappedStatement。
+ */
+location：SqlCommand
+private MappedStatement resolveMappedStatement(Class<?> mapperInterface, String methodName, Class<?> declaringClass, Configuration configuration) {
+	/**
+	 * 获取MappedStatement的ID。Mapper.java的名称 + 方法名。
+	 */
+	String statementId = mapperInterface.getName() + "." + methodName;
+	
+	/**
+	 * 从Configuration中获取对应的MappedStatement
+	 */
+	if (configuration.hasStatement(statementId)) {
+		return configuration.getMappedStatement(statementId);
+	} else if (mapperInterface.equals(declaringClass)) {
+		return null;
+	}
+	
+	/**
+	 * 获取父接口中是否有。
+	 */
+	for (Class<?> superInterface : mapperInterface.getInterfaces()) {
+		if (declaringClass.isAssignableFrom(superInterface)) {
+			MappedStatement ms = resolveMappedStatement(superInterface, methodName, declaringClass, configuration);
+			if (ms != null) {
+				return ms;
+			}
+		}
+	}
+	return null;
+}
+
+
+
+
 
 /**
  *
@@ -105,41 +232,64 @@ public Object execute(SqlSession sqlSession, Object[] args) {
 	Object param;
 	Object result;
 	
-	
+	/**
+	 * 最终调用的还是sqlSession方法。
+	 *
+	 *
+	 */
 	switch(this.command.getType()) {
-	case INSERT:
-		param = this.method.convertArgsToSqlCommandParam(args);
-		result = this.rowCountResult(sqlSession.insert(this.command.getName(), param));
-		break;
-	case UPDATE:
-		param = this.method.convertArgsToSqlCommandParam(args);
-		result = this.rowCountResult(sqlSession.update(this.command.getName(), param));
-		break;
-	case DELETE:
-		param = this.method.convertArgsToSqlCommandParam(args);
-		result = this.rowCountResult(sqlSession.delete(this.command.getName(), param));
-		break;
-	case SELECT:
-		if (this.method.returnsVoid() && this.method.hasResultHandler()) {
-			this.executeWithResultHandler(sqlSession, args);
-			result = null;
-		} else if (this.method.returnsMany()) {
-			result = this.executeForMany(sqlSession, args);
-		} else if (this.method.returnsMap()) {
-			result = this.executeForMap(sqlSession, args);
-		} else if (this.method.returnsCursor()) {
-			result = this.executeForCursor(sqlSession, args);
-		} else {
-			//  以这个方法为例往下走。
+	
+		case INSERT:
 			param = this.method.convertArgsToSqlCommandParam(args);
-			result = sqlSession.selectOne(this.command.getName(), param);
-		}
-		break;
-	case FLUSH:
-		result = sqlSession.flushStatements();
-		break;
-	default:
-		throw new BindingException("Unknown execution method for: " + this.command.getName());
+			result = this.rowCountResult(sqlSession.insert(this.command.getName(), param));
+			break;
+			
+		case UPDATE:
+			param = this.method.convertArgsToSqlCommandParam(args);
+			result = this.rowCountResult(sqlSession.update(this.command.getName(), param));
+			break;
+			
+		case DELETE:
+			param = this.method.convertArgsToSqlCommandParam(args);
+			result = this.rowCountResult(sqlSession.delete(this.command.getName(), param));
+			break;
+			
+		case SELECT:
+			
+			// 返回为空，并且有ResultHandler。
+			if (this.method.returnsVoid() && this.method.hasResultHandler()) {
+				this.executeWithResultHandler(sqlSession, args);
+				result = null;
+			
+			// 返回多条数据。
+			} else if (this.method.returnsMany()) {
+				result = this.executeForMany(sqlSession, args);
+				
+			// 返回是以Map。
+			} else if (this.method.returnsMap()) {
+				result = this.executeForMap(sqlSession, args);
+				
+			// 返回游标
+			} else if (this.method.returnsCursor()) {
+				result = this.executeForCursor(sqlSession, args);
+			
+			// 其他
+			} else {
+				param = this.method.convertArgsToSqlCommandParam(args);
+				/** 
+				 * this.command.getName()   ===>  MappedStatement对应的id
+				 */
+				result = sqlSession.selectOne(this.command.getName(), param);
+			}
+			break;
+			
+		case FLUSH:
+			result = sqlSession.flushStatements();
+			break;
+			
+			
+		default:
+			throw new BindingException("Unknown execution method for: " + this.command.getName());
 	}
 
 	if (result == null && this.method.getReturnType().isPrimitive() && !this.method.returnsVoid()) {
@@ -150,9 +300,9 @@ public Object execute(SqlSession sqlSession, Object[] args) {
 }
 
 /**
- *
+ * statement：MappedStatement对应的id.
  */
-localtion：DefaultSqlSession
+location：DefaultSqlSession
 public <T> T selectOne(String statement, Object parameter) {
 	List<T> list = this.selectList(statement, parameter);
 	if (list.size() == 1) {
@@ -165,26 +315,33 @@ public <T> T selectOne(String statement, Object parameter) {
 }
 
 /**
- *
+ * statement：MappedStatement对应的id.
  */
-localtion：DefaultSqlSession
+location：DefaultSqlSession
 public <E> List<E> selectList(String statement, Object parameter) {
 	return this.selectList(statement, parameter, RowBounds.DEFAULT);
 }
 
+
 /**
  *
  */
-localtion：DefaultSqlSession
+location：DefaultSqlSession
 public <E> List<E> selectList(String statement, Object parameter, RowBounds rowBounds) {
 	List var5;
 	try {
 		
-		// 这里的MappedStatement就是第一步解析Mapper以后生成的MappedStatement，并把其放入Configuration中。
-		// 根据statement（mapper.Mapper的名称.方法名）
+		/**
+		 * 这里的MappedStatement就是第一步解析Mapper以后生成的MappedStatement，并把其放入Configuration中。
+		 * 根据statement（mapper.Mapper的名称.方法名）
+		 */
 		MappedStatement ms = this.configuration.getMappedStatement(statement);
 		
-		// 默认没有
+		/**
+		 * ########################################
+		 * #     执行器执行具体操作				  #
+		 * ########################################
+		 */
 		var5 = this.executor.query(ms, this.wrapCollection(parameter), rowBounds, Executor.NO_RESULT_HANDLER);
 		
 	} catch (Exception var9) {
@@ -196,20 +353,31 @@ public <E> List<E> selectList(String statement, Object parameter, RowBounds rowB
 	return var5;
 }
 
+/**
+ * 从Configuration获取给定ID对应的MappedStatement
+ */
 location：Configuration
 public MappedStatement getMappedStatement(String id) {
 	return this.getMappedStatement(id, true);
 }
 
+
+/**
+ * 从Configuration获取给定ID对应的MappedStatement
+ */
 location：Configuration
 public MappedStatement getMappedStatement(String id, boolean validateIncompleteStatements) {
 	if (validateIncompleteStatements) {
 		this.buildAllStatements();
 	}
+	
 	return (MappedStatement)this.mappedStatements.get(id);
 }
 
-
+/**
+ *  验证是否是完整的Statement。
+ */
+location：Configuration
 protected void buildAllStatements() {
 	if (!incompleteResultMaps.isEmpty()) {
 		synchronized (incompleteResultMaps) {
@@ -233,6 +401,14 @@ protected void buildAllStatements() {
 	}
 }
 
+
+
+
+
+########################################
+#     执行器执行具体操作			   #
+########################################
+
 /**
  * 执行具体的查询操作。
  * CachingExecutor中包含一个根据ExecutorType类型创建的Executor。这个CachingExecutor是装饰类型。
@@ -247,6 +423,8 @@ public <E> List<E> query(MappedStatement ms, Object parameterObject, RowBounds r
 	
     return query(ms, parameterObject, rowBounds, resultHandler, key, boundSql);
 }
+
+
 
 /**
  * tcm：TransactionalCacheManager
@@ -309,3 +487,174 @@ private void ensureNoOutParams(MappedStatement ms, BoundSql boundSql) {
 	}
 }
 
+
+
+
+
+#################################
+#		委托给SimpleExecutor	#
+#################################
+/**
+ *
+ */
+location：BaseExecutor
+public <E> List<E> query(MappedStatement ms, Object parameter, RowBounds rowBounds, ResultHandler resultHandler, CacheKey key, BoundSql boundSql) throws SQLException {
+	
+	ErrorContext.instance().resource(ms.getResource()).activity("executing a query").object(ms.getId());
+	
+	if (closed) {
+		throw new ExecutorException("Executor was closed.");
+	}
+	
+	if (queryStack == 0 && ms.isFlushCacheRequired()) {
+		clearLocalCache();
+	}
+	
+	List<E> list;
+	try {
+		queryStack++;
+		
+		/**
+		 * 从本地缓存获取。
+		 */
+		list = resultHandler == null ? (List<E>) localCache.getObject(key) : null;
+		
+		
+		if (list != null) {
+			handleLocallyCachedOutputParameters(ms, key, parameter, boundSql);
+		} else {
+			list = queryFromDatabase(ms, parameter, rowBounds, resultHandler, key, boundSql);
+		}
+		
+	} finally {
+		queryStack--;
+	}
+	
+	if (queryStack == 0) {
+		for (DeferredLoad deferredLoad : deferredLoads) {
+			deferredLoad.load();
+		}
+		
+		deferredLoads.clear();
+		
+		if (configuration.getLocalCacheScope() == LocalCacheScope.STATEMENT) {
+			clearLocalCache();
+		}
+	}
+	
+	return list;
+}
+
+
+/**
+ *
+ */
+location：BaseExecutor
+private <E> List<E> queryFromDatabase(MappedStatement ms, Object parameter, RowBounds rowBounds, ResultHandler resultHandler, CacheKey key, BoundSql boundSql) throws SQLException {
+	List<E> list;
+	
+	// 添加本地缓存，但是缓存值为EXECUTION_PLACEHOLDER
+	localCache.putObject(key, EXECUTION_PLACEHOLDER);
+	try {
+		list = doQuery(ms, parameter, rowBounds, resultHandler, boundSql);
+	} finally {
+		// 删除本地缓存
+		localCache.removeObject(key);
+	}
+	
+	// 添加本地缓存
+	localCache.putObject(key, list);
+	
+	
+	if (ms.getStatementType() == StatementType.CALLABLE) {
+		localOutputParameterCache.putObject(key, parameter);
+	}
+	
+	return list;
+}
+
+
+
+/**
+ *
+ */
+location：SimpleExecutor
+public <E> List<E> doQuery(MappedStatement ms, Object parameter, RowBounds rowBounds, ResultHandler resultHandler, BoundSql boundSql) throws SQLException {
+	Statement stmt = null;
+	try {
+		Configuration configuration = ms.getConfiguration();
+		StatementHandler handler = configuration.newStatementHandler(wrapper, ms, parameter, rowBounds, resultHandler, boundSql);
+		
+		/**
+		 * 这里创建了Connection，
+		 */ 
+		stmt = prepareStatement(handler, ms.getStatementLog());
+		return handler.query(stmt, resultHandler);
+	} finally {
+		closeStatement(stmt);
+	}
+}
+
+/**
+ *
+ */
+location：SimpleExecutor
+private Statement prepareStatement(StatementHandler handler, Log statementLog) throws SQLException {
+	
+	// 这个Statement就是java.sql中的Statement。
+	Statement stmt;
+	
+	/**
+	 * 创建连接。
+	 */
+	Connection connection = getConnection(statementLog);
+	stmt = handler.prepare(connection, transaction.getTimeout());
+	handler.parameterize(stmt);
+	return stmt;
+}
+
+/**
+ *
+ */
+location：BaseExecutor
+protected Connection getConnection(Log statementLog) throws SQLException {
+	
+	// 以JdbcTransaction为例。
+	Connection connection = transaction.getConnection();
+	if (statementLog.isDebugEnabled()) {
+		return ConnectionLogger.newInstance(connection, statementLog, queryStack);
+	} else {
+		return connection;
+	}
+}
+
+/**
+ *
+ */
+location：JdbcTransaction
+public Connection getConnection() throws SQLException {
+	if (connection == null) {
+		openConnection();
+	}
+	return connection;
+}
+
+/**
+ *
+ */
+location：JdbcTransaction
+protected void openConnection() throws SQLException {
+	if (log.isDebugEnabled()) {
+		log.debug("Opening JDBC Connection");
+	}
+	connection = dataSource.getConnection();
+	
+	if (level != null) {
+		/**
+		 * 设置数据
+		 */
+		connection.setTransactionIsolation(level.getLevel());
+	}
+	
+	setDesiredAutoCommit(autoCommit);
+}
