@@ -1,6 +1,7 @@
 
 一、主要描述
-	通过SqlSessionFactory创建一个SqlSession。SqlSession中主要包含Configuration、Executor、是否自动提交。
+	通过SqlSessionFactory创建一个SqlSession。SqlSessionFactory的openSqlSession()有多个重载，可以指定ExecutorType、TransactionIsolationLevel、autoCommit等等。
+	
 
 	
 	

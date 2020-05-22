@@ -25,7 +25,9 @@
 
 
 三、源码。
-
+#################################
+#			获取代理类			#
+#################################
 /**
  * 获取对应的Mapper.java的代理对象。
  */
@@ -427,8 +429,9 @@ protected void buildAllStatements() {
 
 
 
+
 ########################################
-#    2-2、CachingExecutor执行操作	   #
+#    2-2、CachingExecutor执行操作	   #					委派模式。
 ########################################
 
 /**
@@ -446,6 +449,39 @@ public <E> List<E> query(MappedStatement ms, Object parameterObject, RowBounds r
     return query(ms, parameterObject, rowBounds, resultHandler, key, boundSql);
 }
 
+
+/**
+ *
+ */
+location：MappedStatement
+public BoundSql getBoundSql(Object parameterObject) {
+	
+	/**
+	 * 获取BoundSql
+	 */
+	BoundSql boundSql = sqlSource.getBoundSql(parameterObject);
+	
+	List<ParameterMapping> parameterMappings = boundSql.getParameterMappings();
+	if (parameterMappings == null || parameterMappings.size() <= 0) {
+		boundSql = new BoundSql(configuration, boundSql.getSql(), parameterMap.getParameterMappings(), parameterObject);
+	}
+
+	for (ParameterMapping pm : boundSql.getParameterMappings()) {
+		String rmId = pm.getResultMapId();
+		
+		if (rmId != null) {
+			ResultMap rm = configuration.getResultMap(rmId);
+			if (rm != null) {
+				hasNestedResultMaps |= rm.hasNestedResultMaps();
+			}
+		}
+	}
+
+	return boundSql;
+}
+
+
+
 /**
  *
  */
@@ -456,7 +492,7 @@ public CacheKey createCacheKey(MappedStatement ms, Object parameterObject, RowBo
 
 
 /**
- *
+ * 创建缓存Key
  */
 location：BaseExecutor
 public CacheKey createCacheKey(MappedStatement ms, Object parameterObject, RowBounds rowBounds, BoundSql boundSql) {
@@ -469,6 +505,7 @@ public CacheKey createCacheKey(MappedStatement ms, Object parameterObject, RowBo
 	cacheKey.update(rowBounds.getOffset());
 	cacheKey.update(rowBounds.getLimit());
 	cacheKey.update(boundSql.getSql());
+	
 	List<ParameterMapping> parameterMappings = boundSql.getParameterMappings();
 	TypeHandlerRegistry typeHandlerRegistry = ms.getConfiguration().getTypeHandlerRegistry();
 	
@@ -493,13 +530,14 @@ public CacheKey createCacheKey(MappedStatement ms, Object parameterObject, RowBo
 	if (configuration.getEnvironment() != null) {
 		cacheKey.update(configuration.getEnvironment().getId());
 	}
+	
 	return cacheKey;
 }
 
 
 /**
- * tcm：TransactionalCacheManager
- * 
+ * 这里主要是进行缓存操作【二级缓存操作】。
+ * 如果没有命中缓存，会把查询操作委托给SimpleExecutor实例对象进行查询操作。
  */
 location：CachingExecutor
 public <E> List<E> query(MappedStatement ms, Object parameterObject, RowBounds rowBounds, ResultHandler resultHandler, CacheKey key, BoundSql boundSql)throws SQLException {
@@ -508,7 +546,9 @@ public <E> List<E> query(MappedStatement ms, Object parameterObject, RowBounds r
 	Cache cache = ms.getCache();
 	
     if (cache != null) {
-		
+		/**
+		 * 是否要求要刷新缓存。
+		 */
 		flushCacheIfRequired(ms);
 		
 		// 这个操作是否使用了缓存  并且resultHandler == null。默认resultHandler是等于null的。
@@ -516,14 +556,29 @@ public <E> List<E> query(MappedStatement ms, Object parameterObject, RowBounds r
 		
 			ensureNoOutParams(ms, parameterObject, boundSql);
 			
-			@SuppressWarnings("unchecked")
-			List<E> list = (List<E>) tcm.getObject(cache, key);
 			
-			// 如果没有就去SimpleExecutor去查询。
-			if (list == null) {
-				list = delegate.<E> query(ms, parameterObject, rowBounds, resultHandler, key, boundSql);
-				tcm.putObject(cache, key, list);
+			if (!dirty) {
+				
+				// 上锁
+				cache.getReadWriteLock().readLock().lock();
+				
+				try {
+				
+					// 从缓存中获取数据。有数据直接返回。
+					List<E> cachedList = (List<E>) cache.getObject(key);
+					if (cachedList != null) {
+						return cachedList;
+					}
+					
+				} finally {
+					// 释放锁
+					cache.getReadWriteLock().readLock().unlock();
+				}
 			}
+			
+			List<E> list = delegate.<E> query(ms, parameterObject, rowBounds, resultHandler, key, boundSql);
+			
+			tcm.putObject(cache, key, list);
 			
 			return list;
 		}
@@ -533,16 +588,21 @@ public <E> List<E> query(MappedStatement ms, Object parameterObject, RowBounds r
     return delegate.<E> query(ms, parameterObject, rowBounds, resultHandler, key, boundSql);
 }
 
+
 /**
- * isFlushCacheRequired：select都默认为false
+ * isFlushCacheRequired：select都默认为false。
+ *
+ * 判断是否要进行刷新，如果是update、insert操作这里返回就true。
  */
 location：CachingExecutor
 private void flushCacheIfRequired(MappedStatement ms) {
 	Cache cache = ms.getCache();
+	
 	if (cache != null && ms.isFlushCacheRequired()) {      
 		tcm.clear(cache);
 	}
 }
+
 
 /**
  * 
@@ -566,7 +626,7 @@ private void ensureNoOutParams(MappedStatement ms, BoundSql boundSql) {
 #		2-3、委托给SimpleExecutor	#
 #####################################
 /**
- *
+ * 
  */
 location：BaseExecutor
 public <E> List<E> query(MappedStatement ms, Object parameter, RowBounds rowBounds, ResultHandler resultHandler, CacheKey key, BoundSql boundSql) throws SQLException {
@@ -586,7 +646,7 @@ public <E> List<E> query(MappedStatement ms, Object parameter, RowBounds rowBoun
 		queryStack++;
 		
 		/**
-		 * 从本地缓存获取。
+		 * 从本地缓存获取。这就是【一级缓存】
 		 */
 		list = resultHandler == null ? (List<E>) localCache.getObject(key) : null;
 		
@@ -616,6 +676,46 @@ public <E> List<E> query(MappedStatement ms, Object parameter, RowBounds rowBoun
 	return list;
 }
 
+/**
+ * 刷新本地缓存。
+ * ######################################################################################
+ * #		缓存数据都是保存在Executor中。一个SqlSession内部维护一个Executor。			#
+ * #	二级缓存保存在MappedStatement，一个SQL操作对应一个MappedStatement				#
+ * # 	MappedStatement是被final修饰的并保存在Configuration里。所以只要是通				#
+ * #		过通过Configuration创建的SqlSession，同一ID对应的就是同一个MappedStatement  #
+ * ######################################################################################
+ */
+location：BaseExecutor
+public void clearLocalCache() {
+	if (!closed) {
+		localCache.clear();
+		localOutputParameterCache.clear();
+	}
+}
+
+/**
+ *
+ */
+location：BaseExecutor
+private void handleLocallyCachedOutputParameters(MappedStatement ms, CacheKey key, Object parameter, BoundSql boundSql) {
+	if (ms.getStatementType() == StatementType.CALLABLE) {
+		final Object cachedParameter = localOutputParameterCache.getObject(key);
+		
+		if (cachedParameter != null && parameter != null) {
+			final MetaObject metaCachedParameter = configuration.newMetaObject(cachedParameter);
+			final MetaObject metaParameter = configuration.newMetaObject(parameter);
+			for (ParameterMapping parameterMapping : boundSql.getParameterMappings()) {
+				if (parameterMapping.getMode() != ParameterMode.IN) {
+					final String parameterName = parameterMapping.getProperty();
+					final Object cachedValue = metaCachedParameter.getValue(parameterName);
+					metaParameter.setValue(parameterName, cachedValue);
+				}
+			}
+		}
+	}
+}
+
+
 
 /**
  *
@@ -626,6 +726,7 @@ private <E> List<E> queryFromDatabase(MappedStatement ms, Object parameter, RowB
 	
 	// 添加本地缓存，但是缓存值为EXECUTION_PLACEHOLDER
 	localCache.putObject(key, EXECUTION_PLACEHOLDER);
+	
 	try {
 		list = doQuery(ms, parameter, rowBounds, resultHandler, boundSql);
 	} finally {
@@ -660,6 +761,7 @@ public <E> List<E> doQuery(MappedStatement ms, Object parameter, RowBounds rowBo
 		 * 这里创建了Connection，
 		 */ 
 		stmt = prepareStatement(handler, ms.getStatementLog());
+		
 		return handler.query(stmt, resultHandler);
 	} finally {
 		closeStatement(stmt);
@@ -667,7 +769,7 @@ public <E> List<E> doQuery(MappedStatement ms, Object parameter, RowBounds rowBo
 }
 
 /**
- *
+ * 创建StatementHandler的实例对象。RoutingStatementHandler也是使用委托的机制。
  */
 location：Configuration
 public StatementHandler newStatementHandler(Executor executor, MappedStatement mappedStatement, Object parameterObject, RowBounds rowBounds, ResultHandler resultHandler, BoundSql boundSql) {
@@ -676,8 +778,9 @@ public StatementHandler newStatementHandler(Executor executor, MappedStatement m
 	return statementHandler;
 }
 
+
 /**
- *
+ * 根据MappedStatement的类型，获取对应的实际操作StatementHandler。
  */
 location：RoutingStatementHandler
 public RoutingStatementHandler(Executor executor, MappedStatement ms, Object parameter, RowBounds rowBounds, ResultHandler resultHandler, BoundSql boundSql) {
@@ -700,17 +803,18 @@ public RoutingStatementHandler(Executor executor, MappedStatement ms, Object par
 	}
 }
 
+
 /**
  *
  */
-location：
-InterceptorChain
+location：InterceptorChain
 public Object pluginAll(Object target) {
 	for (Interceptor interceptor : interceptors) {
 		target = interceptor.plugin(target);
 	}
 	return target;
 }
+
 
 
 /**
@@ -757,6 +861,7 @@ public Connection getConnection() throws SQLException {
 	return connection;
 }
 
+
 /**
  *
  */
@@ -769,10 +874,91 @@ protected void openConnection() throws SQLException {
 	
 	if (level != null) {
 		/**
-		 * 设置数据
+		 * 设置回话的事务级别。
 		 */
 		connection.setTransactionIsolation(level.getLevel());
 	}
 	
 	setDesiredAutoCommit(autoCommit);
+}
+
+
+/**
+ * ConnectionImpl extends JdbcConnection。这个方法是mysql-connector.jar里面的
+ * 设置这次回话的事务等级。
+ */
+location：ConnectionImpl
+public void setTransactionIsolation(int level) throws SQLException {
+	
+	synchronized (getConnectionMutex()) {
+		checkClosed();
+
+		String sql = null;
+
+		boolean shouldSendSet = false;
+
+		if (this.propertySet.getBooleanProperty(PropertyKey.alwaysSendSetIsolation).getValue()) {
+			shouldSendSet = true;
+		} else {
+			if (level != this.isolationLevel) {
+				shouldSendSet = true;
+			}
+		}
+
+		if (this.useLocalSessionState.getValue()) {
+			shouldSendSet = this.isolationLevel != level;
+		}
+
+		if (shouldSendSet) {
+			switch (level) {
+				case java.sql.Connection.TRANSACTION_NONE:
+					throw SQLError.createSQLException(Messages.getString("Connection.24"), getExceptionInterceptor());
+
+				case java.sql.Connection.TRANSACTION_READ_COMMITTED:
+					sql = "SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED";
+
+					break;
+
+				case java.sql.Connection.TRANSACTION_READ_UNCOMMITTED:
+					sql = "SET SESSION TRANSACTION ISOLATION LEVEL READ UNCOMMITTED";
+
+					break;
+
+				case java.sql.Connection.TRANSACTION_REPEATABLE_READ:
+					sql = "SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ";
+
+					break;
+
+				case java.sql.Connection.TRANSACTION_SERIALIZABLE:
+					sql = "SET SESSION TRANSACTION ISOLATION LEVEL SERIALIZABLE";
+
+					break;
+
+				default:
+					throw SQLError.createSQLException(Messages.getString("Connection.25", new Object[] { level }), MysqlErrorNumbers.SQL_STATE_DRIVER_NOT_CAPABLE, getExceptionInterceptor());
+			}
+
+			this.session.execSQL(null, sql, -1, null, false, this.nullStatementResultSetFactory, this.database, null, false);
+
+			this.isolationLevel = level;
+		}
+	}
+}
+
+/**
+ * 设置时候自动提交
+ */
+location：JdbcTransaction
+protected void setDesiredAutoCommit(boolean desiredAutoCommit) {
+	try {
+		if (connection.getAutoCommit() != desiredAutoCommit) {
+			if (log.isDebugEnabled()) {
+				log.debug("Setting autocommit to " + desiredAutoCommit + " on JDBC Connection [" + connection + "]");
+			}
+			
+			connection.setAutoCommit(desiredAutoCommit);
+		}
+	} catch (SQLException e) {
+		throw new TransactionException("Error configuring AutoCommit.  " + "Your driver may not support getAutoCommit() or setAutoCommit(). " + "Requested setting: " + desiredAutoCommit + ".  Cause: " + e, e);
+	}
 }
