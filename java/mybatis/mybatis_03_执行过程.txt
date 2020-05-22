@@ -1,13 +1,30 @@
-通过SqlSession获取Mapper的代理类，然后通过代理类执行具体某一个方法执行。
-调用过程。
+
+一、总结
+	1)、调用过程。
+		1、创建Mapper.java接口的代理对象。MapperProxy这个类实现了InvocationHandler接口。所以操作都是调用MapperProxy类的invoke()方法。
+
+二、实例
+
+	1、测试方法。
+		public static void secondTest() {
+			// 01、加载config.xml。这里mapperConfiguration.xml就是config.xml。
+			InputStream inputStream = User.class.getClassLoader().getResourceAsStream("mapperConfiguration.xml");
+			Reader reader = new InputStreamReader(inputStream);
+
+			// 02、解析对应的config.xml文件。获取SqlSessionFactory，并通过SqlSessionFactory获取SqlSession。
+			// XMLConfigBuilder是解析config.xml文件的类。
+			SqlSessionFactory sqlSessionFactory = new SqlSessionFactoryBuilder().build(reader);
+			SqlSession sqlSession = sqlSessionFactory.openSession();
+
+			// 03、调用SqlSession中获取接口的代理，直接通过代理去操作数据库。这个UserMapper是一个代理类，UserMapper本身就是一个接口，不可能有实例对象。
+			UserMapper userMapper = sqlSession.getMapper(UserMapper.class);
+			System.out.println(userMapper.selectUserBySeq(1).getUserName());
+			System.out.println(userMapper.getClass());
+		}
 
 
 
-// 这个StudentMapper是一个代理类，StudentMapper本身就是一个接口，不可能有实例对象
-// 所以这个StudentMapper是一个代理类。
-StudentMapper studentMapper = sqlSession.getMapper(StudentMapper.class);
-
-
+三、源码。
 
 /**
  * 获取对应的Mapper.java的代理对象。
@@ -91,12 +108,13 @@ protected T newInstance(MapperProxy<T> mapperProxy) {
 location：MapperProxy
 public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
 	try {
+		/**
+		 * 一般不会走入下面两个if。
+		 */
 		if (Object.class.equals(method.getDeclaringClass())) {
 			return method.invoke(this, args);
-		}
-
-		if (this.isDefaultMethod(method)) {
-			return this.invokeDefaultMethod(proxy, method, args);
+		} else if (isDefaultMethod(method)) {
+			return invokeDefaultMethod(proxy, method, args);
 		}
 	} catch (Throwable var5) {
 		throw ExceptionUtil.unwrapThrowable(var5);
@@ -110,7 +128,12 @@ public Object invoke(Object proxy, Method method, Object[] args) throws Throwabl
 	
 	// 如果缓存中有对应MapperMethod，就直接从缓存中取，如果没有新建一个MapperMethod，放入缓存中。
 	MapperMethod mapperMethod = this.cachedMapperMethod(method);
-		
+	
+	/**
+	 * ##############################
+	 * #  		2-1、执行过程		#
+	 * ##############################
+	 */
 	return mapperMethod.execute(this.sqlSession, args);
 }
 
@@ -125,7 +148,6 @@ private MapperMethod cachedMapperMethod(Method method) {
 	if (mapperMethod == null) {
 		/**
 		 * 新建一个MapperMethod对象，并放入缓存中。
-		 * 一个方法的创建MapperMethod。
 		 */
 		mapperMethod = new MapperMethod(this.mapperInterface, method, this.sqlSession.getConfiguration());
 		this.methodCache.put(method, mapperMethod);
@@ -165,7 +187,7 @@ public SqlCommand(Configuration configuration, Class<?> mapperInterface, Method 
 	final Class<?> declaringClass = method.getDeclaringClass();
 	
 	/**
-	 * 获取给定mapper.java，给定方法对应的MappedStatement。
+	 * 获取给定mapper.java和给定方法对应的MappedStatement。
 	 */
 	MappedStatement ms = resolveMappedStatement(mapperInterface, methodName, declaringClass, configuration);
 	
@@ -223,7 +245,9 @@ private MappedStatement resolveMappedStatement(Class<?> mapperInterface, String 
 
 
 
-
+* ##############################
+* #  		2-1、执行过程	   #
+* ##############################
 /**
  *
  */
@@ -233,9 +257,7 @@ public Object execute(SqlSession sqlSession, Object[] args) {
 	Object result;
 	
 	/**
-	 * 最终调用的还是sqlSession方法。
-	 *
-	 *
+	 * 最终调用的还是通过SqlSession方法进行操作。这里只是坐了归类。
 	 */
 	switch(this.command.getType()) {
 	
@@ -339,7 +361,7 @@ public <E> List<E> selectList(String statement, Object parameter, RowBounds rowB
 		
 		/**
 		 * ########################################
-		 * #     执行器执行具体操作				  #
+		 * #     执行器执行具体操作				  #             这里会先走插件，为啥呢？？怎么实现的。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。
 		 * ########################################
 		 */
 		var5 = this.executor.query(ms, this.wrapCollection(parameter), rowBounds, Executor.NO_RESULT_HANDLER);
@@ -406,7 +428,7 @@ protected void buildAllStatements() {
 
 
 ########################################
-#     执行器执行具体操作			   #
+#    2-2、CachingExecutor执行操作	   #
 ########################################
 
 /**
@@ -424,6 +446,55 @@ public <E> List<E> query(MappedStatement ms, Object parameterObject, RowBounds r
     return query(ms, parameterObject, rowBounds, resultHandler, key, boundSql);
 }
 
+/**
+ *
+ */
+location：CachingExecutor
+public CacheKey createCacheKey(MappedStatement ms, Object parameterObject, RowBounds rowBounds, BoundSql boundSql) {
+    return delegate.createCacheKey(ms, parameterObject, rowBounds, boundSql);
+}
+
+
+/**
+ *
+ */
+location：BaseExecutor
+public CacheKey createCacheKey(MappedStatement ms, Object parameterObject, RowBounds rowBounds, BoundSql boundSql) {
+	if (closed) {
+		throw new ExecutorException("Executor was closed.");
+	}
+	
+	CacheKey cacheKey = new CacheKey();
+	cacheKey.update(ms.getId());
+	cacheKey.update(rowBounds.getOffset());
+	cacheKey.update(rowBounds.getLimit());
+	cacheKey.update(boundSql.getSql());
+	List<ParameterMapping> parameterMappings = boundSql.getParameterMappings();
+	TypeHandlerRegistry typeHandlerRegistry = ms.getConfiguration().getTypeHandlerRegistry();
+	
+	for (ParameterMapping parameterMapping : parameterMappings) {
+		if (parameterMapping.getMode() != ParameterMode.OUT) {
+			Object value;
+			String propertyName = parameterMapping.getProperty();
+			
+			if (boundSql.hasAdditionalParameter(propertyName)) {
+				value = boundSql.getAdditionalParameter(propertyName);
+			} else if (parameterObject == null) {
+				value = null;
+			} else if (typeHandlerRegistry.hasTypeHandler(parameterObject.getClass())) {
+				value = parameterObject;
+			} else {
+				MetaObject metaObject = configuration.newMetaObject(parameterObject);
+				value = metaObject.getValue(propertyName);
+			}
+			cacheKey.update(value);
+		}
+	}
+	if (configuration.getEnvironment() != null) {
+		cacheKey.update(configuration.getEnvironment().getId());
+	}
+	return cacheKey;
+}
 
 
 /**
@@ -491,9 +562,9 @@ private void ensureNoOutParams(MappedStatement ms, BoundSql boundSql) {
 
 
 
-#################################
-#		委托给SimpleExecutor	#
-#################################
+#####################################
+#		2-3、委托给SimpleExecutor	#
+#####################################
 /**
  *
  */
@@ -594,6 +665,53 @@ public <E> List<E> doQuery(MappedStatement ms, Object parameter, RowBounds rowBo
 		closeStatement(stmt);
 	}
 }
+
+/**
+ *
+ */
+location：Configuration
+public StatementHandler newStatementHandler(Executor executor, MappedStatement mappedStatement, Object parameterObject, RowBounds rowBounds, ResultHandler resultHandler, BoundSql boundSql) {
+	StatementHandler statementHandler = new RoutingStatementHandler(executor, mappedStatement, parameterObject, rowBounds, resultHandler, boundSql);
+	statementHandler = (StatementHandler) interceptorChain.pluginAll(statementHandler);
+	return statementHandler;
+}
+
+/**
+ *
+ */
+location：RoutingStatementHandler
+public RoutingStatementHandler(Executor executor, MappedStatement ms, Object parameter, RowBounds rowBounds, ResultHandler resultHandler, BoundSql boundSql) {
+
+	switch (ms.getStatementType()) {
+		case STATEMENT:
+			delegate = new SimpleStatementHandler(executor, ms, parameter, rowBounds, resultHandler, boundSql);
+			break;
+	
+		case PREPARED:
+			delegate = new PreparedStatementHandler(executor, ms, parameter, rowBounds, resultHandler, boundSql);
+			break;
+	
+		case CALLABLE:
+			delegate = new CallableStatementHandler(executor, ms, parameter, rowBounds, resultHandler, boundSql);
+			break;
+	
+		default:
+			throw new ExecutorException("Unknown statement type: " + ms.getStatementType());
+	}
+}
+
+/**
+ *
+ */
+location：
+InterceptorChain
+public Object pluginAll(Object target) {
+	for (Interceptor interceptor : interceptors) {
+		target = interceptor.plugin(target);
+	}
+	return target;
+}
+
 
 /**
  *

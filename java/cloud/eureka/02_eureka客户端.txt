@@ -11,10 +11,9 @@
 	
 二、流程
 	1、初始化流程。
-		首先在spring-cloud-netflix-eureka-client.jar包中spring.factories文件中配置了org.springframework.boot.autoconfigure.
-	EnableAutoConfiguration，其中配置EurekaClientAutoConfiguration这个类。在EurekaClientAutoConfiguration这个类会注册EurekaClient
-	类，EurekaClient继承DiscoveryClient，在DiscoveryClient这个类中会创建一个ApplicationInfoManager.StatusChangeListener对象，
-	这个对象会调用InstanceInfoReplicator的onDemandUpdate()方法。
+		首先在spring-cloud-netflix-eureka-client.jar包中spring.factories文件中配置了org.springframework.boot.autoconfigure.EnableAutoConfiguration，其中配置EurekaClientAutoConfiguration这个类。
+		在EurekaClientAutoConfiguration这个类会注册EurekaClient类，EurekaClient继承DiscoveryClient，在DiscoveryClient这个类中会创建一个ApplicationInfoManager.StatusChangeListener对象，这个对象
+		会调用InstanceInfoReplicator的onDemandUpdate()方法。
 	
 	2、
 		EurekaAutoServiceRegistration这个类实现了SmartLifecycle接口。在调用EurekaAutoServiceRegistration方法中会调用之前注册
@@ -24,15 +23,14 @@
 	EurekaAutoServiceRegistration
 
 /**
- *
+ * EurekaClientAutoConfiguration配置类，注入EurekaClient实例Bean。
  */
 location：EurekaClientAutoConfiguration
 @Bean(destroyMethod = "shutdown")
 @ConditionalOnMissingBean(value = EurekaClient.class, search = SearchStrategy.CURRENT)
 @org.springframework.cloud.context.config.annotation.RefreshScope
 @Lazy
-public EurekaClient eurekaClient(ApplicationInfoManager manager, EurekaClientConfig config, EurekaInstanceConfig instance,
-		@Autowired(required = false) HealthCheckHandler healthCheckHandler) {
+public EurekaClient eurekaClient(ApplicationInfoManager manager, EurekaClientConfig config, EurekaInstanceConfig instance, @Autowired(required = false) HealthCheckHandler healthCheckHandler) {
 
 	ApplicationInfoManager appManager;
 	
@@ -49,19 +47,19 @@ public EurekaClient eurekaClient(ApplicationInfoManager manager, EurekaClientCon
 	return cloudEurekaClient;
 }
 
+
 /**
  *
  */
 location：CloudEurekaClient
-public CloudEurekaClient(ApplicationInfoManager applicationInfoManager, EurekaClientConfig config, AbstractDiscoveryClientOptionalArgs<?> args,
-		ApplicationEventPublisher publisher) {
-		
+public CloudEurekaClient(ApplicationInfoManager applicationInfoManager, EurekaClientConfig config, AbstractDiscoveryClientOptionalArgs<?> args,  ApplicationEventPublisher publisher) {
 	super(applicationInfoManager, config, args);
 	this.applicationInfoManager = applicationInfoManager;
 	this.publisher = publisher;
 	this.eurekaTransportField = ReflectionUtils.findField(DiscoveryClient.class, "eurekaTransport");
 	ReflectionUtils.makeAccessible(this.eurekaTransportField);
 }
+
 
 /**
  *
@@ -99,6 +97,7 @@ public DiscoveryClient(ApplicationInfoManager applicationInfoManager, final Eure
 		}
 	});
 }
+
 
 /**
  *
@@ -252,9 +251,8 @@ private void initScheduledTasks() {
 		int registryFetchIntervalSeconds = clientConfig.getRegistryFetchIntervalSeconds();
 		int expBackOffBound = clientConfig.getCacheRefreshExecutorExponentialBackOffBound();
 		
-		// 【【【缓存刷线】】】
-		scheduler.schedule(new TimedSupervisorTask("cacheRefresh", scheduler, cacheRefreshExecutor, registryFetchIntervalSeconds,
-						TimeUnit.SECONDS, expBackOffBound, new CacheRefreshThread()), registryFetchIntervalSeconds, TimeUnit.SECONDS);
+		// 【【【缓存刷新】】】
+		scheduler.schedule(new TimedSupervisorTask("cacheRefresh", scheduler, cacheRefreshExecutor, registryFetchIntervalSeconds, TimeUnit.SECONDS, expBackOffBound, new CacheRefreshThread()), registryFetchIntervalSeconds, TimeUnit.SECONDS);
 	}
 
 	if (clientConfig.shouldRegisterWithEureka()) {
@@ -263,8 +261,7 @@ private void initScheduledTasks() {
 		logger.info("Starting heartbeat executor: " + "renew interval is: {}", renewalIntervalInSecs);
 
 		// 【【【续约，心跳】】】
-		scheduler.schedule(new TimedSupervisorTask("heartbeat", scheduler, heartbeatExecutor,
-						renewalIntervalInSecs, TimeUnit.SECONDS, expBackOffBound, new HeartbeatThread()), renewalIntervalInSecs, TimeUnit.SECONDS);
+		scheduler.schedule(new TimedSupervisorTask("heartbeat", scheduler, heartbeatExecutor, renewalIntervalInSecs, TimeUnit.SECONDS, expBackOffBound, new HeartbeatThread()), renewalIntervalInSecs, TimeUnit.SECONDS);
 
 		// instanceInfoReplicator内部会调用【注册】
 		instanceInfoReplicator = new InstanceInfoReplicator(this, instanceInfo, clientConfig.getInstanceInfoReplicationIntervalSeconds(), 2);

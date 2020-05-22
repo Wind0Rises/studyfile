@@ -1,5 +1,6 @@
 1、jdk的动态代理与cglib（code generate）哪个速度快。
 	在jdk8之前，cglib的速度比jdk的速度快；在jdk8及其之后版本JDK动态代理的速度已经比CGLib动态代理的速度快很多。
+
 	
 2、cglib代理的原理？
 	cglib会产生三个class文件，其中一个class继承被代理类并实现Factory对象；另外两个继承FastClass类，其中一个是代理的FastClass，一个是被代理的FastClass。

@@ -1,10 +1,139 @@
-* JDK动态代理类会生成：Object的toString()、hashCode()、equals()方法，和被代理接口的方法。
-* JDK动态代理类都会基础java.lang.reflect.Proxy类，实现被代理类实现的接口。
-* JDK动态代理类的调用方法：都是使用super.h.invoke(Object proxy, Method method, Object[] args)方法，
-						   super.h是一个InvokeHandler，用于分派方法调用的，最终调用的你自己实现的InvokeHandler对象。
-* 生成的代理类，默认生成一个参数为InvocationHandler的构造函数，这个参数调用父类的构造函数，并设置InvocationHandler。
+
+一、解析
+ 	1、JDK动态代理类会生成：Object的toString()、hashCode()、equals()方法，和被代理接口的方法。
+	2、JDK动态代理类都会基础java.lang.reflect.Proxy类，实现被代理类实现的接口。即代理类 extends Proxy implement CustomInterface
+	3、JDK动态代理类的调用方法：都是使用super.h.invoke(Object proxy, Method method, Object[] args)方法，
+						        super.h是一个InvokeHandler，用于分派方法调用的，最终调用的你自己实现的InvokeHandler对象。
+							    生成的代理类，默认生成一个参数为InvocationHandler的构造函数，这个参数调用父类的构造函数，并设置InvocationHandler。
 
 
+二、实例
+	1、接口
+		public interface ProxyInterface{
+			public void test();
+		}
+		
+	2、实现类
+		public class ProxyInterfaceImpl implements ProxyInterface {
+			@Override
+			public void test() {
+				System.out.println("被代理对象的实现类的方法被调用。");
+			}
+		}
+	
+	3、调用类。
+		public class Agency implements InvocationHandler {
+
+			private Object target;
+
+			public Agency(Object target) {
+				this.target = target;
+			}
+
+			public <T> T getProxy() {
+				return (T) Proxy.newProxyInstance(target.getClass().getClassLoader(), target.getClass().getInterfaces(), this);
+			}
+
+			@Override
+			public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+				System.out.println("###### 代理对象调用被代理对象  开始前  ######################");
+				System.out.println(target + "    " + method.getName());
+				Object result = method.invoke(target, args);
+				System.out.println("###### 代理对象调用被代理对象  结束后  ######################");
+				return result;
+			}
+
+		}
+		
+	4、测试类
+		public class Test {
+			public static void main(String[] args) {
+				ProxyInterface proxyInterface = new ProxyInterfaceImpl();
+				
+				// public static Object newProxyInstance(ClassLoader loader, Class<?>[] interfaces, InvocationHandler h) throws IllegalArgumentException;
+				// 注意new Agency(proxyInterface)：这个proxyInterface就是InvocationHandler实现类要操作的对象。
+				ProxyInterface proxyInterface1 = (ProxyInterface) Proxy.newProxyInstance(proxyInterface.getClass().getClassLoader(),  proxyInterface.getClass().getInterfaces(), new Agency(proxyInterface));
+				System.out.println(proxyInterface);
+				proxyInterface1.test();
+			}
+			
+		}
+
+	2、反编译
+		public final class $Proxy0 extends Proxy implements ProxyInterface {
+
+			private static Method m1;
+			private static Method m3;
+			private static Method m2;
+			private static Method m0;
+
+			static {
+				try {
+					m1 = Class.forName("java.lang.Object").getMethod("equals", new Class[]{Class.forName("java.lang.Object")});
+					m3 = Class.forName("com.liu.proxy.test.ProxyInterface").getMethod("test", new Class[0]);
+					m2 = Class.forName("java.lang.Object").getMethod("toString", new Class[0]);
+					m0 = Class.forName("java.lang.Object").getMethod("hashCode", new Class[0]);
+				} catch (NoSuchMethodException var2) {
+					throw new NoSuchMethodError(var2.getMessage());
+				} catch (ClassNotFoundException var3) {
+					throw new NoClassDefFoundError(var3.getMessage());
+				}
+			}
+
+			/**
+			 * 构造函数。
+			 */ 
+			public $Proxy0(InvocationHandler var1) {
+				super(var1);
+			}
+			
+			/** 
+			 * ######################################################################################
+			 * #		1、最终是调用super.h的invoke(..)方法                                        #
+			 * #     	2、这个super.h就是构建代理时传入的InvocationHandler实现类实例               #
+			 * ######################################################################################
+			 */
+			public final void test()  throws UndeclaredThrowableException {
+				try {
+					super.h.invoke(this, m3, (Object[])null);
+				} catch (RuntimeException | Error var2) {
+					throw var2;
+				} catch (Throwable var3) {
+					throw new UndeclaredThrowableException(var3);
+				}	
+			}
+
+			public final boolean equals(Object var1)  throws UndeclaredThrowableException {
+				try {
+					return ((Boolean)super.h.invoke(this, m1, new Object[]{var1})).booleanValue();
+				} catch (RuntimeException | Error var3) {
+					throw var3;
+				} catch (Throwable var4) {
+					throw new UndeclaredThrowableException(var4);
+				}
+			}
+
+			
+			public final String toString()  throws UndeclaredThrowableException {
+				try {
+					return (String)super.h.invoke(this, m2, (Object[])null);
+				} catch (RuntimeException | Error var2) {
+					throw var2;
+				} catch (Throwable var3) {
+					throw new UndeclaredThrowableException(var3);
+				}
+			}
+
+			public final int hashCode() throws UndeclaredThrowableException {
+				try {
+					return ((Integer)super.h.invoke(this, m0, (Object[])null)).intValue();
+				} catch (RuntimeException | Error var2) {
+					throw var2;
+				} catch (Throwable var3) {
+					throw new UndeclaredThrowableException(var3);
+				}
+			}	
+		}
 
 /**
  * 返回指定接口的代理类的实例，该实例将方法调用dispatches(分派)到指定的invoke handler程序。
@@ -24,8 +153,9 @@ public static Object newProxyInstance(ClassLoader loader, Class<?>[] interfaces,
 		checkProxyAccess(Reflection.getCallerClass(), loader, intfs);
 	}
 
-	/*
-	 * 查找或者生成指定的代理类。【【【重要】】】
+	/* ####################################################################
+	 * #			查找或者生成指定的代理类。【【【重要】】】			  #	
+	 * ####################################################################
 	 */
 	Class<?> cl = getProxyClass0(loader, intfs);
 
@@ -52,7 +182,7 @@ public static Object newProxyInstance(ClassLoader loader, Class<?>[] interfaces,
 			});
 		}
 		
-		// 生成代理类的实例对象。
+		// 生成代理类的实例对象。注意生成的代理对象的构造函数有一个InvocationHandler参数。
 		return cons.newInstance(new Object[]{h});
 		
 	} catch (IllegalAccessException|InstantiationException e) {
@@ -457,6 +587,12 @@ private byte[] generateClassFile() {
 		}
 	}
 }
+
+
+
+
+
+
 
 
 
