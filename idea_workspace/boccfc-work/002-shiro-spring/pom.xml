@@ -24,7 +24,7 @@
         <ch.qos.logback>1.2.3</ch.qos.logback>
 
         <!-- jackson -->
-        <com.fasterxml.jackson>2.9.3</com.fasterxml.jackson>
+        <com.fasterxml.jackson>2.11.0</com.fasterxml.jackson>
         <net.sf.josn-lib>2.4</net.sf.josn-lib>
         <jackson-annotations>2.9.0</jackson-annotations>
 
