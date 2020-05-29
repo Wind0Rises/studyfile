@@ -1,3 +1,8 @@
+############################################################################################################################################################
+#################################################   				    Spring-4.3.12		 		########################################################
+############################################################################################################################################################
+
+
 ###################  XmlWebApplicationContext  ##################
 
 DefaultResourceLoader
@@ -20,14 +25,13 @@ public void refresh() throws BeansException, IllegalStateException {
 	
 		// 第一步：刷新准备工作 
 		prepareRefresh();
-		
-		/**
-		 * 告诉子类刷新内部Bean Factory，这里有加载BeanDefinition的全过程，这个步骤完成以后，可以通过BeanFactory获取保存在其中的BeanDefinition集合。
-		 * 
-		 */
+
+		// 第二步：告诉子类刷新内部Bean Factory,这里有加载BeanDefinition的全过程，这个步骤完成以后，
+		// 获取到的BeanFactory中有保存着加载的BeanDefinition集合。
+		// ☆☆☆☆☆  很重要 ☆☆☆☆☆
 		ConfigurableListableBeanFactory beanFactory = obtainFreshBeanFactory();
 
-		
+		// Prepare the bean factory for use in this context.
 		prepareBeanFactory(beanFactory);
 
 		try {

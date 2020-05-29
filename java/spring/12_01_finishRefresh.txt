@@ -1,0 +1,209 @@
+refresh()方法的第十二步骤。
+	finishRefresh():
+
+【问题】
+	1、spring是如何控制各个主键的生命周期的？？
+	2、beanFactory.registerSingleton()这个方法到底做了什么。
+	
+
+location：AbstractApplicationContext
+protected void finishRefresh() {
+	// Initialize lifecycle processor for this context.
+	initLifecycleProcessor();
+
+	// Propagate refresh to lifecycle processor first.
+	getLifecycleProcessor().onRefresh();
+
+	// Publish the final event.
+	publishEvent(new ContextRefreshedEvent(this));
+
+	// Participate in LiveBeansView MBean, if active.
+	LiveBeansView.registerApplicationContext(this);
+}
+
+#############################   第一步  ####################################
+
+location：AbstractApplicationContext
+protected void initLifecycleProcessor() {
+	// 获取BeanFactory
+	ConfigurableListableBeanFactory beanFactory = getBeanFactory();
+	
+	// 判断BeanFactory中是否有lifecycleProcessor对应的Bean
+	if (beanFactory.containsLocalBean(LIFECYCLE_PROCESSOR_BEAN_NAME)) {
+	
+		// 把LifecycleProcessor【控制什么周期的】赋值给ApplicationContext
+		this.lifecycleProcessor = beanFactory.getBean(LIFECYCLE_PROCESSOR_BEAN_NAME, LifecycleProcessor.class);
+		if (logger.isDebugEnabled()) {
+			logger.debug("Using LifecycleProcessor [" + this.lifecycleProcessor + "]");
+		}
+		
+	// 如果没有lifecycleProcessor对应的bean的话，默认实例化一个DefaultLifecycleProcessor对象。
+	} else {
+	
+		DefaultLifecycleProcessor defaultProcessor = new DefaultLifecycleProcessor();
+		defaultProcessor.setBeanFactory(beanFactory);
+		
+		// 把LifecycleProcessor【控制生命周期的】赋值给ApplicationContext
+		this.lifecycleProcessor = defaultProcessor;
+		
+		// 注册LifecycleProcessor  Bean
+		beanFactory.registerSingleton(LIFECYCLE_PROCESSOR_BEAN_NAME, this.lifecycleProcessor);
+		if (logger.isDebugEnabled()) {
+			logger.debug("Unable to locate LifecycleProcessor with name '" + LIFECYCLE_PROCESSOR_BEAN_NAME + "': using default [" + this.lifecycleProcessor + "]");
+		}
+	}
+}
+
+
+#############################   第二步  ####################################
+
+// 获取第一步设置到ApplicationContext  lifecycleProcessor属性的值。
+location：AbstractApplicationContext
+LifecycleProcessor getLifecycleProcessor() throws IllegalStateException {
+	if (this.lifecycleProcessor == null) {
+		throw new IllegalStateException("LifecycleProcessor not initialized - " + "call 'refresh' before invoking lifecycle methods via the context: " + this);
+	}
+	return this.lifecycleProcessor;
+}
+
+// 开始刷新过程。
+location：DefaultLifecycleProcessor
+public void onRefresh() {
+	startBeans(true);
+	this.running = true;
+}
+
+
+//
+private void startBeans(boolean autoStartupOnly) {
+	// 获取BeanFactory中符合条件的Lifecycle。
+	Map<String, Lifecycle> lifecycleBeans = getLifecycleBeans();
+	Map<Integer, LifecycleGroup> phases = new HashMap<Integer, LifecycleGroup>();
+	
+	// 遍历所有获取到的Lifecycle集合。
+	for (Map.Entry<String, ? extends Lifecycle> entry : lifecycleBeans.entrySet()) {
+		Lifecycle bean = entry.getValue();
+		
+		// autoStartupOnly默认传true。
+		if (!autoStartupOnly || (bean instanceof SmartLifecycle && ((SmartLifecycle) bean).isAutoStartup())) {
+			int phase = getPhase(bean);
+			
+			LifecycleGroup group = phases.get(phase);
+			
+			if (group == null) {
+				group = new LifecycleGroup(phase, this.timeoutPerShutdownPhase, lifecycleBeans, autoStartupOnly);
+				phases.put(phase, group);
+			}
+			group.add(entry.getKey(), bean);
+		}
+	}
+	
+	if (!phases.isEmpty()) {
+		List<Integer> keys = new ArrayList<Integer>(phases.keySet());
+		Collections.sort(keys);
+		for (Integer key : keys) {
+			// 开始操作。
+			phases.get(key).start();
+		}
+	}
+}
+
+protected Map<String, Lifecycle> getLifecycleBeans() {
+	Map<String, Lifecycle> beans = new LinkedHashMap<String, Lifecycle>();
+	
+	// 获取BeanFactory中Lifecycle对应的所有Bean
+	String[] beanNames = this.beanFactory.getBeanNamesForType(Lifecycle.class, false, false);
+	
+	for (String beanName : beanNames) {
+		// 处理一下名称。
+		String beanNameToRegister = BeanFactoryUtils.transformedBeanName(beanName);
+		
+		// 判断Bean是否是FactoryBean子类
+		boolean isFactoryBean = this.beanFactory.isFactoryBean(beanNameToRegister);
+		
+		String beanNameToCheck = (isFactoryBean ? BeanFactory.FACTORY_BEAN_PREFIX + beanName : beanName);
+		if ((this.beanFactory.containsSingleton(beanNameToRegister) && (!isFactoryBean || Lifecycle.class.isAssignableFrom(this.beanFactory.getType(beanNameToCheck)))) || SmartLifecycle.class.isAssignableFrom(this.beanFactory.getType(beanNameToCheck))) {
+			// 获取实例对象。
+			Lifecycle bean = this.beanFactory.getBean(beanNameToCheck, Lifecycle.class);
+			
+			if (bean != this) {
+				beans.put(beanNameToRegister, bean);
+			}
+		}
+	}
+	return beans;
+}
+
+
+#############################   第三步  ####################################
+
+location：AbstractApplicationContext
+public void publishEvent(ApplicationEvent event) {
+	publishEvent(event, null);
+}
+
+
+protected void publishEvent(Object event, ResolvableType eventType) {
+	Assert.notNull(event, "Event must not be null");
+	
+	if (logger.isTraceEnabled()) {
+		logger.trace("Publishing event in " + getDisplayName() + ": " + event);
+	}
+
+	// Decorate event as an ApplicationEvent if necessary
+	ApplicationEvent applicationEvent;
+	if (event instanceof ApplicationEvent) {
+		applicationEvent = (ApplicationEvent) event;
+	} else {
+		applicationEvent = new PayloadApplicationEvent<Object>(this, event);
+		if (eventType == null) {
+			eventType = ((PayloadApplicationEvent)applicationEvent).getResolvableType();
+		}
+	}
+
+	// Multicast right now if possible - or lazily once the multicaster is initialized
+	if (this.earlyApplicationEvents != null) {
+		this.earlyApplicationEvents.add(applicationEvent);
+	} else {
+		getApplicationEventMulticaster().multicastEvent(applicationEvent, eventType);
+	}
+
+	// Publish event via parent context as well...
+	if (this.parent != null) {
+		if (this.parent instanceof AbstractApplicationContext) {
+			((AbstractApplicationContext) this.parent).publishEvent(event, eventType);
+		} else {
+			this.parent.publishEvent(event);
+		}
+	}
+}
+
+#############################   第四步  ####################################
+
+static void registerApplicationContext(ConfigurableApplicationContext applicationContext) {
+
+	String mbeanDomain = applicationContext.getEnvironment().getProperty(MBEAN_DOMAIN_PROPERTY_NAME);
+	
+	if (mbeanDomain != null) {
+		synchronized (applicationContexts) {
+			if (applicationContexts.isEmpty()) {
+				try {
+					MBeanServer server = ManagementFactory.getPlatformMBeanServer();
+					applicationName = applicationContext.getApplicationName();
+					server.registerMBean(new LiveBeansView(), new ObjectName(mbeanDomain, MBEAN_APPLICATION_KEY, applicationName));
+				} catch (Throwable ex) {
+					throw new ApplicationContextException("Failed to register LiveBeansView MBean", ex);
+				}
+			}
+			applicationContexts.add(applicationContext);
+		}
+	}
+}
+
+
+
+
+
+
+
+

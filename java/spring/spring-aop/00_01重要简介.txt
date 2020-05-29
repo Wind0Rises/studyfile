@@ -1,0 +1,17 @@
+一、待处理
+	1、JdkDynamicProxy的处理流程还没有看。
+
+
+
+二、理解还不深的类
+	1、ComponentDefinition：描述某些配置上下文中呈现的BeanDefinitions和BeanReferences的逻辑视图的接口。....后面还有很多。
+	
+	
+	2、ParserContext：
+		属性值：
+			XmlReaderContext：
+			BeanDefinitionParserDelegate：
+			BeanDefinition：
+			Stack<ComponentDefinition>：
+
+

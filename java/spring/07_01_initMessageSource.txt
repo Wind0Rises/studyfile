@@ -1,20 +1,28 @@
-refresh()	
-initMessageSource():初始化MessageSource信息，如果BeanFactory中有MessageSource对应的Bean则获取出来，把这个Bean赋给ApplicationContext；如果没有这实例化一个DelegatingMessageSource对象，并把这个实例对象
-				    赋给ApplicationContext。【ApplicationContext中有一个MessageSource属性。】
+【spring 4.3.12】
 
 
+
+
+refresh()：
+	initMessageSource():初始化MessageSource信息，如果BeanFactory中有MessageSource对应的Bean则获取出来，把这个Bean赋给ApplicationContext；如果没有这实例化一
+			个DelegatingMessageSource对象，并把这个实例对象赋给ApplicationContext。【ApplicationContext中有一个MessageSource属性。】
+
+
+/**
+ *
+ */
 location：AbstractApplicationContext
 protected void initMessageSource() {
 	// 获取内置的BeanFactory。
 	ConfigurableListableBeanFactory beanFactory = getBeanFactory();
 
-	// 判断是否有BeanName为messageSource的bean。
+	// 判断是否有BeanName为messageSource的bean。【MESSAGE_SOURCE_BEAN_NAME = messageSource】
 	if (beanFactory.containsLocalBean(MESSAGE_SOURCE_BEAN_NAME)) {
 		
 		// 获取BeanFactory中的MessageSource的Bean
 		this.messageSource = beanFactory.getBean(MESSAGE_SOURCE_BEAN_NAME, MessageSource.class);
 
-		// 让MessageSource知道付MessageSource.
+		// 让MessageSource知道父MessageSource.
 		if (this.parent != null && this.messageSource instanceof HierarchicalMessageSource) {
 
 			HierarchicalMessageSource hms = (HierarchicalMessageSource) this.messageSource;

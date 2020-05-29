@@ -1,0 +1,127 @@
+XmlBeanDefinitionReader
+	AbstractBeanDefinitionReader
+		BeanDefinitionReader
+
+		
+类：
+	BeanDefinitionReader：Bean Definition Reader的简单接口。具体的Bean Definition Reader附加了加载BeanDefinition和注册BeanDefinition的方法，
+		这是对于特定的bean Definition。bean definition reader没有实现这个接口，它仅对希望遵循标准命名约定的bean定义读者提供建议。
+		
+		方法：
+			BeanDefinitionRegistry getRegistry():返回Bean Factroy以向其注册Bean Definition。
+			ResourceLoader getResourceLoader()：
+			BeanNameGenerator getBeanNameGenerator()：
+			int loadBeanDefinitions(..)：从特殊的资源加载Bean Definition。
+		
+	ParserContext：
+	
+	
+	ResultActions：允许对已执行请求的结果应用操作，例如期望。可以参考静态工厂方法：MockMvcResultMatchers、MockMvcResultHandlers。
+		
+		方法：
+			ResultActions andExpect(ResultMatcher matcher)：添加期望。
+			ResultActions andDo(ResultHandler handler)：执行一个一般动作，如打印。
+			MvcResult andReturn()：直接返回请求的结果。
+			
+			
+	ResultMatcher：将执行的请求的结果与某些期望进行匹配。
+		
+		方法：
+			match(MvcResult result)：断言已执行的请求的结果。
+	
+	
+	MvcResult：
+		getRequest()：获取执行的请求。
+		getResponse()：获取执行的响应。
+		getHandler()：获取执行的Handler。
+		getInterceptors()：获取执行的拦截器。
+			...
+			
+			
+	ResultHandler：
+			
+			
+/**
+ *
+ */
+location：AbstractBeanDefinitionReader
+protected AbstractBeanDefinitionReader(BeanDefinitionRegistry registry) {
+	Assert.notNull(registry, "BeanDefinitionRegistry must not be null");
+	this.registry = registry;
+
+	
+	if (this.registry instanceof ResourceLoader) {
+		this.resourceLoader = (ResourceLoader) this.registry;
+	} else {
+		this.resourceLoader = new PathMatchingResourcePatternResolver();
+	}
+ 
+	if (this.registry instanceof EnvironmentCapable) {
+		this.environment = ((EnvironmentCapable) this.registry).getEnvironment();
+	} else {
+		this.environment = new StandardEnvironment();
+	}
+}
+
+
+/**
+ * 执行请求操作。
+ */
+location：MockMvc
+public ResultActions perform(RequestBuilder requestBuilder) throws Exception {
+	
+	if (this.defaultRequestBuilder != null && requestBuilder instanceof Mergeable) {
+		requestBuilder = (RequestBuilder) ((Mergeable) requestBuilder).merge(this.defaultRequestBuilder);
+	}
+
+	MockHttpServletRequest request = requestBuilder.buildRequest(this.servletContext);
+
+	AsyncContext asyncContext = request.getAsyncContext();
+	MockHttpServletResponse mockResponse;
+	HttpServletResponse servletResponse;
+	if (asyncContext != null) {
+		servletResponse = (HttpServletResponse) asyncContext.getResponse();
+		mockResponse = unwrapResponseIfNecessary(servletResponse);
+	} else {
+		mockResponse = new MockHttpServletResponse();
+		servletResponse = mockResponse;
+	}
+
+	if (requestBuilder instanceof SmartRequestBuilder) {
+		request = ((SmartRequestBuilder) requestBuilder).postProcessRequest(request);
+	}
+
+	final MvcResult mvcResult = new DefaultMvcResult(request, mockResponse);
+	request.setAttribute(MVC_RESULT_ATTRIBUTE, mvcResult);
+
+	RequestAttributes previousAttributes = RequestContextHolder.getRequestAttributes();
+	RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request, servletResponse));
+
+	MockFilterChain filterChain = new MockFilterChain(this.servlet, this.filters);
+	filterChain.doFilter(request, servletResponse);
+
+	if (DispatcherType.ASYNC.equals(request.getDispatcherType()) &&
+			asyncContext != null && !request.isAsyncStarted()) {
+		asyncContext.complete();
+	}
+
+	applyDefaultResultActions(mvcResult);
+	RequestContextHolder.setRequestAttributes(previousAttributes);
+
+	return new ResultActions() {
+		@Override
+		public ResultActions andExpect(ResultMatcher matcher) throws Exception {
+			matcher.match(mvcResult);
+			return this;
+		}
+		@Override
+		public ResultActions andDo(ResultHandler handler) throws Exception {
+			handler.handle(mvcResult);
+			return this;
+		}
+		@Override
+		public MvcResult andReturn() {
+			return mvcResult;
+		}
+	};
+}	

@@ -1,7 +1,6 @@
 Web项目初始化bean
 
-1、web.xml中配置ContextLoaderListener监听器，该监听器实现了Servlet的ServletContextListener接口，所以在web启动的时候，第二加载（第一个context-param）监听器，
-   然后进行初始操作。
+1、web.xml中配置ContextLoaderListener监听器，该监听器实现了Servlet的ServletContextListener接口，所以在web启动的时候，第二加载（第一个context-param）监听器，然后进行初始操作。
 2、ContextLoaderListener还继承了ContextLoader类，ContextLoader类主要是Context初始化操。
 
 首先：创建一个WebApplicationContext。    创建过程：通过加载ContextLoader.properties文件获取到XmlWebApplicationContext完全限定名。通过获取的全限定名和ClassLoader获取对应的WebApplicationContext的Class对象，通过反射获取对应的WebApplicationContext实例对象。
@@ -180,8 +179,7 @@ public void setConfigLocation(String location) {
 	setConfigLocations(StringUtils.tokenizeToStringArray(location, CONFIG_LOCATION_DELIMITERS));
 }
 
-
-// 把web.xml中配置的xml文件复制给configLocations参数。
+// 把XML中配置的xml文件复制给configLocations参数。
 <context-param>
 	<param-name>contextConfigLocation</param-name>
 	<param-value>

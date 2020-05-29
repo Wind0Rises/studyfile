@@ -1,0 +1,1100 @@
+
+一、总结、
+	
+
+二、重要的类
+	AbstractAutoProxyCreator：实现了BeanPostProcessor接口，生成代理的主要实现就是在postProcessAfterInitialization
+
+
+
+
+四、源码
+
+/**
+ * AbstractAutoProxyCreator
+ *			BeanNameAutoProxyCreator
+ *			AbstractAdvisorAutoProxyCreator
+ *					DefaultAdvisorAutoProxyCreator
+ *					AspectJAwareAdvisorAutoProxyCreator (这里是以其为例。)
+ *							AnnotationAwareAspectJAutoProxyCreator
+ *					InfrastructureAdvisorAutoProxyCreator
+ *			
+ * AbstractAutoProxyCreator实现了SmartInstantiationAwareBeanPostProcessor，SmartInstantiationAwareBeanPostProcessor接口继承了InstantiationAwareBeanPostProcessor
+ * InstantiationAwareBeanPostProcessor继承了BeanPostProcessor。
+ *
+ * 执行顺序：postProcessBeforeInstantiation(...)   ===>  postProcessAfterInstantiation(...)    ===>    determineCandidateConstructors(..)    ===>   
+ *			 postProcessPropertyValues(...)        ===>  getEarlyBeanReference(...)   ====>
+ *			 postProcessBeforeInitialization(...)  ===>  postProcessAfterInitialization	
+ */
+location：AbstractAutoProxyCreator
+public Object postProcessBeforeInstantiation(Class<?> beanClass, String beanName) throws BeansException {
+	
+	Object cacheKey = getCacheKey(beanClass, beanName);
+
+	// targetSourcedBeans中不包含，执行if。
+	if (beanName == null || !this.targetSourcedBeans.contains(beanName)) {
+		
+		// advisedBeans包含直接返回。
+		if (this.advisedBeans.containsKey(cacheKey)) {
+			return null;
+		}
+		
+		/**
+		 * beanClass是Advice、Pointcut、Advisor、AopInfrastructureBean的子类，进入If。
+		 * 把Advice、Pointcut、Advisor、AopInfrastructureBean子类对一个的Bean放入advisedBeans这个集合。
+		 */
+		if (isInfrastructureClass(beanClass) || shouldSkip(beanClass, beanName)) {
+			this.advisedBeans.put(cacheKey, Boolean.FALSE);
+			return null;
+		}
+	}
+
+	
+	if (beanName != null) {
+	
+		/**
+		 * 获取自定义TargetSource，一般情况下，不会自定义区定义的。
+		 */
+		TargetSource targetSource = getCustomTargetSource(beanClass, beanName);
+		
+		if (targetSource != null) {
+			this.targetSourcedBeans.add(beanName);
+			Object[] specificInterceptors = getAdvicesAndAdvisorsForBean(beanClass, beanName, targetSource);
+			
+			/**
+			 * ☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆
+			 * ☆                              生成代理类过程								 ☆
+			 * ☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆
+			 */
+			Object proxy = createProxy(beanClass, beanName, specificInterceptors, targetSource);
+			this.proxyTypes.put(cacheKey, proxy.getClass());
+			return proxy;
+		}
+	}
+
+	return null;
+}
+
+/**
+ * 给定的Class是Advice、Pointcut、Advisor、AopInfrastructureBean的子类返回true。
+ */ 
+location：AbstractAutoProxyCreator
+protected boolean isInfrastructureClass(Class<?> beanClass) {
+	boolean retVal = Advice.class.isAssignableFrom(beanClass) || Pointcut.class.isAssignableFrom(beanClass) || Advisor.class.isAssignableFrom(beanClass) ||
+			AopInfrastructureBean.class.isAssignableFrom(beanClass);
+	
+	if (retVal && logger.isTraceEnabled()) {
+		logger.trace("Did not attempt to auto-proxy infrastructure class [" + beanClass.getName() + "]");
+	}
+	
+	return retVal;
+}
+
+/**
+ * 
+ */ 
+location：AspectJAwareAdvisorAutoProxyCreator
+protected boolean shouldSkip(Class<?> beanClass, String beanName) {
+	
+	List<Advisor> candidateAdvisors = findCandidateAdvisors();
+	
+	for (Advisor advisor : candidateAdvisors) {
+		if (advisor instanceof AspectJPointcutAdvisor) {
+			if (((AbstractAspectJAdvice) advisor.getAdvice()).getAspectName().equals(beanName)) {
+				return true;
+			}
+		}
+	}
+	return super.shouldSkip(beanClass, beanName);
+}
+
+
+/**
+ * 获取自定义的TargetSource。
+ */
+location：AbstractAutoProxyCreator
+protected TargetSource getCustomTargetSource(Class<?> beanClass, String beanName) {
+
+	// customTargetSourceCreators默认为null。
+	if (this.customTargetSourceCreators != null && this.beanFactory != null && this.beanFactory.containsBean(beanName)) {
+		
+		for (TargetSourceCreator tsc : this.customTargetSourceCreators) {
+			TargetSource ts = tsc.getTargetSource(beanClass, beanName);
+			
+			if (ts != null) {
+				
+				if (logger.isDebugEnabled()) {
+					logger.debug("TargetSourceCreator [" + tsc + " found custom TargetSource for bean with name '" + beanName + "'");
+				}
+				
+				return ts;
+			}
+		}
+	}
+
+	// No custom TargetSource found.
+	return null;
+}
+
+
+
+
+/**
+ * ☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆
+ * ☆                              第一部分、生成代理入口。								 ☆
+ * ☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆
+ */
+location：AbstractAutoProxyCreator
+public Object postProcessAfterInitialization(Object bean, String beanName) throws BeansException {
+	
+	if (bean != null) {
+		
+		// 获取缓存Key。
+		Object cacheKey = getCacheKey(bean.getClass(), beanName);
+		
+		// 判断是否已经缓存了。如果不包含进入If。
+		if (!this.earlyProxyReferences.contains(cacheKey)) {
+			return wrapIfNecessary(bean, beanName, cacheKey);
+		}
+	}
+	return bean;
+}
+
+
+/**
+ * 获取缓存Key。
+ */
+location：AbstractAutoProxyCreator
+rotected Object getCacheKey(Class<?> beanClass, String beanName) {
+	if (StringUtils.hasLength(beanName)) {
+		/**
+		 * isAssignableFrom()：FactoryBean是否是beanClass的父类。
+		 *
+		 * BeanFactory.FACTORY_BEAN_PREFIX = "&";
+		 */
+		return (FactoryBean.class.isAssignableFrom(beanClass) ? BeanFactory.FACTORY_BEAN_PREFIX + beanName : beanName);
+	} else {
+		return beanClass;
+	}
+}
+
+
+/**
+ *
+ */
+location：AbstractAutoProxyCreator
+protected Object wrapIfNecessary(Object bean, String beanName, Object cacheKey) {
+	
+	// this.targetSourcedBeans是否包含
+	if (beanName != null && this.targetSourcedBeans.contains(beanName)) {
+		return bean;
+	}
+	
+	/**
+	 * 如果是advisedBeans中直接返回。
+	 */ 
+	if (Boolean.FALSE.equals(this.advisedBeans.get(cacheKey))) {
+		return bean;
+	}
+	
+	/**
+	 * 是否是Advice、Pointcut、Advisor、AopInfrastructureBean的子类。
+	 */
+	if (isInfrastructureClass(bean.getClass()) || shouldSkip(bean.getClass(), beanName)) {
+		this.advisedBeans.put(cacheKey, Boolean.FALSE);
+		return bean;
+	}
+
+	/**
+	 * 获取符合条件的Advisor。
+	 */
+	Object[] specificInterceptors = getAdvicesAndAdvisorsForBean(bean.getClass(), beanName, null);
+
+	
+	// DO_NOT_PROXY = null;
+	if (specificInterceptors != DO_NOT_PROXY) {
+		this.advisedBeans.put(cacheKey, Boolean.TRUE);
+		
+		/**
+		 * ☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆
+		 * ☆           	                  创建代理类								 ☆
+		 * ☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆
+		 */
+		Object proxy = createProxy(bean.getClass(), beanName, specificInterceptors, new SingletonTargetSource(bean));
+		
+		this.proxyTypes.put(cacheKey, proxy.getClass());
+		return proxy;
+	}
+
+	this.advisedBeans.put(cacheKey, Boolean.FALSE);
+	
+	return bean;
+}
+
+
+/**
+ * 获取符合条件的Advisor对应BeanDefinition。
+ */
+location：AbstractAdvisorAutoProxyCreator
+protected Object[] getAdvicesAndAdvisorsForBean(Class<?> beanClass, String beanName, TargetSource targetSource) {
+	
+	List<Advisor> advisors = findEligibleAdvisors(beanClass, beanName);
+	
+	if (advisors.isEmpty()) {
+		return DO_NOT_PROXY;
+	}
+	return advisors.toArray();
+}
+
+
+
+/**
+ * 获取符合条件的Advisor对应BeanDefinition
+ */
+location：AbstractAdvisorAutoProxyCreator
+protected List<Advisor> findEligibleAdvisors(Class<?> beanClass, String beanName) {
+	// 获取候选Advisor
+	List<Advisor> candidateAdvisors = findCandidateAdvisors();
+	
+	// 获取符合条件的Advisor。
+	List<Advisor> eligibleAdvisors = findAdvisorsThatCanApply(candidateAdvisors, beanClass, beanName);
+	
+	/**
+	 * ##############################
+	 * #  创建一个拓展的Advisor 	#
+	 * ##############################
+	 */
+	extendAdvisors(eligibleAdvisors);
+	
+	if (!eligibleAdvisors.isEmpty()) {
+		eligibleAdvisors = sortAdvisors(eligibleAdvisors);
+	}
+	
+	return eligibleAdvisors;
+}
+
+/**
+ * 获取候选Advisor对应的BeanDefinition
+ */
+location：AbstractAdvisorAutoProxyCreator
+protected List<Advisor> findCandidateAdvisors() {
+	return this.advisorRetrievalHelper.findAdvisorBeans();
+}
+
+/**
+ * 获取候选Advisor对应的BeanDefinition
+ */
+location：BeanFactoryAdvisorRetrievalHelperAdapter
+public List<Advisor> findAdvisorBeans() {
+	String[] advisorNames = null;
+	
+	synchronized (this) {
+		advisorNames = this.cachedAdvisorBeanNames;
+		if (advisorNames == null) {
+			advisorNames = BeanFactoryUtils.beanNamesForTypeIncludingAncestors(this.beanFactory, Advisor.class, true, false);
+			this.cachedAdvisorBeanNames = advisorNames;
+		}
+	}
+	
+	if (advisorNames.length == 0) {
+		return new LinkedList<Advisor>();
+	}
+
+	List<Advisor> advisors = new LinkedList<Advisor>();
+	
+	for (String name : advisorNames) {
+		if (isEligibleBean(name)) {
+			if (this.beanFactory.isCurrentlyInCreation(name)) {
+				if (logger.isDebugEnabled()) {
+					logger.debug("Skipping currently created advisor '" + name + "'");
+				}
+			} else {
+				try {
+					advisors.add(this.beanFactory.getBean(name, Advisor.class));
+				} catch (BeanCreationException ex) {
+					// ....
+					throw ex;
+				}
+			}
+		}
+	}
+	return advisors;
+}
+
+/**
+ * 判断给定的Advisor集合是否可用。
+ */
+location：AbstractAdvisorAutoProxyCreator
+protected List<Advisor> findAdvisorsThatCanApply(List<Advisor> candidateAdvisors, Class<?> beanClass, String beanName) {
+
+	ProxyCreationContext.setCurrentProxiedBeanName(beanName);
+	try {
+		return AopUtils.findAdvisorsThatCanApply(candidateAdvisors, beanClass);
+	} finally {
+		ProxyCreationContext.setCurrentProxiedBeanName(null);
+	}
+}
+
+/**
+ *
+ */
+location：ProxyCreationContext
+static void setCurrentProxiedBeanName(String beanName) {
+	if (beanName != null) {
+		currentProxiedBeanName.set(beanName);
+	} else {
+		currentProxiedBeanName.remove();
+	}
+}
+
+/**
+ *
+ */
+location：AopUtils
+public static List<Advisor> findAdvisorsThatCanApply(List<Advisor> candidateAdvisors, Class<?> clazz) {
+	if (candidateAdvisors.isEmpty()) {
+		return candidateAdvisors;
+	}
+	
+	List<Advisor> eligibleAdvisors = new LinkedList<Advisor>();
+	for (Advisor candidate : candidateAdvisors) {
+		if (candidate instanceof IntroductionAdvisor && canApply(candidate, clazz)) {
+			eligibleAdvisors.add(candidate);
+		}
+	}
+	
+	boolean hasIntroductions = !eligibleAdvisors.isEmpty();
+	for (Advisor candidate : candidateAdvisors) {
+		if (candidate instanceof IntroductionAdvisor) { 
+			continue;
+		}
+		if (canApply(candidate, clazz, hasIntroductions)) {
+			eligibleAdvisors.add(candidate);
+		}
+	}
+	return eligibleAdvisors;
+}
+
+
+/**
+ *
+ */
+location：AbstractAdvisorAutoProxyCreator
+protected void extendAdvisors(List<Advisor> candidateAdvisors) {
+	AspectJProxyUtils.makeAdvisorChainAspectJCapableIfNecessary(candidateAdvisors);
+}
+
+/**
+ *
+ */
+location：AspectJProxyUtils
+public static boolean makeAdvisorChainAspectJCapableIfNecessary(List<Advisor> advisors) {
+	if (!advisors.isEmpty()) {
+		boolean foundAspectJAdvice = false;
+		for (Advisor advisor : advisors) {
+			if (isAspectJAdvice(advisor)) {
+				foundAspectJAdvice = true;
+			}
+		}
+		if (foundAspectJAdvice && !advisors.contains(ExposeInvocationInterceptor.ADVISOR)) {
+			advisors.add(0, ExposeInvocationInterceptor.ADVISOR);
+			return true;
+		}
+	}
+	
+	return false;
+}
+
+
+
+
+######################################################
+#      			   第二部分、创建代理类				 #
+######################################################
+/**
+ * 创建代理类。 只有写有before、after对应的类的Bean才会进入这里。
+ */
+location：AbstractAdvisorAutoProxyCreator
+protected Object createProxy(Class<?> beanClass, String beanName, Object[] specificInterceptors, TargetSource targetSource) {
+
+	/**
+	 * 设置beanName对应的BeanDefinition的org.springframework.aop.framework.autoproxy.AutoProxyUtils.originalTargetClass属性值为给定的Class对象。
+	 */ 
+	if (this.beanFactory instanceof ConfigurableListableBeanFactory) {
+		AutoProxyUtils.exposeTargetClass((ConfigurableListableBeanFactory) this.beanFactory, beanName, beanClass);
+	}
+
+
+	/** 
+	 *	ProxyConfig
+	 *		AdvisedSupport(implements Advised)
+	 *				ProxyCreatorSupport
+	 *						ProxyFactory
+	 */ 
+	ProxyFactory proxyFactory = new ProxyFactory();
+	proxyFactory.copyFrom(this);
+
+
+	/**
+	 * ProxyConfig；proxyTargetClass默认为false。
+	 * 所以isProxyTargetClass()默认返回false。
+	 */ 
+	if (!proxyFactory.isProxyTargetClass()) {
+		if (shouldProxyTargetClass(beanClass, beanName)) {
+			proxyFactory.setProxyTargetClass(true);
+		}
+		else {
+			evaluateProxyInterfaces(beanClass, proxyFactory);
+		}
+	}
+
+	/**
+	 * 设置ProxyFactory的Advisor和targerSource。
+	 */
+	Advisor[] advisors = buildAdvisors(beanName, specificInterceptors);
+	proxyFactory.addAdvisors(advisors);
+	proxyFactory.setTargetSource(targetSource);
+	
+	// 子类自定义，用于扩展使用的。
+	customizeProxyFactory(proxyFactory);
+
+	/**
+	 * 设置ProxyFactory的frozen和preFiltered。
+	 */
+	proxyFactory.setFrozen(this.freezeProxy);
+	if (advisorsPreFiltered()) {
+		proxyFactory.setPreFiltered(true);
+	}
+
+	return proxyFactory.getProxy(getProxyClassLoader());
+}
+
+/**
+ * ProxyConfig；proxyTargetClass默认为false。
+ */
+location：ProxyConfig
+public void copyFrom(ProxyConfig other) {
+	Assert.notNull(other, "Other ProxyConfig object must not be null");
+	this.proxyTargetClass = other.proxyTargetClass;
+	this.optimize = other.optimize;
+	this.exposeProxy = other.exposeProxy;
+	this.frozen = other.frozen;
+	this.opaque = other.opaque;
+}
+
+
+/**
+ * 设置BeanDefinition的org.springframework.aop.framework.autoproxy.AutoProxyUtils.originalTargetClass属性值为给定的Class对象。
+ */
+location：AutoProxyUtils
+static void exposeTargetClass(ConfigurableListableBeanFactory beanFactory, String beanName, Class<?> targetClass) {
+	if (beanName != null && beanFactory.containsBeanDefinition(beanName)) {
+		// ORIGINAL_TARGET_CLASS_ATTRIBUTE = org.springframework.aop.framework.autoproxy.AutoProxyUtils.originalTargetClass
+		// 设置org.springframework.aop.framework.autoproxy.AutoProxyUtils.originalTargetClass值为对应Class。
+		beanFactory.getMergedBeanDefinition(beanName).setAttribute(ORIGINAL_TARGET_CLASS_ATTRIBUTE, targetClass);
+	}
+}
+
+/**
+ *
+ */
+location：AspectJAwareAdvisorAutoProxyCreator
+protected void extendAdvisors(List<Advisor> candidateAdvisors) {
+	AspectJProxyUtils.makeAdvisorChainAspectJCapableIfNecessary(candidateAdvisors);
+}
+
+/**
+ *  这里会添加一个新的Advisor。ExposeInvocationInterceptor.ADVISOR
+ */
+location：AspectJProxyUtils
+public static boolean makeAdvisorChainAspectJCapableIfNecessary(List<Advisor> advisors) {
+	if (!advisors.isEmpty()) {
+		boolean foundAspectJAdvice = false;
+		for (Advisor advisor : advisors) {
+			if (isAspectJAdvice(advisor)) {
+				foundAspectJAdvice = true;
+			}
+		}
+		if (foundAspectJAdvice && !advisors.contains(ExposeInvocationInterceptor.ADVISOR)) {
+			advisors.add(0, ExposeInvocationInterceptor.ADVISOR);
+			return true;
+		}
+	}
+	return false;
+}
+
+
+/**
+ *
+ */
+location：AbstractAutoProxyCreator
+protected boolean shouldProxyTargetClass(Class<?> beanClass, String beanName) {	
+	// this.beanFactory instanceof ConfigurableListableBeanFactory     ========       true。
+	return (this.beanFactory instanceof ConfigurableListableBeanFactory && AutoProxyUtils.shouldProxyTargetClass((ConfigurableListableBeanFactory) this.beanFactory, beanName));
+}
+
+
+/**
+ * 获取BeanDefinition的org.springframework.aop.framework.autoproxy.AutoProxyUtils.preserveTargetClass属性值。
+ */
+location：AutoProxyUtils
+public static boolean shouldProxyTargetClass(ConfigurableListableBeanFactory beanFactory, String beanName) {
+	if (beanName != null && beanFactory.containsBeanDefinition(beanName)) {
+		BeanDefinition bd = beanFactory.getBeanDefinition(beanName);
+		
+		// 获取BeanDefinition的org.springframework.aop.framework.autoproxy.AutoProxyUtils.preserveTargetClass属性值。
+		return Boolean.TRUE.equals(bd.getAttribute(PRESERVE_TARGET_CLASS_ATTRIBUTE));
+	}
+	return false;
+}
+
+
+/**
+ *
+ */
+location：AbstractAutoProxyCreator
+protected void evaluateProxyInterfaces(Class<?> beanClass, ProxyFactory proxyFactory) {
+	Class<?>[] targetInterfaces = ClassUtils.getAllInterfacesForClass(beanClass, getProxyClassLoader());
+	boolean hasReasonableProxyInterface = false;
+	
+	for (Class<?> ifc : targetInterfaces) {
+		if (!isConfigurationCallbackInterface(ifc) && !isInternalLanguageInterface(ifc) && ifc.getMethods().length > 0) {
+			hasReasonableProxyInterface = true;
+			break;
+		}
+	}
+	
+	/**
+	 * 接口处理。
+	 */
+	if (hasReasonableProxyInterface) {
+		for (Class<?> ifc : targetInterfaces) {
+			proxyFactory.addInterface(ifc);
+		}
+	} else {
+		/**
+		 * 设置ProxyTargetClass为True。
+		 */ 
+		proxyFactory.setProxyTargetClass(true);
+	}
+}
+
+/**
+ * 构建Advisor。把特定的interceptor保证包装成Advisor放入Advisor数组上。
+ */
+location：AbstractAutoProxyCreator
+protected Advisor[] buildAdvisors(String beanName, Object[] specificInterceptors) {
+
+	Advisor[] commonInterceptors = resolveInterceptorNames();
+
+	List<Object> allInterceptors = new ArrayList<Object>();
+	if (specificInterceptors != null) {
+		allInterceptors.addAll(Arrays.asList(specificInterceptors));
+		if (commonInterceptors.length > 0) {
+			if (this.applyCommonInterceptorsFirst) {
+				allInterceptors.addAll(0, Arrays.asList(commonInterceptors));
+			} else {
+				allInterceptors.addAll(Arrays.asList(commonInterceptors));
+			}
+		}
+	}
+	
+	
+	if (logger.isDebugEnabled()) {
+		int nrOfCommonInterceptors = commonInterceptors.length;
+		int nrOfSpecificInterceptors = (specificInterceptors != null ? specificInterceptors.length : 0);
+		logger.debug("Creating implicit proxy for bean '" + beanName + "' with " + nrOfCommonInterceptors + " common interceptors and " + nrOfSpecificInterceptors + " specific interceptors");
+	}
+
+	Advisor[] advisors = new Advisor[allInterceptors.size()];
+	
+	for (int i = 0; i < allInterceptors.size(); i++) {
+		advisors[i] = this.advisorAdapterRegistry.wrap(allInterceptors.get(i));
+	}
+	
+	return advisors;
+}
+
+/**
+ *
+ */
+location：AbstractAutoProxyCreator
+private Advisor[] resolveInterceptorNames() {
+	
+	// 获取BeanFactory。
+	ConfigurableBeanFactory cbf = (this.beanFactory instanceof ConfigurableBeanFactory ? (ConfigurableBeanFactory) this.beanFactory : null);
+	
+	List<Advisor> advisors = new ArrayList<Advisor>();
+	
+	/**
+	 * 如果interceptorNames不为空的话。
+	 * 从BeanFactory中加载Advisor类对应的BeanName对应的Bean。
+	 */
+	for (String beanName : this.interceptorNames) {
+		if (cbf == null || !cbf.isCurrentlyInCreation(beanName)) {
+			Object next = this.beanFactory.getBean(beanName);
+			advisors.add(this.advisorAdapterRegistry.wrap(next));
+		}
+	}
+	
+	return advisors.toArray(new Advisor[advisors.size()]);
+}
+
+/**
+ * 包装给定的对象。
+ */
+location：DefaultAdvisorAdapterRegistry
+public Advisor wrap(Object adviceObject) throws UnknownAdviceTypeException {
+	
+	if (adviceObject instanceof Advisor) {
+		return (Advisor) adviceObject;
+	}
+	
+	if (!(adviceObject instanceof Advice)) {
+		throw new UnknownAdviceTypeException(adviceObject);
+	}
+	
+	Advice advice = (Advice) adviceObject;
+	if (advice instanceof MethodInterceptor) {
+		return new DefaultPointcutAdvisor(advice);
+	}
+	
+	
+	for (AdvisorAdapter adapter : this.adapters) {
+		if (adapter.supportsAdvice(advice)) {
+			return new DefaultPointcutAdvisor(advice);
+		}
+	}
+	throw new UnknownAdviceTypeException(advice);
+}
+
+
+
+#######################################
+#    	第三部：代理的具体实现		  #
+#######################################
+/**
+ *
+ */
+location：ProxyCreatorSupport
+public Object getProxy(ClassLoader classLoader) {
+	return createAopProxy().getProxy(classLoader);
+}
+
+/**
+ * 创建AopProxy。
+ */
+location：ProxyCreatorSupport
+protected final synchronized AopProxy createAopProxy() {
+	/**
+	 * 初始化active为false。
+	 */
+	if (!this.active) {
+		activate();
+	}
+	return getAopProxyFactory().createAopProxy(this);
+}
+
+/**
+ * 是否活跃状态。
+ */
+location：ProxyCreatorSupport
+private void activate() {
+	this.active = true;
+	for (AdvisedSupportListener listener : this.listeners) {
+		listener.activated(this);
+	}
+}
+
+/**
+ * 初始化this.aopProxyFactory = new DefaultAopProxyFactory();
+ */
+location：ProxyCreatorSupport
+public AopProxyFactory getAopProxyFactory() {
+	return this.aopProxyFactory;
+}
+
+
+
+/**
+ * 选择用什么样的ProxyFactory。
+ */
+location：DefaultAopProxyFactory
+public AopProxy createAopProxy(AdvisedSupport config) throws AopConfigException {
+	
+	// 选择用什么样的ProxyFactory。
+	if (config.isOptimize() || config.isProxyTargetClass() || hasNoUserSuppliedProxyInterfaces(config)) {
+		Class<?> targetClass = config.getTargetClass();
+		
+		if (targetClass == null) {
+			throw new AopConfigException("TargetSource cannot determine target class: " + "Either an interface or a target is required for proxy creation.");
+		}
+		
+		if (targetClass.isInterface() || Proxy.isProxyClass(targetClass)) {
+			return new JdkDynamicAopProxy(config);
+		}
+		
+		// ObjenesisCglibAopProxy继承CglibAopProxy
+		return new ObjenesisCglibAopProxy(config);
+	
+	} else {
+		return new JdkDynamicAopProxy(config);
+	}
+}
+
+/**
+ * ObjenesisCglibAopProxy的构造函数。
+ */
+location：ObjenesisCglibAopProxy
+public ObjenesisCglibAopProxy(AdvisedSupport config) {
+	super(config);
+}
+
+
+/**
+ * advised就是AdvisedSupport
+ */
+location：CglibAopProxy
+public CglibAopProxy(AdvisedSupport config) throws AopConfigException {
+	
+	Assert.notNull(config, "AdvisedSupport must not be null");
+	if (config.getAdvisors().length == 0 && config.getTargetSource() == AdvisedSupport.EMPTY_TARGET_SOURCE) {
+		throw new AopConfigException("No advisors and no TargetSource specified");
+	}
+	
+	this.advised = config;
+	this.advisedDispatcher = new AdvisedDispatcher(this.advised);
+}
+
+
+
+
+
+#######################################
+#    	第四部：Cglib代理			  #
+#######################################
+
+/**
+ * CglibAopProxy 继承 ObjenesisCglibAopProxy
+ */
+location：CglibAopProxy
+public Object getProxy(ClassLoader classLoader) {
+
+	if (logger.isDebugEnabled()) {
+		logger.debug("Creating CGLIB proxy: target source is " + this.advised.getTargetSource());
+	}
+
+	try {
+		// 获取目标类
+		Class<?> rootClass = this.advised.getTargetClass();
+		Assert.state(rootClass != null, "Target class must be available for creating a CGLIB proxy");
+
+		
+		/**
+		 * isCglibProxyClass(..)：判读是否是代理类，是否包含"$$"
+		 */
+		Class<?> proxySuperClass = rootClass;
+		if (ClassUtils.isCglibProxyClass(rootClass)) {
+			proxySuperClass = rootClass.getSuperclass();
+			Class<?>[] additionalInterfaces = rootClass.getInterfaces();
+			for (Class<?> additionalInterface : additionalInterfaces) {
+				this.advised.addInterface(additionalInterface);
+			}
+		}
+
+		/**
+		 * 验证。
+		 */
+		validateClassIfNecessary(proxySuperClass, classLoader);
+
+		
+		Enhancer enhancer = createEnhancer();
+		if (classLoader != null) {
+			enhancer.setClassLoader(classLoader);
+			if (classLoader instanceof SmartClassLoader && ((SmartClassLoader) classLoader).isClassReloadable(proxySuperClass)) {
+				enhancer.setUseCache(false);
+			}
+		}
+		
+		enhancer.setSuperclass(proxySuperClass);
+		enhancer.setInterfaces(AopProxyUtils.completeProxiedInterfaces(this.advised));
+		enhancer.setNamingPolicy(SpringNamingPolicy.INSTANCE);
+		enhancer.setStrategy(new ClassLoaderAwareUndeclaredThrowableStrategy(classLoader));
+
+		Callback[] callbacks = getCallbacks(rootClass);
+		Class<?>[] types = new Class<?>[callbacks.length];
+		for (int x = 0; x < types.length; x++) {
+			types[x] = callbacks[x].getClass();
+		}
+		
+		/**
+		 * ProxyCallbackFilter判断使用哪一个Callback。一般情况都是使用DynamicAdvisedInterceptor这个Callback。
+		 */
+		enhancer.setCallbackFilter(new ProxyCallbackFilter(this.advised.getConfigurationOnlyCopy(), this.fixedInterceptorMap, this.fixedInterceptorOffset));
+		
+		// 添加回调类型。
+		enhancer.setCallbackTypes(types);
+
+		/**
+		 * 创建对应的代理类。
+		 */
+		return createProxyClassAndInstance(enhancer, callbacks);
+	
+	
+	} catch (CodeGenerationException ex) {
+		throw new AopConfigException("Could not generate CGLIB subclass of class [" + this.advised.getTargetClass() + "]: ");
+	} catch (IllegalArgumentException ex) {
+		throw new AopConfigException("Could not generate CGLIB subclass of class [" +  "Common causes of this problem include using a final class or a non-visible class", ex);
+	} catch (Throwable ex) {
+		throw new AopConfigException("Unexpected AOP exception", ex);
+	}
+}
+
+
+/**
+ * Map<Class<?>, Boolean> validatedClasses。
+ */
+location：CglibAopProxy
+private void validateClassIfNecessary(Class<?> proxySuperClass, ClassLoader proxyClassLoader) {
+	if (logger.isWarnEnabled()) {
+		synchronized (validatedClasses) {
+			if (!validatedClasses.containsKey(proxySuperClass)) {
+				doValidateClass(proxySuperClass, proxyClassLoader, ClassUtils.getAllInterfacesForClassAsSet(proxySuperClass));
+				validatedClasses.put(proxySuperClass, Boolean.TRUE);
+			}
+		}
+	}
+}
+
+/**
+ * 
+ */
+location：CglibAopProxy
+private void doValidateClass(Class<?> proxySuperClass, ClassLoader proxyClassLoader, Set<Class<?>> ifcs) {
+	if (proxySuperClass != Object.class) {
+		
+		Method[] methods = proxySuperClass.getDeclaredMethods();
+		
+		for (Method method : methods) {
+			int mod = method.getModifiers();
+			
+			if (!Modifier.isStatic(mod)) {
+			
+				if (Modifier.isFinal(mod)) {
+					if (implementsInterface(method, ifcs)) {
+						logger.warn("Unable to proxy interface-implementing method [" + method + "] because " + "it is marked as final: Consider using interface-based JDK proxies instead!");
+					}
+					
+					logger.info("Final method [" + method + "] cannot get proxied via CGLIB: " + "might lead to NPEs against uninitialized fields in the proxy instance.");
+					
+					
+				} else if (!Modifier.isPublic(mod) && !Modifier.isProtected(mod) && !Modifier.isPrivate(mod) && proxyClassLoader != null && proxySuperClass.getClassLoader() != proxyClassLoader) {
+					logger.info("Method [" + method + "] is package-visible across different ClassLoaders " + "if you need to support invocations through the proxy.");
+				}
+			}
+		}
+		
+		doValidateClass(proxySuperClass.getSuperclass(), proxyClassLoader, ifcs);
+	}
+}
+
+
+
+/**
+ *
+ */
+location：
+private Callback[] getCallbacks(Class<?> rootClass) throws Exception {
+	boolean exposeProxy = this.advised.isExposeProxy();
+	boolean isFrozen = this.advised.isFrozen();
+	boolean isStatic = this.advised.getTargetSource().isStatic();
+	
+	/**
+	 * 很重要。通用AOP回调。当目标是动态的或代理未冻结时使用。
+	 */
+	Callback aopInterceptor = new DynamicAdvisedInterceptor(this.advised);
+
+	Callback targetInterceptor;
+	if (exposeProxy) {
+		targetInterceptor = isStatic ? new StaticUnadvisedExposedInterceptor(this.advised.getTargetSource().getTarget()) : new DynamicUnadvisedExposedInterceptor(this.advised.getTargetSource());
+	} else {
+		targetInterceptor = isStatic ? new StaticUnadvisedInterceptor(this.advised.getTargetSource().getTarget()) : new DynamicUnadvisedInterceptor(this.advised.getTargetSource());
+	}
+
+	Callback targetDispatcher = isStatic ? new StaticDispatcher(this.advised.getTargetSource().getTarget()) : new SerializableNoOp();
+
+	
+	/**
+	 * Callback数组中所有的实例对应的类都实现了MethodInterceptor接口。
+	 */
+	Callback[] mainCallbacks = new Callback[] {
+			aopInterceptor,  									// 
+			targetInterceptor,  								// 
+			new SerializableNoOp(),  							// 
+			targetDispatcher,                                   // 
+			this.advisedDispatcher,                             // 
+			new EqualsInterceptor(this.advised),                // 
+			new HashCodeInterceptor(this.advised)				// 
+	};
+
+	Callback[] callbacks;
+
+	if (isStatic && isFrozen) {
+		Method[] methods = rootClass.getMethods();
+		Callback[] fixedCallbacks = new Callback[methods.length];
+		this.fixedInterceptorMap = new HashMap<String, Integer>(methods.length);
+
+		for (int x = 0; x < methods.length; x++) {
+			List<Object> chain = this.advised.getInterceptorsAndDynamicInterceptionAdvice(methods[x], rootClass);
+			fixedCallbacks[x] = new FixedChainStaticTargetInterceptor(chain, this.advised.getTargetSource().getTarget(), this.advised.getTargetClass());
+			this.fixedInterceptorMap.put(methods[x].toString(), x);
+		}
+
+		callbacks = new Callback[mainCallbacks.length + fixedCallbacks.length];
+		System.arraycopy(mainCallbacks, 0, callbacks, 0, mainCallbacks.length);
+		System.arraycopy(fixedCallbacks, 0, callbacks, mainCallbacks.length, fixedCallbacks.length);
+		this.fixedInterceptorOffset = mainCallbacks.length;
+	} else {
+		callbacks = mainCallbacks;
+	}
+	
+	return callbacks;
+}
+
+/**
+ *
+ */
+location：ObjenesisCglibAopProxy
+protected Object createProxyClassAndInstance(Enhancer enhancer, Callback[] callbacks) {
+	// 创建代理类的类名。
+	Class<?> proxyClass = enhancer.createClass();
+	Object proxyInstance = null;
+
+	if (objenesis.isWorthTrying()) {
+		try {
+			/**
+			 * 创建代理类实例。
+			 */
+			proxyInstance = objenesis.newInstance(proxyClass, enhancer.getUseCache());
+		} catch (Throwable ex) {
+			logger.debug("Unable to instantiate proxy using Objenesis, " + "falling back to regular proxy construction", ex);
+		}
+	}
+
+	if (proxyInstance == null) {
+		try {
+			proxyInstance = (this.constructorArgs != null ? proxyClass.getConstructor(this.constructorArgTypes).newInstance(this.constructorArgs) : proxyClass.newInstance());
+		} catch (Throwable ex) {
+			throw new AopConfigException("Unable to instantiate proxy using Objenesis, " +  "and regular proxy instantiation via default constructor fails as well", ex);
+		}
+	}
+
+	((Factory) proxyInstance).setCallbacks(callbacks);
+	
+	
+	return proxyInstance;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+#######################################
+#    		第五部：JDK代理			  #
+#######################################
+/**
+ * 注意JdkDynamicAopProxy着是实现了InvocationHandler接口。
+ */
+location：JdkDynamicAopProxy
+public Object getProxy(ClassLoader classLoader) {
+	if (logger.isDebugEnabled()) {
+		logger.debug("Creating JDK dynamic proxy: target source is " + this.advised.getTargetSource());
+	}
+	
+	Class<?>[] proxiedInterfaces = AopProxyUtils.completeProxiedInterfaces(this.advised, true);
+	
+	findDefinedEqualsAndHashCodeMethods(proxiedInterfaces);
+	
+	return Proxy.newProxyInstance(classLoader, proxiedInterfaces, this);
+}
+
+/**
+ *
+ */
+location：AopProxyUtils
+static Class<?>[] completeProxiedInterfaces(AdvisedSupport advised, boolean decoratingProxy) {
+	Class<?>[] specifiedInterfaces = advised.getProxiedInterfaces();
+	if (specifiedInterfaces.length == 0) {
+		// No user-specified interfaces: check whether target class is an interface.
+		Class<?> targetClass = advised.getTargetClass();
+		if (targetClass != null) {
+			if (targetClass.isInterface()) {
+				advised.setInterfaces(targetClass);
+			}
+			else if (Proxy.isProxyClass(targetClass)) {
+				advised.setInterfaces(targetClass.getInterfaces());
+			}
+			specifiedInterfaces = advised.getProxiedInterfaces();
+		}
+	}
+	boolean addSpringProxy = !advised.isInterfaceProxied(SpringProxy.class);
+	boolean addAdvised = !advised.isOpaque() && !advised.isInterfaceProxied(Advised.class);
+	boolean addDecoratingProxy = (decoratingProxy && !advised.isInterfaceProxied(DecoratingProxy.class));
+	int nonUserIfcCount = 0;
+	if (addSpringProxy) {
+		nonUserIfcCount++;
+	}
+	if (addAdvised) {
+		nonUserIfcCount++;
+	}
+	if (addDecoratingProxy) {
+		nonUserIfcCount++;
+	}
+	Class<?>[] proxiedInterfaces = new Class<?>[specifiedInterfaces.length + nonUserIfcCount];
+	System.arraycopy(specifiedInterfaces, 0, proxiedInterfaces, 0, specifiedInterfaces.length);
+	int index = specifiedInterfaces.length;
+	if (addSpringProxy) {
+		proxiedInterfaces[index] = SpringProxy.class;
+		index++;
+	}
+	if (addAdvised) {
+		proxiedInterfaces[index] = Advised.class;
+		index++;
+	}
+	if (addDecoratingProxy) {
+		proxiedInterfaces[index] = DecoratingProxy.class;
+	}
+	return proxiedInterfaces;
+}
+
+
+/**
+ *
+ */
+location：JdkDynamicAopProxy
+private void findDefinedEqualsAndHashCodeMethods(Class<?>[] proxiedInterfaces) {
+	for (Class<?> proxiedInterface : proxiedInterfaces) {
+		Method[] methods = proxiedInterface.getDeclaredMethods();
+		for (Method method : methods) {
+			if (AopUtils.isEqualsMethod(method)) {
+				this.equalsDefined = true;
+			}
+			if (AopUtils.isHashCodeMethod(method)) {
+				this.hashCodeDefined = true;
+			}
+			if (this.equalsDefined && this.hashCodeDefined) {
+				return;
+			}
+		}
+	}
+}
+
+

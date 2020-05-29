@@ -1,0 +1,1095 @@
+
+
+二、例子：
+	1、xml配置
+		<bean id="aspectClass" class="com.liu.study.spring.aop.CustomAspect" />
+		<bean id="pointCut" class="com.liu.study.spring.aop.PointCut" />
+		<aop:config >
+			<!-- 定义切 -->
+			<aop:aspect ref="aspectClass">
+				<!-- 定义切入点 -->
+				<aop:pointcut id="customPointCut" expression="execution(* com.liu.study.spring.aop.PointCut.*(..))"/>
+
+				<!-- 操作方式 -->
+				<aop:before method="before" pointcut-ref="customPointCut" />
+				<aop:after method="after" pointcut-ref="customPointCut" />
+			</aop:aspect>
+		</aop:config>
+		
+	2、切面。
+		public class CustomAspect {
+			public void before() {
+				System.out.println("CustomAspect ---  前置处理");
+			}
+
+			public void after() {
+				System.out.println("CustomAspect ---  后置处理");
+			}
+		}
+		
+	3、切点。
+		public class PointCut {
+			public void aopTestMethod() {
+				System.out.println("这是被切的类。。。。在这个方法前后织入-----切面");
+			}
+		}
+
+	4、测试类
+		public class AopTest {
+
+			public static void main(String[] args) throws Exception {
+				ApplicationContext context = new ClassPathXmlApplicationContext("classpath:spring-context.xml");
+				
+				/** 
+				 * pointCut这个是代理类的实例，并不是PointCut.class的实例了。
+				 */ 
+				PointCut pointCut = (PointCut) context.getBean("pointCut");
+				pointCut.aopTestMethod();
+				TimeUnit.SECONDS.sleep(1000);
+			}
+
+		}
+
+三、重要的类
+	1、BeanDefinitionParser：用于处理自定义顶级标签（在<beans/>标签下）的接口。实现是自由的，可以根据需要将定制标签中的元数据转换为尽可能多的BeanDefinition。
+		解析器从关联的NamespaceHandler中找到一个BeanDefinitionParser，用于定制标签所在的名称空间。
+		
+		方法；
+			parse(Element element, ParserContext parserContext)：解析特殊的element并且使用提供的ParserContext【ParserContext.getRegistry()】方法注册
+				BeanDefinition，
+	
+	2、ParserContext：在Bean Definition解析过程中传递的上下文，封装了所有相关的配置和状态。
+		属性：
+			XmlReaderContext readerContext；
+			BeanDefinitionParserDelegate delegate；
+			BeanDefinition containingBeanDefinition；
+			Stack<ComponentDefinition> containingComponents；
+	
+	3、DefaultNamespaceHandlerResolver：实现了NamespaceHandlerResolver，提供了resolve(String namespaceUri)方法的实现。
+		解析：通过加载META-INF/spring.handlers文件，获取对应的命名空间和处理类的全限定名，就可以创建对应处理类的实例了
+		下面是aop下的spring.handlers文件：
+			http\://www.springframework.org/schema/aop=org.springframework.aop.config.AopNamespaceHandler
+	
+	4、NamespaceHandler：DefaultBeanDefinitionDocumentReader使用的基本接口，用于处理Spring XML配置文件中的自定义名称空间。解析器在<beans>标签下遇到自定义标签时，将调用parse()方法。当
+		在<bean>标签下遇到自定义标签，将调用decorate()方法。开发人员编写自己的自定义元素扩展通常不会直接实现此接口，而是会使用提供的NamespaceHandlerSupport类。
+		方法：
+			1、init()：在构造之后但在解析任何自定义元素之前，由DefaultBeanDefinitionDocumentReader调用。
+			2、parse(Element element, ParserContext parserContext)：解析特殊的元素，并且使用BeanDefinitionRegistry注册Bean Definition
+			3、decorate(Node source, BeanDefinitionHolder definition, ParserContext parserContext)：
+	
+	5、ReaderContext：在Bean Definition解析过程中传递的上下文，封装了所有相关的配置和状态。
+		主要属性：
+			Resource resource：[这个资源就是要加载的xml文件或者其他类似的资源。]
+			ProblemReporter problemReporter：SPI接口允许工具和其他外部进程处理在Bean Definition解析期间报告的错误和警告。
+			ReaderEventListener eventListener：在Bean Definition读取过程中接收组件，别名和导入注册的回调的接口。
+			SourceExtractor sourceExtractor：简单的策略允许工具控制源元数据如何附加到Bean Definition元数据。
+	
+	
+	6、XmlReaderContext：继承了ReaderContext。ReaderContext的拓展，专门用于XmlBeanDefinitionReader，提供对XmlBeanDefinitionReader中配置的NamespaceHandlerResolver的访问。
+		主要属性：
+			XmlBeanDefinitionReader：其中包含BeanFactory
+			NamespaceHandlerResolver：用于通过命名空间获取对应的NamespaceHandler。
+			Resource resource;
+			ProblemReporter problemReporter;
+			ReaderEventListener eventListener;
+			SourceExtractor sourceExtractor;
+			
+	
+	
+	7、BeanDefinitionParserDelegate：
+	
+	
+	8、ComponentDefinition：随着NamespaceHandler可插入的自定义XML标签的引入，单个逻辑配置实体现在可以创建多个BeanDefinitions和RuntimeBeanReferences以便为最终用户提供更简洁的配置和更大的便利。
+		这样，就不能再假定每个配置实体都映射到一个BeanDefinition。对于希望提供可视化效果或支持配置Spring应用程序的工具供应商和其他用户，重要的是要有某种适当的机制将BeanFactory中的BeanDefinitions
+		与配置数据相关联，从而对最终用户具有特定的意义。 这样，NamespaceHandler实现就可以为每个要配置的逻辑实体以ComponentDefinition的形式发布事件。 然后，第三方可以{@link ReaderEventListener订阅这些事件}，
+		从而允许以用户为中心的bean元数据视图。
+
+
+
+
+
+
+	
+	
+四、源码
+
+
+☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆
+☆	                                         	第一部分：如何aop是如何接入到spring框架的													☆
+☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆
+#################################
+# 		1.1  spring接入			#
+#################################
+/**
+ * 这个是注册BeanDefinition的主要步骤，这里是从refresh()，第二不过来的。
+ */
+location：XmlBeanDefinitionReader
+public int registerBeanDefinitions(Document doc, Resource resource) throws BeanDefinitionStoreException {
+	BeanDefinitionDocumentReader documentReader = createBeanDefinitionDocumentReader();
+	int countBefore = getRegistry().getBeanDefinitionCount();
+	documentReader.registerBeanDefinitions(doc, createReaderContext(resource));
+	return getRegistry().getBeanDefinitionCount() - countBefore;
+}
+
+/**
+ * 构建XmlReaderContext对象。
+ */
+location：XmlBeanDefinitionReader
+public XmlReaderContext createReaderContext(Resource resource) {
+	return new XmlReaderContext(resource, this.problemReporter, this.eventListener, this.sourceExtractor, this, getNamespaceHandlerResolver());
+}
+
+
+/**
+ * 创建NamespaceHandlerResolver实例对象。
+ */
+location：XmlBeanDefinitionReader
+public NamespaceHandlerResolver getNamespaceHandlerResolver() {
+	if (this.namespaceHandlerResolver == null) {
+		this.namespaceHandlerResolver = createDefaultNamespaceHandlerResolver();
+	}
+	return this.namespaceHandlerResolver;
+}
+
+/**
+ * 创建默认的DefaultNamespaceHandlerResolver。
+ */
+location：XmlBeanDefinitionReader
+protected NamespaceHandlerResolver createDefaultNamespaceHandlerResolver() {
+	return new DefaultNamespaceHandlerResolver(getResourceLoader().getClassLoader());
+}
+
+/**
+ * DefaultNamespaceHandlerResolver构造函数
+ */
+location：DefaultNamespaceHandlerResolver
+public DefaultNamespaceHandlerResolver(ClassLoader classLoader) {
+	// DEFAULT_HANDLER_MAPPINGS_LOCATION = "MATE-INF/spring.handlers"
+	this(classLoader, DEFAULT_HANDLER_MAPPINGS_LOCATION);
+}
+
+/**
+ * DefaultNamespaceHandlerResolver构造函数
+ */
+location：DefaultNamespaceHandlerResolver
+public DefaultNamespaceHandlerResolver(ClassLoader classLoader, String handlerMappingsLocation) {
+	Assert.notNull(handlerMappingsLocation, "Handler mappings location must not be null");
+	this.classLoader = (classLoader != null ? classLoader : ClassUtils.getDefaultClassLoader());
+	this.handlerMappingsLocation = handlerMappingsLocation;
+}
+
+/**
+ * 通过命名空间获取对应的NamespaceHandler。
+ */
+location：DefaultNamespaceHandlerResolver
+public NamespaceHandler resolve(String namespaceUri) {
+	Map<String, Object> handlerMappings = getHandlerMappings();
+	
+	Object handlerOrClassName = handlerMappings.get(namespaceUri);
+	
+	if (handlerOrClassName == null) {
+		return null;
+	} else if (handlerOrClassName instanceof NamespaceHandler) {
+		return (NamespaceHandler) handlerOrClassName;
+	} else {
+		String className = (String) handlerOrClassName;
+		try {
+			Class<?> handlerClass = ClassUtils.forName(className, this.classLoader);
+			if (!NamespaceHandler.class.isAssignableFrom(handlerClass)) {
+				throw new FatalBeanException("Class [" + className + "] for namespace [" + namespaceUri + "] does not implement the [" + NamespaceHandler.class.getName() + "] interface");
+			}
+			NamespaceHandler namespaceHandler = (NamespaceHandler) BeanUtils.instantiateClass(handlerClass);
+			
+			/**
+			 * 初始化流程。	
+			 */
+			namespaceHandler.init();
+			handlerMappings.put(namespaceUri, namespaceHandler);
+			return namespaceHandler;
+		} catch (ClassNotFoundException ex) {
+			throw new FatalBeanException("NamespaceHandler class [" + className + "] for namespace [" +
+					namespaceUri + "] not found", ex);
+		} catch (LinkageError err) {
+			throw new FatalBeanException("Invalid NamespaceHandler class [" + className + "] for namespace [" + namespaceUri + "]: problem with handler class file or dependent class", err);
+		}
+	}
+}
+
+/**
+ * 获取所有MATE-INF下的spring.handlers文件。
+ */
+location：DefaultNamespaceHandlerResolver
+private Map<String, Object> getHandlerMappings() {
+	if (this.handlerMappings == null) {
+		synchronized (this) {
+			if (this.handlerMappings == null) {
+				try {
+					Properties mappings = PropertiesLoaderUtils.loadAllProperties(this.handlerMappingsLocation, this.classLoader);
+					if (logger.isDebugEnabled()) {
+						logger.debug("Loaded NamespaceHandler mappings: " + mappings);
+					}
+					Map<String, Object> handlerMappings = new ConcurrentHashMap<String, Object>(mappings.size());
+					CollectionUtils.mergePropertiesIntoMap(mappings, handlerMappings);
+					this.handlerMappings = handlerMappings;
+				} catch (IOException ex) {
+					throw new IllegalStateException("Unable to load NamespaceHandler mappings from location [" + this.handlerMappingsLocation + "]", ex);
+				}
+			}
+		}
+	}
+	return this.handlerMappings;
+}
+
+#################################
+# 1.2  AopNamespaceHandler初始  #
+#################################
+/**
+ * 初始化AopNamespaceHandler。添加元素与对应的解析器。
+ */
+location：AopNamespaceHandler
+public class AopNamespaceHandler extends NamespaceHandlerSupport {
+
+	@Override
+	public void init() {
+		registerBeanDefinitionParser("config", new ConfigBeanDefinitionParser());
+		registerBeanDefinitionParser("aspectj-autoproxy", new AspectJAutoProxyBeanDefinitionParser());
+		registerBeanDefinitionDecorator("scoped-proxy", new ScopedProxyBeanDefinitionDecorator());
+		registerBeanDefinitionParser("spring-configured", new SpringConfiguredBeanDefinitionParser());
+	}
+
+}
+
+
+
+
+
+☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆
+☆	                                         	第二部分：加载解析BeanDefinition															☆
+☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆
+###################################
+# 	2.1  从spring解析开始		  #
+###################################
+/**
+ * 解析过程
+ */
+location：DefaultBeanDefinitionDocumentReader
+protected void parseBeanDefinitions(Element root, BeanDefinitionParserDelegate delegate) {
+	/**
+	 * 判断xml中的标签[也就是根节点<beans>]对应的命名空间是否是默认的命名空间,默认的命名空间为:http://www.springframework.org/schema/beans。
+	 * 如果是默认的默认的命名空间，进入IF。
+	 */
+	if (delegate.isDefaultNamespace(root)) {
+		
+		// 获取子节点集合 nl：第一个元素是beans。
+		NodeList nl = root.getChildNodes();
+
+		// 遍历子节点。
+		for (int i = 0; i < nl.getLength(); i++) {
+			Node node = nl.item(i);
+			if (node instanceof Element) {
+			
+				Element ele = (Element) node;
+
+				/** 
+				 * 判断该子节点是否是默认xml命名空间设置的。默认的命名空间为：http://www.springframework.org/schema/beans
+				 * 所有属于http://www.springframework.org/schema/beans的子节点都走默认解析过程。
+				 */
+				if (delegate.isDefaultNamespace(ele)) {
+					parseDefaultElement(ele, delegate);
+
+				// 非http://www.springframework.org/schema/beans下的标签。aop、mvc等标签。
+				} else {
+					delegate.parseCustomElement(ele);
+				}
+			}
+		}
+	
+	// 使用给定的代理类解析。
+	} else {
+		delegate.parseCustomElement(root);
+	}
+}
+
+/**
+ * 非默认的命名空间的解析。
+ */
+location：BeanDefinitionParserDelegate
+public BeanDefinition parseCustomElement(Element ele) {
+	return parseCustomElement(ele, null);
+}
+
+/**
+ *
+ */
+location：BeanDefinitionParserDelegate
+public BeanDefinition parseCustomElement(Element ele, BeanDefinition containingBd) {
+	String namespaceUri = getNamespaceURI(ele);
+	NamespaceHandler handler = this.readerContext.getNamespaceHandlerResolver().resolve(namespaceUri);
+	if (handler == null) {
+		error("Unable to locate Spring NamespaceHandler for XML schema namespace [" + namespaceUri + "]", ele);
+		return null;
+	}
+	return handler.parse(ele, new ParserContext(this.readerContext, this, containingBd));
+}
+
+
+###################################
+# 	2.2  AopNamespaceHandler	  #
+###################################
+/**
+ * 这是AopNamespaceHandler实例对象。
+ * 
+ */
+location：NamespaceHandlerSupport【其实beans包下的】
+public BeanDefinition parse(Element element, ParserContext parserContext) {
+	return findParserForElement(element, parserContext).parse(element, parserContext);
+}
+
+
+
+/**
+ * 获取给定元素的对应的解析器。
+ *
+ *  【###############】 这么模式不错，可以借鉴 【########################】
+ */
+location：NamespaceHandlerSupport【其实beans包下的】
+private BeanDefinitionParser findParserForElement(Element element, ParserContext parserContext) {
+	// 获取对应的元素名称。
+	String localName = parserContext.getDelegate().getLocalName(element);
+	
+	// 获取元素对应的解析器。
+	BeanDefinitionParser parser = this.parsers.get(localName);
+	if (parser == null) {
+		parserContext.getReaderContext().fatal("Cannot locate BeanDefinitionParser for element [" + localName + "]", element);
+	}
+	return parser;
+}
+
+/**
+ * aop中config对应的解析器。
+ * <aop:config> ....
+ *
+ * 自动注入  	====  	AspectJAwareAdvisorAutoProxyCreator
+ * 通知			====  	AspectJPointcutAdvisor				（一个after/before）创建一个。
+ * 切点			====	AspectJExpressionPointcut
+ *
+ *
+ *
+ */
+location：ConfigBeanDefinitionParser【其实beans包下的】
+public BeanDefinition parse(Element element, ParserContext parserContext) {
+	
+	/**
+	 * CompositeComponentDefinition该类实现了ComponentDefinition接口。
+	 * CompositeComponentDefinition又保存很多ComponentDefinition实例。属性：List<ComponentDefinition> nestedComponents；
+	 *
+	 * ComponentDefinition：描述某些配置上下文中提供的BeanDefinitions和BeanReferences集合的逻辑视图的接口。
+	 *
+	 */
+	CompositeComponentDefinition compositeDef = new CompositeComponentDefinition(element.getTagName(), parserContext.extractSource(element));
+	
+	/**
+	 * ParserContext中保存着ComponentDefinition的栈，把CompositeComponentDefinition压入ParserContext中保存着ComponentDefinition栈中。
+	 */ 
+	parserContext.pushContainingComponent(compositeDef);
+
+	/**
+	 * 配置支持<aopconfig/>标签进行创建BeanDefinition所需的自动代理创建器。
+	 * 如果'proxy-target-class属性设置为true，将强制进行类代理。
+	 */
+	configureAutoProxyCreator(parserContext, element);
+
+	/**
+	 * 
+	 * 对<aop:config></aop:config>下的子标签进行处理。
+	 * 
+	 */
+	List<Element> childElts = DomUtils.getChildElements(element);
+	for (Element elt: childElts) {
+		String localName = parserContext.getDelegate().getLocalName(elt);
+		 
+		
+		if (POINTCUT.equals(localName)) {
+			/**
+			 * 解析pointcut节点
+			 */
+			parsePointcut(elt, parserContext);
+		} else if (ADVISOR.equals(localName)) {
+		
+			/**
+			 * 解析advisor节点
+			 */
+			parseAdvisor(elt, parserContext);
+		} else if (ASPECT.equals(localName)) {
+		
+			/**
+			 * 解析aspect节点
+			 */
+			parseAspect(elt, parserContext);
+		}
+	}
+
+	parserContext.popAndRegisterContainingComponent();
+	return null;
+}
+
+/**
+ * 配置支持<aopconfig/>标签进行创建BeanDefinition所需的自动代理创建器。
+ * 如果'proxy-target-class属性设置为true，将强制进行类代理。
+ */
+location：ConfigBeanDefinitionParser
+private void configureAutoProxyCreator(ParserContext parserContext, Element element) {
+	AopNamespaceUtils.registerAspectJAutoProxyCreatorIfNecessary(parserContext, element);
+}
+
+/**
+ *
+ */
+location：AopNamespaceUtils
+public static void registerAspectJAutoProxyCreatorIfNecessary(ParserContext parserContext, Element sourceElement) {
+	
+	BeanDefinition beanDefinition = AopConfigUtils.registerAspectJAutoProxyCreatorIfNecessary(parserContext.getRegistry(), parserContext.extractSource(sourceElement));
+	useClassProxyingIfNecessary(parserContext.getRegistry(), sourceElement);
+	registerComponentIfNecessary(beanDefinition, parserContext);
+}
+
+
+/**
+ * 如果BeanDefinitionRegistry有名称为org.springframework.aop.config.internalAutoProxyCreator的Bean，就判断是否满足要求。
+ * 如果没有就创建一个，并把创建的返回回去。
+ */
+location：AopConfigUtils
+public static BeanDefinition registerAspectJAutoProxyCreatorIfNecessary(BeanDefinitionRegistry registry, Object source) {
+	return registerOrEscalateApcAsRequired(AspectJAwareAdvisorAutoProxyCreator.class, registry, source);
+}
+
+
+/**
+ * 如果BeanDefinitionRegistry有名称为org.springframework.aop.config.internalAutoProxyCreator的Bean，就判断是否满足要求。
+ * 如果没有就创建一个，并把创建的返回回去。
+ */
+location：AopConfigUtils
+private static BeanDefinition registerOrEscalateApcAsRequired(Class<?> cls, BeanDefinitionRegistry registry, Object source) {
+	Assert.notNull(registry, "BeanDefinitionRegistry must not be null");
+	
+	/**
+	 * AUTO_PROXY_CREATOR_BEAN_NAME = "org.springframework.aop.config.internalAutoProxyCreator"
+	 * 看BeanDefinitionRegistry（BeanFactory）是否包含名称为org.springframework.aop.config.internalAutoProxyCreator的bean。
+	 */
+	if (registry.containsBeanDefinition(AUTO_PROXY_CREATOR_BEAN_NAME)) {
+		BeanDefinition apcDefinition = registry.getBeanDefinition(AUTO_PROXY_CREATOR_BEAN_NAME);
+		
+		/**
+		 * 如果发现BeanDefinitionRegister中的名称为org.springframework.aop.config.internalAutoProxyCreator的bean，对应的class
+		 * 不是传入的cls。
+		 * 判断传入的cls和BeanDefinitionRegister的优先级哪个高就用哪个。
+		 */
+		if (!cls.getName().equals(apcDefinition.getBeanClassName())) {
+			int currentPriority = findPriorityForClass(apcDefinition.getBeanClassName());
+			int requiredPriority = findPriorityForClass(cls);
+			if (currentPriority < requiredPriority) {
+				apcDefinition.setBeanClassName(cls.getName());
+			}
+		}
+		
+		return null;
+	}
+	
+	/**
+	 * 创建一个AspectJAwareAdvisorAutoProxyCreator对应的bean。
+	 */
+	RootBeanDefinition beanDefinition = new RootBeanDefinition(cls);
+	beanDefinition.setSource(source);
+	beanDefinition.getPropertyValues().add("order", Ordered.HIGHEST_PRECEDENCE);
+	beanDefinition.setRole(BeanDefinition.ROLE_INFRASTRUCTURE);
+	
+	/**
+	 * 把创建的AspectJAwareAdvisorAutoProxyCreator对应的bean注册到BeanDefinitionRegistry中，bean name：org.springframework.aop.config.internalAutoProxyCreator
+	 */ 
+	registry.registerBeanDefinition(AUTO_PROXY_CREATOR_BEAN_NAME, beanDefinition);
+	return beanDefinition;
+}
+
+
+
+
+/**
+ * <aop:config> 
+ *		<!-- 解析aspect标签。 -->
+ *		<aop:aspect> ....</aop:aspect>
+ * </aop:config>
+ */
+location：ConfigBeanDefinitionParser
+private void parseAspect(Element aspectElement, ParserContext parserContext) {
+	
+	// 获取<aspect>标签的
+	String aspectId = aspectElement.getAttribute(ID);
+	String aspectName = aspectElement.getAttribute(REF);
+
+	try {
+		// 压栈。
+		this.parseState.push(new AspectEntry(aspectId, aspectName));
+		List<BeanDefinition> beanDefinitions = new ArrayList<BeanDefinition>();
+		List<BeanReference> beanReferences = new ArrayList<BeanReference>();
+
+		List<Element> declareParents = DomUtils.getChildElementsByTagName(aspectElement, DECLARE_PARENTS);
+		for (int i = METHOD_INDEX; i < declareParents.size(); i++) {
+			Element declareParentsElement = declareParents.get(i);
+			beanDefinitions.add(parseDeclareParents(declareParentsElement, parserContext));
+		}
+
+		// 遍历所以子元素。
+		NodeList nodeList = aspectElement.getChildNodes();
+		boolean adviceFoundAlready = false;
+		
+		
+		/**
+		 * 这里处理类after/before/after-returning/after-throwing/around标签。
+		 */
+		for (int i = 0; i < nodeList.getLength(); i++) {
+			Node node = nodeList.item(i);
+			
+			/**
+			 * 这里是对before、after、after-returning、after-throwing、around这个几个标签处理。
+			 */
+			if (isAdviceNode(node, parserContext)) {
+				if (!adviceFoundAlready) {
+					adviceFoundAlready = true;
+					if (!StringUtils.hasText(aspectName)) {
+						parserContext.getReaderContext().error("<aspect> tag needs aspect bean reference via 'ref' attribute when declaring advices.", aspectElement, this.parseState.snapshot());
+						return;
+					}
+					
+					beanReferences.add(new RuntimeBeanReference(aspectName));
+				}
+				
+				/**
+				 * 
+				 * 解析<aop:before、<aop:after...标签内容，并生成对应的Bean Definition。
+				 * 每一标签（before、after..）都会生成一个Bean Definition。
+				 * 并把这个Bean Definition注册到BeanFactory中。
+				 */
+				AbstractBeanDefinition advisorDefinition = parseAdvice(aspectName, i, aspectElement, (Element) node, parserContext, beanDefinitions, beanReferences);
+				
+				
+				// 把Advice的Bean Definition放入一个集合中。
+				beanDefinitions.add(advisorDefinition);
+			}
+		}
+
+		/**
+		 * 创建AspectComponentDefinition实例对象.
+		 */
+		AspectComponentDefinition aspectComponentDefinition = createAspectComponentDefinition(aspectElement, aspectId, beanDefinitions, beanReferences, parserContext);
+		
+		/**
+		 * 把aspectComponentDefinition压入ParserContext.containingComponents这个栈中。
+		 */
+		parserContext.pushContainingComponent(aspectComponentDefinition);
+		
+
+		/**
+		 * 这里处理了pointcut标签。
+		 *
+		 * 获取给定元素给定子元素名称（pointcut）的子元素信息。
+		 */
+		List<Element> pointcuts = DomUtils.getChildElementsByTagName(aspectElement, POINTCUT);
+		for (Element pointcutElement : pointcuts) {
+			parsePointcut(pointcutElement, parserContext);
+		}
+		
+
+		/**
+		 * 从CompositeComponentDefinition栈顶弹出一个元素，
+		 *		如果这时CompositeComponentDefinition栈里还有元素。取出最后一个元素。把栈顶元素放入最后一个元素。
+		 * 		如果这时CompositeComponentDefinition栈里没有元素。事件通知元素处理。
+		 */
+		parserContext.popAndRegisterContainingComponent();
+		
+		
+	} finally {
+		// 弹栈。
+		this.parseState.pop();
+	}
+}
+
+/**
+ * 注意before、after、after-returning、after-throwing、around这几种策略。
+ */
+location：ConfigBeanDefinitionParser
+private boolean isAdviceNode(Node aNode, ParserContext parserContext) {
+	if (!(aNode instanceof Element)) {
+		return false;
+	} else {
+		String name = parserContext.getDelegate().getLocalName(aNode);
+		return (BEFORE.equals(name) || AFTER.equals(name) || AFTER_RETURNING_ELEMENT.equals(name) || AFTER_THROWING_ELEMENT.equals(name) || AROUND.equals(name));
+	}
+}
+
+
+/**
+ * 解析before、after..之一，并将结果BeanDefinition【是AspectJPointcutAdvisor类的BeanDefinition。】注册到提供的BeanDefinitionRegistry中。
+ */
+location：ConfigBeanDefinitionParser
+private AbstractBeanDefinition parseAdvice(String aspectName, int order, Element aspectElement, Element adviceElement, ParserContext parserContext,
+		List<BeanDefinition> beanDefinitions, List<BeanReference> beanReferences) {
+
+	try {
+		this.parseState.push(new AdviceEntry(parserContext.getDelegate().getLocalName(adviceElement)));
+
+		// 创建一个方法的Factory Bean。【MethodLocatingFactoryBean】
+		RootBeanDefinition methodDefinition = new RootBeanDefinition(MethodLocatingFactoryBean.class);
+		methodDefinition.getPropertyValues().add("targetBeanName", aspectName);
+		methodDefinition.getPropertyValues().add("methodName", adviceElement.getAttribute("method"));
+			// 设置是否是合成Bean Definition
+		methodDefinition.setSynthetic(true);
+
+		
+		//  创建Factory Definition。【SimpleBeanFactoryAwareAspectInstanceFactory】
+		RootBeanDefinition aspectFactoryDef = new RootBeanDefinition(SimpleBeanFactoryAwareAspectInstanceFactory.class);
+		aspectFactoryDef.getPropertyValues().add("aspectBeanName", aspectName);
+		aspectFactoryDef.setSynthetic(true);
+
+		/** 
+		 * 创建AbstractBeanDefinition实例。
+		 * 
+		 * 	before 				AspectJMethodBeforeAdvice			AbstractAspectJAdvice			会生成对应的内部Bean
+		 *	after				AspectJAfterAdvice					AbstractAspectJAdvice			会生成对应的内部Bean
+		 *	after-returning 	AspectJAfterReturningAdvice			AbstractAspectJAdvice			会生成对应的内部Bean
+		 *  after-throwing 		AspectJAfterThrowingAdvice			AbstractAspectJAdvice			会生成对应的内部Bean
+		 * 	around 				AspectJAroundAdvice					AbstractAspectJAdvice			会生成对应的内部Bean
+		 *
+		 */
+		AbstractBeanDefinition adviceDef = createAdviceDefinition(adviceElement, parserContext, aspectName, order, methodDefinition, aspectFactoryDef, beanDefinitions, beanReferences);
+
+
+		/** 
+		 * ☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆
+		 * ☆			创建并配置AspectJPointcutAdvisor对应的BeanDefinition。					   ☆
+		 * ☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆
+		 */
+		 
+		 
+		/** 
+		 * 构建AspectJPointcutAdvisor对应BeanDefinition。AspectJPointcutAdvisor这个的构造函数需要AbstractAspectJAdvice实例。
+		 */
+		RootBeanDefinition advisorDefinition = new RootBeanDefinition(AspectJPointcutAdvisor.class);
+		advisorDefinition.setSource(parserContext.extractSource(adviceElement));
+		advisorDefinition.getConstructorArgumentValues().addGenericArgumentValue(adviceDef);
+		
+		// 是否有order属性。
+		if (aspectElement.hasAttribute(ORDER_PROPERTY)) {
+			advisorDefinition.getPropertyValues().add(ORDER_PROPERTY, aspectElement.getAttribute(ORDER_PROPERTY));
+		}
+
+		/**
+		 * 把生成的代理类Bean Definition注册到Bean Factory中。
+		 * 
+		 * 注意这个bean都是AspectJPointcutAdvisor的实例。
+		 *
+		 */
+		parserContext.getReaderContext().registerWithGeneratedName(advisorDefinition);
+
+		return advisorDefinition;
+	} finally {
+		this.parseState.pop();
+	}
+}
+
+
+/**
+ *	Advice
+ *		AbstractAspectJAdvice
+				// Method aspectJBeforeAdviceMethod, AspectJExpressionPointcut pointcut, AspectInstanceFactory aif 构造函数的三个值。
+ *				AspectJAfterReturningAdvice：看下构造函数
+ *				AspectJAfterAdvice
+ *				AspectJAroundAdvice
+ *				AspectJAfterThrowingAdvice
+ *				AspectJMethodBeforeAdvice
+ *
+ *		Interceptor(接口)
+ *				MethodInterceptor
+ *				ConstructorInterceptor
+ *
+ *		DynamicIntroductionAdvice
+ *				IntroductionInterceptor(接口) 也继承了 MethodInterceptor
+ *						DelegatingIntroductionInterceptor
+ *						DelegatePerTargetObjectIntroductionInterceptor
+ *						AnnotationAwareRetryOperationsInterceptor
+ *
+ *
+ * 根据标签获取对一个的Class。before===AspectJMethodBeforeAdvice; 
+ *							  after===AspectJAfterAdvice;
+ * 							  after-returning====AspectJAfterReturningAdvice
+ * 							  after-throwing====AspectJAfterThrowingAdvice
+ * 							  around====AspectJAroundAdvice
+ * 创建对应BeanDefinition。
+ */
+location：ConfigBeanDefinitionParser
+private AbstractBeanDefinition createAdviceDefinition(Element adviceElement, ParserContext parserContext, String aspectName, int order,
+		RootBeanDefinition methodDef, RootBeanDefinition aspectFactoryDef, List<BeanDefinition> beanDefinitions, List<BeanReference> beanReferences) {
+
+	/**
+	 * 创建Advice对应的Bean Definition。getAdviceClass(...)这个方法很重要。
+	 */
+	RootBeanDefinition adviceDefinition = new RootBeanDefinition(getAdviceClass(adviceElement, parserContext));
+	adviceDefinition.setSource(parserContext.extractSource(adviceElement));
+
+	// ASPECT_NAME_PROPERTY="aspectName"，DECLARATION_ORDER_PROPERTY = "declarationOrder"
+	adviceDefinition.getPropertyValues().add(ASPECT_NAME_PROPERTY, aspectName);
+	adviceDefinition.getPropertyValues().add(DECLARATION_ORDER_PROPERTY, order);
+
+	// RETURNING = "returning";RETURNING_PROPERTY = "returningName"
+	if (adviceElement.hasAttribute(RETURNING)) {
+		adviceDefinition.getPropertyValues().add(RETURNING_PROPERTY, adviceElement.getAttribute(RETURNING));
+	}
+	// THROWING = "throwing";THROWING_PROPERTY = "throwingName"
+	if (adviceElement.hasAttribute(THROWING)) {
+		adviceDefinition.getPropertyValues().add(THROWING_PROPERTY, adviceElement.getAttribute(THROWING));
+	}
+	// ARG_NAMES = "arg-names";ARG_NAMES_PROPERTY = "argumentNames";
+	if (adviceElement.hasAttribute(ARG_NAMES)) {
+		adviceDefinition.getPropertyValues().add(ARG_NAMES_PROPERTY, adviceElement.getAttribute(ARG_NAMES));
+	}
+	
+	
+	
+	/**
+	 * AbstractAspectJAdvice所有子类的构造函数都有下面三个参数。
+	 * 		Method aspectJBeforeAdviceMethod, AspectJExpressionPointcut pointcut, AspectInstanceFactory aif；都行要这三个函数。
+	 *
+	 * ConstructorArgumentValues：用于保存构造函数参数值。设置Advice第一参数。
+	 *
+	 */
+	ConstructorArgumentValues cav = adviceDefinition.getConstructorArgumentValues();
+	cav.addIndexedArgumentValue(METHOD_INDEX, methodDef);
+
+	/**
+	 * ☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆
+	 * ☆				获取切点属性。如果使用pointcut将初始化一个切点Bean Definition。							☆
+	 * ☆				如果使用的pointcut-ref，直接返回pointcut-ref的属性值。									☆
+	 * ☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆
+	 */
+	Object pointcut = parsePointcutProperty(adviceElement, parserContext);
+	
+	/**
+	 * 设置Advice第二参数。
+	 */
+	if (pointcut instanceof BeanDefinition) {
+		cav.addIndexedArgumentValue(POINTCUT_INDEX, pointcut);
+		beanDefinitions.add((BeanDefinition) pointcut);
+	} else if (pointcut instanceof String) {
+		RuntimeBeanReference pointcutRef = new RuntimeBeanReference((String) pointcut);
+		cav.addIndexedArgumentValue(POINTCUT_INDEX, pointcutRef);
+		beanReferences.add(pointcutRef);
+	}
+
+	/**
+	 * 设置Advice第三参数。
+	 */
+	cav.addIndexedArgumentValue(ASPECT_INSTANCE_FACTORY_INDEX, aspectFactoryDef);
+
+	return adviceDefinition;
+}
+
+
+/**
+ *
+ */
+location：ConfigBeanDefinitionParser
+private Class<?> getAdviceClass(Element adviceElement, ParserContext parserContext) {
+	String elementName = parserContext.getDelegate().getLocalName(adviceElement);
+	if (BEFORE.equals(elementName)) {
+		return AspectJMethodBeforeAdvice.class;
+	} else if (AFTER.equals(elementName)) {
+		return AspectJAfterAdvice.class;
+	} else if (AFTER_RETURNING_ELEMENT.equals(elementName)) {
+		return AspectJAfterReturningAdvice.class;
+	} else if (AFTER_THROWING_ELEMENT.equals(elementName)) {
+		return AspectJAfterThrowingAdvice.class;
+	} else if (AROUND.equals(elementName)) {
+		return AspectJAroundAdvice.class;
+	} else {
+		throw new IllegalArgumentException("Unknown advice kind [" + elementName + "].");
+	}
+}
+
+/**
+ * 解析提供的Element的pointcut或pointcut-ref属性，并适当添加一个pointcut属性。如有必要，为切入点生成
+ * BeanDefinition并返回其Bean名称，否则返回所引用的切入点的Bean名称。
+ */
+private Object parsePointcutProperty(Element element, ParserContext parserContext) {
+	
+	// 在<advisor>标签中不能同时出现'pointcut' and 'pointcut-ref'
+	if (element.hasAttribute(POINTCUT) && element.hasAttribute(POINTCUT_REF)) {
+		parserContext.getReaderContext().error("Cannot define both 'pointcut' and 'pointcut-ref' on <advisor> tag.", element, this.parseState.snapshot());
+		return null;
+		
+	// 'pointcut'的处理。
+	} else if (element.hasAttribute(POINTCUT)) {
+		String expression = element.getAttribute(POINTCUT);
+		
+		// 创建切入点bean。
+		AbstractBeanDefinition pointcutDefinition = createPointcutDefinition(expression);
+		pointcutDefinition.setSource(parserContext.extractSource(element));
+		return pointcutDefinition;
+	
+	// 'pointcut-ref'的处理。
+	} else if (element.hasAttribute(POINTCUT_REF)) {
+		String pointcutRef = element.getAttribute(POINTCUT_REF);
+		if (!StringUtils.hasText(pointcutRef)) {
+			parserContext.getReaderContext().error("'pointcut-ref' attribute contains empty value.", element, this.parseState.snapshot());
+			return null;
+		}
+		return pointcutRef;
+	} else {
+		parserContext.getReaderContext().error("Must define one of 'pointcut' or 'pointcut-ref' on <advisor> tag.", element, this.parseState.snapshot());
+		return null;
+	}
+}
+
+
+/**
+ * 构建一个AspectComponentDefinition实例对象。
+ */
+location：ConfigBeanDefinitionParser
+private AspectComponentDefinition createAspectComponentDefinition(Element aspectElement, String aspectId, List<BeanDefinition> beanDefs, List<BeanReference> beanRefs, ParserContext parserContext) {
+	BeanDefinition[] beanDefArray = beanDefs.toArray(new BeanDefinition[beanDefs.size()]);
+	BeanReference[] beanRefArray = beanRefs.toArray(new BeanReference[beanRefs.size()]);
+	Object source = parserContext.extractSource(aspectElement);
+	return new AspectComponentDefinition(aspectId, beanDefArray, beanRefArray, source);
+}
+
+
+
+
+/**
+ * Stack<ComponentDefinition> containingComponents = new Stack<ComponentDefinition>();
+ */
+location：ParserContext
+public void pushContainingComponent(CompositeComponentDefinition containingComponent) {
+	this.containingComponents.push(containingComponent);
+}
+
+
+
+
+
+/**
+ * 把ParserContext中CompositeComponentDefinition栈的最上面一个元素
+ */
+location；ParserContext
+public void popAndRegisterContainingComponent() {
+	registerComponent(popContainingComponent());
+}
+
+/**
+ * 把ParserContext中CompositeComponentDefinition栈的最上面一个元素
+ */
+location；ParserContext
+public CompositeComponentDefinition popContainingComponent() {
+	return (CompositeComponentDefinition) this.containingComponents.pop();
+}
+
+
+/**
+ * 获取ParserContext中CompositeComponentDefinition栈的最上面一个元素，并把传入的元素
+ * 添加到CompositeComponentDefinition的List<ComponentDefinition> nestedComponents中。
+ */
+location；ParserContext
+public void registerComponent(ComponentDefinition component) {
+	// 获取containingComponents栈的嘴上面一个元素。
+	CompositeComponentDefinition containingComponent = getContainingComponent();
+	
+	
+	if (containingComponent != null) {
+		containingComponent.addNestedComponent(component);
+	} else {
+		this.readerContext.fireComponentRegistered(component);
+	}
+}
+
+
+/**
+ * 判断containingComponents是否为空，如果不为空，获取最上面一个元素。
+ */
+location；ParserContext
+public CompositeComponentDefinition getContainingComponent() {
+	return (!this.containingComponents.isEmpty() ? (CompositeComponentDefinition) this.containingComponents.lastElement() : null);
+}
+
+
+/**
+ * List<ComponentDefinition> nestedComponents = new LinkedList<ComponentDefinition>();
+ */
+location：CompositeComponentDefinition
+public void addNestedComponent(ComponentDefinition component) {
+	Assert.notNull(component, "ComponentDefinition must not be null");
+	this.nestedComponents.add(component);
+}
+
+
+
+/**
+ *
+ */
+location；ParserContext
+public void fireComponentRegistered(ComponentDefinition componentDefinition) {
+	this.eventListener.componentRegistered(componentDefinition);
+}
+
+
+
+
+
+#####################################################################################
+#              		   注册代理类BeanDefinition到BeanFactory						#
+#####################################################################################
+/**
+ *
+ */
+location；ParserContext
+public String registerWithGeneratedName(BeanDefinition beanDefinition) {
+	// 生成Bean的名称。
+	String generatedName = generateBeanName(beanDefinition);
+	
+	// getRegistry():获取的就是BeanFactory。
+	getRegistry().registerBeanDefinition(generatedName, beanDefinition);
+	return generatedName;
+}
+
+
+/**
+ * 注册Bean Definition。
+ */
+location：DefaultListableBeanFactory
+public void registerBeanDefinition(String beanName, BeanDefinition beanDefinition) throws BeanDefinitionStoreException {
+
+	Assert.hasText(beanName, "Bean name must not be empty");
+	Assert.notNull(beanDefinition, "BeanDefinition must not be null");
+
+	if (beanDefinition instanceof AbstractBeanDefinition) {
+		try {
+			((AbstractBeanDefinition) beanDefinition).validate();
+		} catch (BeanDefinitionValidationException ex) {
+			throw new BeanDefinitionStoreException(beanDefinition.getResourceDescription(), beanName, "Validation of bean definition failed", ex);
+		}
+	}
+
+	BeanDefinition oldBeanDefinition;
+
+	// 获取老的BeanDefinition。
+	oldBeanDefinition = this.beanDefinitionMap.get(beanName);
+	
+	if (oldBeanDefinition != null) {
+		if (!isAllowBeanDefinitionOverriding()) {
+			throw new BeanDefinitionStoreException(beanDefinition.getResourceDescription(), beanName, "Cannot register bean definition [" + beanDefinition + "] for bean '" + beanName + "': There is already [" + oldBeanDefinition + "] bound.");
+		} else if (oldBeanDefinition.getRole() < beanDefinition.getRole()) {
+			
+			if (this.logger.isWarnEnabled()) {
+				this.logger.warn("Overriding user-defined bean definition for bean '" + beanName + "' with a framework-generated bean definition: replacing [" + oldBeanDefinition + "] with [" + beanDefinition + "]");
+			}
+		} else if (!beanDefinition.equals(oldBeanDefinition)) {
+			if (this.logger.isInfoEnabled()) {
+				this.logger.info("Overriding bean definition for bean '" + beanName + "' with a different definition: replacing [" + oldBeanDefinition + "] with [" + beanDefinition + "]");
+			}
+		} else {
+			if (this.logger.isDebugEnabled()) {
+				this.logger.debug("Overriding bean definition for bean '" + beanName + "' with an equivalent definition: replacing [" + oldBeanDefinition + "] with [" + beanDefinition + "]");
+			}
+		}
+		this.beanDefinitionMap.put(beanName, beanDefinition);
+	
+	
+	
+	} else {
+		// 是否有Bean开始创建。
+		if (hasBeanCreationStarted()) {
+			synchronized (this.beanDefinitionMap) {
+				this.beanDefinitionMap.put(beanName, beanDefinition);
+				List<String> updatedDefinitions = new ArrayList<String>(this.beanDefinitionNames.size() + 1);
+				updatedDefinitions.addAll(this.beanDefinitionNames);
+				updatedDefinitions.add(beanName);
+				this.beanDefinitionNames = updatedDefinitions;
+				if (this.manualSingletonNames.contains(beanName)) {
+					Set<String> updatedSingletons = new LinkedHashSet<String>(this.manualSingletonNames);
+					updatedSingletons.remove(beanName);
+					this.manualSingletonNames = updatedSingletons;
+				}
+			}
+			
+			
+		
+		} else {
+			this.beanDefinitionMap.put(beanName, beanDefinition);
+			this.beanDefinitionNames.add(beanName);
+			this.manualSingletonNames.remove(beanName);
+		}
+		this.frozenBeanDefinitionNames = null;
+	}
+
+	if (oldBeanDefinition != null || containsSingleton(beanName)) {
+		resetBeanDefinition(beanName);
+	}
+}
+
+
+
+
+
+#########################################
+#            pointCut解析				#
+#########################################
+/**
+ *
+ */
+location：ConfigBeanDefinitionParser
+private AbstractBeanDefinition parsePointcut(Element pointcutElement, ParserContext parserContext) {
+	// 获取<aop:pointCut的id、expression属性值。
+	String id = pointcutElement.getAttribute(ID);
+	String expression = pointcutElement.getAttribute(EXPRESSION);
+
+	
+	AbstractBeanDefinition pointcutDefinition = null;
+	try {
+		this.parseState.push(new PointcutEntry(id));
+		
+		// 构建一个AspectJExpressionPointcut类的BeanDefinition。并设置scope和expression、source。
+		pointcutDefinition = createPointcutDefinition(expression);
+		pointcutDefinition.setSource(parserContext.extractSource(pointcutElement));
+
+		
+		String pointcutBeanName = id;
+		
+		
+		// 向BeanFactory中注入对应的BeanDefinition。
+		if (StringUtils.hasText(pointcutBeanName)) {
+			parserContext.getRegistry().registerBeanDefinition(pointcutBeanName, pointcutDefinition);
+		} else {
+			pointcutBeanName = parserContext.getReaderContext().registerWithGeneratedName(pointcutDefinition);
+		}
+
+		
+		// 构建一个PointcutComponentDefinition注册
+		parserContext.registerComponent(new PointcutComponentDefinition(pointcutBeanName, pointcutDefinition, expression));
+		
+		
+	} finally {
+		this.parseState.pop();
+	}
+
+	return pointcutDefinition;
+}
+
+
+/**
+ * 构建一个AspectJExpressionPointcut类的BeanDefinition。并设置scope和expression。
+ */
+location：ConfigBeanDefinitionParser
+protected AbstractBeanDefinition createPointcutDefinition(String expression) {
+	RootBeanDefinition beanDefinition = new RootBeanDefinition(AspectJExpressionPointcut.class);
+	beanDefinition.setScope(BeanDefinition.SCOPE_PROTOTYPE);
+	beanDefinition.setSynthetic(true);
+	beanDefinition.getPropertyValues().add(EXPRESSION, expression);
+	return beanDefinition;
+}

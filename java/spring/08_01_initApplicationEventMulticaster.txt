@@ -1,15 +1,35 @@
-refresh()方法的第五步骤。
+【spring 4.3.12】
+
+
+
+refresh()：第八部分
 	initApplicationEventMulticaster():初始化ApplicationEventMulticaster。判断BeanFactory中是否有applicationEventMulticaster对应的Bean，如果有取出来并把值赋给ApplicationContext，如果没有则实例化一个SimpleApplicationEventMulticaster
 									  对象，并把这个实例对象赋值给ApplicationContext中。
 	
 	ApplicationEventMulticaster（接口）：实现该接口的对象，能够管理ApplicationListener对象，并且发布时间给ApplicationListener。
 
+	
+	
+一、重要的类。
+	1、ApplicationEventMulticaster：可以通过其内部的方法获取到多个ApplicationListener（监听）。然后遍历触发这些监听。
+	
+	2、ApplicationEventMulticaster在时间模型的作用。相当于一个监听的总调度，这是一个总监听，调用其某一个方法，就会触发所有给定条件的监听器。
+
+
+	
+	
+二、源码。	
+/**
+ * 判断BeanFactory中是否有ApplicationEventMulticaster的bean。如果有把BeanFactory中的bean赋值给Context。
+ * 如果没有自己创建一个SimpleApplicationEventMulticaster()，并把Bean注册到Context中。
+ */
+location：
 protected void initApplicationEventMulticaster() {
 
 	// 获取内置的BeanFactory。
 	ConfigurableListableBeanFactory beanFactory = getBeanFactory();
 	
-	// BeanFactory是否包含applicationEventMulticaster的Bean
+	// BeanFactory是否包含applicationEventMulticaster的Bean。【APPLICATION_EVENT_MULTICASTER_BEAN_NAME=applicationEventMulticaster】
 	if (beanFactory.containsLocalBean(APPLICATION_EVENT_MULTICASTER_BEAN_NAME)) {
 		
 		// 把内置BeanFactory中的applicationEventMulticaster的Bean复制给xmlWebApplicationContext
@@ -22,6 +42,7 @@ protected void initApplicationEventMulticaster() {
 	
 		// 创建applicationEventMulticaster的Bean并注册到BeanFactory中。【【事件源】】
 		this.applicationEventMulticaster = new SimpleApplicationEventMulticaster(beanFactory);
+		
 		beanFactory.registerSingleton(APPLICATION_EVENT_MULTICASTER_BEAN_NAME, this.applicationEventMulticaster);
 		if (logger.isDebugEnabled()) {
 			logger.debug("Unable to locate ApplicationEventMulticaster with name '" + APPLICATION_EVENT_MULTICASTER_BEAN_NAME + "': using default [" + this.applicationEventMulticaster + "]");
@@ -53,16 +74,21 @@ public void multicastEvent(final ApplicationEvent event, ResolvableType eventTyp
 }
 
 
-// 根据事件、事件类型获取到对应的监听器。
+/**
+ * 根据事件、事件类型获取到对应的监听器。
+ */
+location： 
 protected Collection<ApplicationListener<?>> getApplicationListeners(ApplicationEvent event, ResolvableType eventType) {
 
 	Object source = event.getSource();
 	
 	Class<?> sourceType = (source != null ? source.getClass() : null);
+	
 	// 获取监听器的缓存key。
 	ListenerCacheKey cacheKey = new ListenerCacheKey(eventType, sourceType);
 	
 	ListenerRetriever retriever = this.retrieverCache.get(cacheKey);
+	
 	if (retriever != null) {
 		return retriever.getApplicationListeners();
 	}

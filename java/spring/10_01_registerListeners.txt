@@ -1,4 +1,7 @@
-refresh()
+【spring 4.3.12】
+
+
+refresh()：第十部分
 	registerListeners()：注册监听器。
 
 

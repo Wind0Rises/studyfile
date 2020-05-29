@@ -1,0 +1,904 @@
+
+零、待处理：
+
+
+
+
+四、源码
+
+
+#################################################
+#   				跳转过程					#
+#################################################
+/**
+ * 对请求进行分发。
+ */ 
+location：DispatcherServlet
+protected void doDispatch(HttpServletRequest request, HttpServletResponse response) throws Exception {
+	
+	HttpServletRequest processedRequest = request;
+	HandlerExecutionChain mappedHandler = null;
+	boolean multipartRequestParsed = false;
+
+	// 主要用来管理异步请求的处理。
+	WebAsyncManager asyncManager = WebAsyncUtils.getAsyncManager(request);
+
+	try {
+		ModelAndView mv = null;
+		Exception dispatchException = null;
+
+		try {
+		
+		
+			/**
+			 * 01、检查是否是文件上传。
+			 */
+			processedRequest = checkMultipart(request);
+			multipartRequestParsed = (processedRequest != request);
+
+			
+			
+			/**
+			 * 02、获取对应的HandlerExecutionChain。【【【根据请求获取对应的HandlerExecutionChain】】】
+			 * 		HandlerExecutionChain只能通过HandlerMapping中的getHandler(..)方法获取到。
+			 */
+			mappedHandler = getHandler(processedRequest);
+			
+			if (mappedHandler == null || mappedHandler.getHandler() == null) {
+				noHandlerFound(processedRequest, response);
+				return;
+			}
+
+			
+			
+			/** 
+			 * mappedHandler.getHandler()：获取的就是HandlerMethod。
+			 * 03、确定当前请求的处理器适配器。【getHandlerAdapter】
+			 */
+			HandlerAdapter ha = getHandlerAdapter(mappedHandler.getHandler());
+
+			
+			// 获取请求的方法。
+			String method = request.getMethod();
+			
+			// get方法处理
+			boolean isGet = "GET".equals(method);
+			
+			// 04、判读是否是GET请求或者是HEAD请求。
+			if (isGet || "HEAD".equals(method)) {
+				// 这个与缓存有关，可以研究一下？？？？
+				long lastModified = ha.getLastModified(request, mappedHandler.getHandler());
+				if (logger.isDebugEnabled()) {
+					logger.debug("Last-Modified value for [" + getRequestUri(request) + "] is: " + lastModified);
+				}
+				if (new ServletWebRequest(request, response).checkNotModified(lastModified) && isGet) {
+					return;
+				}
+			}
+
+			// 拦截器的前置处理。
+			if (!mappedHandler.applyPreHandle(processedRequest, response)) {
+				return;
+			}
+
+			/**
+			 * 04、调用HandlerAdapter的handler方法。获取对应ModelAndView
+			 */
+			mv = ha.handle(processedRequest, response, mappedHandler.getHandler());
+
+			
+			
+			if (asyncManager.isConcurrentHandlingStarted()) {
+				return;
+			}
+
+			// 06、添加默认的名称
+			applyDefaultViewName(processedRequest, mv);
+			
+			
+			// 07、HandlerExecutionChain后置处理
+			mappedHandler.applyPostHandle(processedRequest, response, mv);
+			
+		} catch (Exception ex) {
+			dispatchException = ex;
+		} catch (Throwable err) {
+			dispatchException = new NestedServletException("Handler dispatch failed", err);
+		}
+		
+		// 08、结果处理、获取视图解析解
+		processDispatchResult(processedRequest, response, mappedHandler, mv, dispatchException);
+		
+		
+	} catch (Exception ex) {
+		triggerAfterCompletion(processedRequest, response, mappedHandler, ex);
+	} catch (Throwable err) {
+		triggerAfterCompletion(processedRequest, response, mappedHandler,  new NestedServletException("Handler processing failed", err));
+	} finally {
+		if (asyncManager.isConcurrentHandlingStarted()) {
+			if (mappedHandler != null) {
+				mappedHandler.applyAfterConcurrentHandlingStarted(processedRequest, response);
+			}
+		} else {
+			if (multipartRequestParsed) {
+				cleanupMultipart(processedRequest);
+			}
+		}
+	}
+}
+
+
+/**
+ * 以RequestMappingHandlerAdapter实例。
+ */
+location：AbstractHandlerMethodAdapter
+public final ModelAndView handle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
+	// handler：就是HandlerMethod。
+	return handleInternal(request, response, (HandlerMethod) handler);
+}
+
+
+/**
+ * 以RequestMappingHandlerAdapter实例。
+ */
+location：RequestMappingHandlerAdapter
+protected ModelAndView handleInternal(HttpServletRequest request, HttpServletResponse response, HandlerMethod handlerMethod) throws Exception {
+
+	ModelAndView mav;
+	
+	/**
+	 * 检查request。
+	 */
+	checkRequest(request);
+
+	
+	// synchronizeOnSession：默认为false。
+	if (this.synchronizeOnSession) {
+		HttpSession session = request.getSession(false);
+		if (session != null) {
+			Object mutex = WebUtils.getSessionMutex(session);
+			synchronized (mutex) {
+				mav = invokeHandlerMethod(request, response, handlerMethod);
+			}
+		} else {
+			mav = invokeHandlerMethod(request, response, handlerMethod);
+		}
+	} else {
+		/** 
+		 * ##############################################
+		 * #			调用HandlerMethod的过程	 		#
+		 * ##############################################
+		 */
+		mav = invokeHandlerMethod(request, response, handlerMethod);
+	}
+
+	
+	if (!response.containsHeader(HEADER_CACHE_CONTROL)) {
+		if (getSessionAttributesHandler(handlerMethod).hasSessionAttributes()) {
+			applyCacheSeconds(response, this.cacheSecondsForSessionAttributeHandlers);
+		} else {
+			prepareResponse(response);
+		}
+	}
+
+	return mav;
+}
+
+
+
+
+
+/**
+ * 通过
+ * 
+ * 
+ * 主要步骤：
+ * 		1、遍历HandlerMehtod中的所有参数。首先通过参数类型获取对应的HandlerMethodArgumentResolver。然后在HandlerMethodArgumentResolver中解析请求并把请求
+ *		   转换成HandlerMehtod中参数类型的实例，这里通过HttpMessageConverter进行读取信息和装换操作，可以通过Content-Type和参数类型获取适合的HttMessageConverter
+ *		   
+ * 		2、构建一个WebDataBinder，进行必要的参数校验处理。
+ *
+ *		3、通过反射调用HandlerMapping。
+ *		
+ *		4、对返回结果值进行处理。通过返回值的类型获取对应的HandlerMethodReturnValueHandler，在HandlerMethodReturnValueHandler中会把响应信息写入输出流，真正操
+ *		   作的是HttpMessageConverter，可以根据返回类型和MideaType确定使用哪一个HttpMessageConverter
+ *		
+ *		5、构建一个ModelAndView并返回
+ * 
+ * 调用HandlerMethod的过程
+ */
+location：RequestMappingHandlerAdapter
+protected ModelAndView invokeHandlerMethod(HttpServletRequest request, HttpServletResponse response, HandlerMethod handlerMethod) throws Exception {
+	
+	// 创建ServletWebRequest对象。
+	ServletWebRequest webRequest = new ServletWebRequest(request, response);
+	
+	try {
+		/**
+		 * 获取WebDataBinderFactory，并构建ModelFactory。
+		 * 		
+		 */
+		WebDataBinderFactory binderFactory = getDataBinderFactory(handlerMethod);
+		ModelFactory modelFactory = getModelFactory(handlerMethod, binderFactory);
+
+		/**
+		 * 创建ServletInvocableHandlerMethod实例，并为其设置属性，ServletInvocableHandlerMethod是HandlerMethod的子类。
+		 */
+		ServletInvocableHandlerMethod invocableMethod = createInvocableHandlerMethod(handlerMethod);
+		invocableMethod.setHandlerMethodArgumentResolvers(this.argumentResolvers);
+		invocableMethod.setHandlerMethodReturnValueHandlers(this.returnValueHandlers);
+		invocableMethod.setDataBinderFactory(binderFactory);
+		invocableMethod.setParameterNameDiscoverer(this.parameterNameDiscoverer);
+
+		/**
+		 * 创建ModelAndViewContainer实例，并为其设置属性。
+		 */
+		ModelAndViewContainer mavContainer = new ModelAndViewContainer();
+		mavContainer.addAllAttributes(RequestContextUtils.getInputFlashMap(request));
+		modelFactory.initModel(webRequest, mavContainer, invocableMethod);
+		mavContainer.setIgnoreDefaultModelOnRedirect(this.ignoreDefaultModelOnRedirect);
+
+		/**
+		 * 构建AsyncWebRequest实例对象，并设置属性。
+		 */
+		AsyncWebRequest asyncWebRequest = WebAsyncUtils.createAsyncWebRequest(request, response);
+		asyncWebRequest.setTimeout(this.asyncRequestTimeout);
+
+		/**
+		 * 构建WebAsyncManager实例对象，并设置属性。
+		 */
+		WebAsyncManager asyncManager = WebAsyncUtils.getAsyncManager(request);
+		asyncManager.setTaskExecutor(this.taskExecutor);
+		asyncManager.setAsyncWebRequest(asyncWebRequest);
+		asyncManager.registerCallableInterceptors(this.callableInterceptors);
+		asyncManager.registerDeferredResultInterceptors(this.deferredResultInterceptors);
+
+		
+		if (asyncManager.hasConcurrentResult()) {
+			Object result = asyncManager.getConcurrentResult();
+			mavContainer = (ModelAndViewContainer) asyncManager.getConcurrentResultContext()[0];
+			asyncManager.clearConcurrentResult();
+			if (logger.isDebugEnabled()) {
+				logger.debug("Found concurrent result value [" + result + "]");
+			}
+			
+			invocableMethod = invocableMethod.wrapConcurrentResult(result);
+		}
+
+		/**
+		 * ##################################################################################
+		 * # 			会调用具体的Handler内容，即你写的Controller里具体的方法				#
+		 * ##################################################################################
+		 */
+		invocableMethod.invokeAndHandle(webRequest, mavContainer);
+		
+		
+		if (asyncManager.isConcurrentHandlingStarted()) {
+			return null;
+		}
+
+		/**
+		 * 获取ModelAndView
+		 */
+		return getModelAndView(mavContainer, modelFactory, webRequest);
+	} finally {
+		webRequest.requestCompleted();
+	}
+}
+
+
+
+#################################################
+#   				1、流程开始					#
+#################################################
+/**
+ * 具体的处理HandlerMapping操作。
+ *
+ * 
+ *
+ * 在构建ServletInvocableHandlerMethod的时候会把HandlerMethod传入其中
+ */
+location：ServletInvocableHandlerMethod
+public void invokeAndHandle(ServletWebRequest webRequest, ModelAndViewContainer mavContainer, Object... providedArgs) throws Exception {
+
+	/**
+	 * 执行具体的HandlerMapping。
+	 */
+	Object returnValue = invokeForRequest(webRequest, mavContainer, providedArgs);
+	
+	/**
+	 * 设置响应状态。
+	 */
+	setResponseStatus(webRequest);
+
+	if (returnValue == null) {
+		if (isRequestNotModified(webRequest) || getResponseStatus() != null || mavContainer.isRequestHandled()) {
+			mavContainer.setRequestHandled(true);
+			return;
+		}
+	} else if (StringUtils.hasText(getResponseStatusReason())) {
+		mavContainer.setRequestHandled(true);
+		return;
+	}
+
+	/**
+	 *   mavContainer的requestHandled：用于判断该请求是否已在处理程序中完全处理，例如@ResponseBody方法，其是不需要View的。
+	 * 			当控制器方法声明类型为ServletResponse或OutputStream的参数时，也可以设置此标志。
+	 */
+	mavContainer.setRequestHandled(false);
+	
+	try {
+		/**
+		 * ##################################################
+		 * #	响应：请求头信息、响应信息					#
+		 * ##################################################
+		 */
+		this.returnValueHandlers.handleReturnValue(returnValue, getReturnValueType(returnValue), mavContainer, webRequest);
+	} catch (Exception ex) {
+		if (logger.isTraceEnabled()) {
+			logger.trace(getReturnValueHandlingErrorMessage("Error handling return value", returnValue), ex);
+		}
+		throw ex;
+	}
+}
+
+/**
+ * HandlerMethod
+ *			InvocableHandlerMethod
+ *						ServletInvocableHandlerMethod
+ *
+ * 1、参数处理。  
+ *
+ * 
+ */
+location：InvocableHandlerMethod
+public Object invokeForRequest(NativeWebRequest request, ModelAndViewContainer mavContainer, Object... providedArgs) throws Exception {
+
+	/**
+	 * 这时上一节研究的。
+	 */
+	Object[] args = getMethodArgumentValues(request, mavContainer, providedArgs);
+	
+	if (logger.isTraceEnabled()) {
+		logger.trace("Invoking '" + ClassUtils.getQualifiedMethodName(getMethod(), getBeanType()) + "' with arguments " + Arrays.toString(args));
+	}
+	
+	/**
+	 * ##################################################################
+	 * #						反射调用								#
+	 * ##################################################################
+	 */
+	Object returnValue = doInvoke(args);
+	
+	if (logger.isTraceEnabled()) {
+		logger.trace("Method [" + ClassUtils.getQualifiedMethodName(getMethod(), getBeanType()) + "] returned [" + returnValue + "]");
+	}
+	
+	return returnValue;
+}
+
+
+
+
+/**
+ * 其是ServletInvocableHandlerMethod实例。
+ * 在构建ServletInvocableHandlerMethod实例时，会把HandlerMethod实例的信息赋值给ServletInvocableHandlerMethod
+ */
+location：InvocableHandlerMethod
+protected Object doInvoke(Object... args) throws Exception {
+	ReflectionUtils.makeAccessible(getBridgedMethod());
+	
+	try {
+		/**
+		 * getBridgedMethod()：handlerMethod.bridgedMethod   ==》 就是@RequestMapping修饰具体要调用的方法。返回的是一个Method实例。
+		 * getBean()：handlerMethod.bean   ==》  就是@RequestMapping修饰的方法对应的类的实例对象。返回对应的实例。
+		 *
+		 * 通过反射调用具体方法。
+		 */
+		return getBridgedMethod().invoke(getBean(), args);
+		
+		
+	} catch (IllegalArgumentException ex) {
+		assertTargetBean(getBridgedMethod(), getBean(), args);
+		String text = (ex.getMessage() != null ? ex.getMessage() : "Illegal argument");
+		throw new IllegalStateException(getInvocationErrorMessage(text, args), ex);
+	} catch (InvocationTargetException ex) { 
+		Throwable targetException = ex.getTargetException();
+		if (targetException instanceof RuntimeException) {
+			throw (RuntimeException) targetException;
+		} else if (targetException instanceof Error) {
+			throw (Error) targetException;
+		} else if (targetException instanceof Exception) {
+			throw (Exception) targetException;
+		} else {
+			String text = getInvocationErrorMessage("Failed to invoke handler method", args);
+			throw new IllegalStateException(text, targetException);
+		}
+	}
+}
+
+
+/**
+ * 设置响应状态。
+ */
+location：ServletInvocableHandlerMethod
+private void setResponseStatus(ServletWebRequest webRequest) throws IOException {
+	HttpStatus status = getResponseStatus();
+	if (status == null) {
+		return;
+	}
+
+	String reason = getResponseStatusReason();
+	if (StringUtils.hasText(reason)) {
+		webRequest.getResponse().sendError(status.value(), reason);
+	} else {
+		webRequest.getResponse().setStatus(status.value());
+	}
+
+	webRequest.getRequest().setAttribute(View.RESPONSE_STATUS_ATTRIBUTE, status);
+}
+
+
+
+/**
+ * 处理返回结果值。
+ */
+location：HandlerMethodReturnValueHandlerComposite
+public void handleReturnValue(Object returnValue, MethodParameter returnType, ModelAndViewContainer mavContainer, NativeWebRequest webRequest) throws Exception {
+
+	/**
+	 * 获取可以处理给定返回值和返回类型的HandlerMethodReturnValueHandler。这里以RequestResponseBodyMethodProcessor为例。
+	 */
+	HandlerMethodReturnValueHandler handler = selectHandler(returnValue, returnType);
+	
+	if (handler == null) {
+		throw new IllegalArgumentException("Unknown return value type: " + returnType.getParameterType().getName());
+	}
+	
+	handler.handleReturnValue(returnValue, returnType, mavContainer, webRequest);
+}
+
+/**
+ * 通过返回结果和返回结果类型确定对应HandlerMethodReturnValueHandler
+ *
+ * HandlerMethodReturnValueHandler：有很多子类。
+ * 		1、ViewNameMethodReturnValueHandler
+ *				public boolean supportsReturnType(MethodParameter returnType) {
+ *					Class<?> paramType = returnType.getParameterType();
+ *					return (void.class == paramType || CharSequence.class.isAssignableFrom(paramType));
+ *				}
+ *		
+ *		2、ViewMethodReturnValueHandler（View）
+ *				public boolean supportsReturnType(MethodParameter returnType) {
+ *					return View.class.isAssignableFrom(returnType.getParameterType());
+ *				}
+ *
+ *
+ * 		3、ModelMethodProcessor（Modle）
+ *				public boolean supportsParameter(MethodParameter parameter) {
+ *					return Map.class.isAssignableFrom(parameter.getParameterType());
+ *				}
+ *
+ *		4、ModelAndViewMethodReturnValueHandler（ModelAndView）
+ *				public boolean supportsReturnType(MethodParameter returnType) {
+ *					return ModelAndView.class.isAssignableFrom(returnType.getParameterType());
+ *				}
+ *
+ *
+ *		5、ModelAttributeMethodProcessor（@ModelAttribute）
+ *				public boolean supportsParameter(MethodParameter parameter) {
+ *					return (parameter.hasParameterAnnotation(ModelAttribute.class) || (this.annotationNotRequired && !BeanUtils.isSimpleProperty(parameter.getParameterType())));
+ *				}
+ *
+ * 		6、StreamingResponseBodyReturnValueHandler
+ *				public boolean supportsReturnType(MethodParameter returnType) {
+ *					if (StreamingResponseBody.class.isAssignableFrom(returnType.getParameterType())) {
+ *						return true;
+ *					} else if (ResponseEntity.class.isAssignableFrom(returnType.getParameterType())) {
+ *						Class<?> bodyType = ResolvableType.forMethodParameter(returnType).getGeneric(0).resolve();
+ *						return (bodyType != null && StreamingResponseBody.class.isAssignableFrom(bodyType));
+ *					}
+ *					return false;
+ *				}
+ *
+ *		7、RequestResponseBodyMethodProcessor
+ *				public boolean supportsReturnType(MethodParameter returnType) {
+ *					return (AnnotatedElementUtils.hasAnnotation(returnType.getContainingClass(), ResponseBody.class) || returnType.hasMethodAnnotation(ResponseBody.class));
+ *				}
+ *
+ *
+ *
+ *
+ */
+location：HandlerMethodReturnValueHandlerComposite
+private HandlerMethodReturnValueHandler selectHandler(Object value, MethodParameter returnType) {
+
+	boolean isAsyncValue = isAsyncReturnValue(value, returnType);
+	
+	/**
+	 * 遍历所有HandlerMethodReturnHandler找到合适的HandlerMethodReturnValueHandler。
+	 */
+	for (HandlerMethodReturnValueHandler handler : this.returnValueHandlers) {
+		if (isAsyncValue && !(handler instanceof AsyncHandlerMethodReturnValueHandler)) {
+			continue;
+		}
+		if (handler.supportsReturnType(returnType)) {
+			return handler;
+		}
+	}
+	return null;
+}
+
+/**
+ *
+ */
+location：HandlerMethodReturnValueHandlerComposite
+public boolean isAsyncReturnValue(Object value, MethodParameter returnType) {
+	for (HandlerMethodReturnValueHandler handler : this.returnValueHandlers) {
+		if (handler instanceof AsyncHandlerMethodReturnValueHandler) {
+			if (((AsyncHandlerMethodReturnValueHandler) handler).isAsyncReturnValue(value, returnType)) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+
+
+/**
+ *
+ */
+location：RequestResponseBodyMethodProcessor
+public void handleReturnValue(Object returnValue, MethodParameter returnType, ModelAndViewContainer mavContainer, NativeWebRequest webRequest) throws IOException, HttpMediaTypeNotAcceptableException, HttpMessageNotWritableException {
+
+	/**
+	 * 
+	 */
+	mavContainer.setRequestHandled(true);
+	
+	/**
+	 * 创建ServletServerHttpRequest、ServletServerHttpResponse实例对象。
+	 */
+	ServletServerHttpRequest inputMessage = createInputMessage(webRequest);
+	ServletServerHttpResponse outputMessage = createOutputMessage(webRequest);
+
+	/**
+	 * 把返回值写入响应。
+	 */
+	writeWithMessageConverters(returnValue, returnType, inputMessage, outputMessage);
+}
+
+/**
+ * 构建ServletServerHttpRequest实例。
+ */
+location：AbstractMessageConverterMethodArgumentResolver
+protected ServletServerHttpRequest createInputMessage(NativeWebRequest webRequest) {
+	HttpServletRequest servletRequest = webRequest.getNativeRequest(HttpServletRequest.class);
+	return new ServletServerHttpRequest(servletRequest);
+}
+
+
+/**
+ * 构建ServletServerHttpResponse实例。
+ */
+location：AbstractMessageConverterMethodArgumentResolver
+protected ServletServerHttpResponse createOutputMessage(NativeWebRequest webRequest) {
+	HttpServletResponse response = webRequest.getNativeResponse(HttpServletResponse.class);
+	return new ServletServerHttpResponse(response);
+}
+
+
+/**
+ *
+ */
+location：AbstractMessageConverterMethodArgumentResolver
+protected <T> void writeWithMessageConverters(T value, MethodParameter returnType, ServletServerHttpRequest inputMessage, ServletServerHttpResponse outputMessage) throws IOException, HttpMediaTypeNotAcceptableException, HttpMessageNotWritableException {
+
+	Object outputValue;
+	Class<?> valueType;
+	Type declaredType;
+
+	/**
+	 * 判断是否是String类型。
+	 */
+	if (value instanceof CharSequence) {
+		outputValue = value.toString();
+		valueType = String.class;
+		declaredType = String.class;
+	} else {
+		outputValue = value;
+		valueType = getReturnValueType(outputValue, returnType);
+		declaredType = getGenericType(returnType);
+	}
+
+	HttpServletRequest request = inputMessage.getServletRequest();
+	List<MediaType> requestedMediaTypes = getAcceptableMediaTypes(request);
+	List<MediaType> producibleMediaTypes = getProducibleMediaTypes(request, valueType, declaredType);
+
+	if (outputValue != null && producibleMediaTypes.isEmpty()) {
+		throw new IllegalArgumentException("No converter found for return value of type: " + valueType);
+	}
+
+	Set<MediaType> compatibleMediaTypes = new LinkedHashSet<MediaType>();
+	for (MediaType requestedType : requestedMediaTypes) {
+		for (MediaType producibleType : producibleMediaTypes) {
+			if (requestedType.isCompatibleWith(producibleType)) {
+				compatibleMediaTypes.add(getMostSpecificMediaType(requestedType, producibleType));
+			}
+		}
+	}
+	
+	if (compatibleMediaTypes.isEmpty()) {
+		if (outputValue != null) {
+			throw new HttpMediaTypeNotAcceptableException(producibleMediaTypes);
+		}
+		return;
+	}
+
+	List<MediaType> mediaTypes = new ArrayList<MediaType>(compatibleMediaTypes);
+	MediaType.sortBySpecificityAndQuality(mediaTypes);
+
+	MediaType selectedMediaType = null;
+	for (MediaType mediaType : mediaTypes) {
+		if (mediaType.isConcrete()) {
+			selectedMediaType = mediaType;
+			break;
+		} else if (mediaType.equals(MediaType.ALL) || mediaType.equals(MEDIA_TYPE_APPLICATION)) {
+			selectedMediaType = MediaType.APPLICATION_OCTET_STREAM;
+			break;
+		}
+	}
+
+	if (selectedMediaType != null) {
+		selectedMediaType = selectedMediaType.removeQualityValue();
+		
+		/**
+		 * 根据返回类型和媒体类型获取符合条件的HttpMessageConverter
+		 */
+		for (HttpMessageConverter<?> messageConverter : this.messageConverters) {
+			if (messageConverter instanceof GenericHttpMessageConverter) {
+				
+				if (((GenericHttpMessageConverter) messageConverter).canWrite(declaredType, valueType, selectedMediaType)) {
+					
+					outputValue = (T) getAdvice().beforeBodyWrite(outputValue, returnType, selectedMediaType, (Class<? extends HttpMessageConverter<?>>) messageConverter.getClass(), inputMessage, outputMessage);
+					
+					if (outputValue != null) {
+						addContentDispositionHeader(inputMessage, outputMessage);
+						((GenericHttpMessageConverter) messageConverter).write(outputValue, declaredType, selectedMediaType, outputMessage);
+						if (logger.isDebugEnabled()) {
+							logger.debug("Written [" + outputValue + "] as \"" + selectedMediaType + "\" using [" + messageConverter + "]");
+						}
+					}
+					return;
+				}
+			
+			/**
+			 * HttpMessageConverter：其有很多实现类。可以根据返回值类类型和mediaTye判断其是否支持。
+			 * 				FormHttpMessageConverter
+			 *				AbstractHttpMessageConverter
+			 *						SourceHttpMessageConverter
+			 *						ResourceHttpMessageConverter
+			 *						ByteArrayHttpMessageConverter
+			 *						StringHttpMessageConverter【使用的】
+			 *						
+			 */
+			} else if (messageConverter.canWrite(valueType, selectedMediaType)) {
+				
+				outputValue = (T) getAdvice().beforeBodyWrite(outputValue, returnType, selectedMediaType, (Class<? extends HttpMessageConverter<?>>) messageConverter.getClass(),inputMessage, outputMessage);
+				
+				if (outputValue != null) {
+					/**
+					 * 请求头处理。
+					 */
+					addContentDispositionHeader(inputMessage, outputMessage);
+					((HttpMessageConverter) messageConverter).write(outputValue, selectedMediaType, outputMessage);
+					if (logger.isDebugEnabled()) {
+						logger.debug("Written [" + outputValue + "] as \"" + selectedMediaType + "\" using [" + messageConverter + "]");
+					}
+				}
+				return;
+			}
+		}
+	}
+
+	if (outputValue != null) {
+		throw new HttpMediaTypeNotAcceptableException(this.allSupportedMediaTypes);
+	}
+}
+
+/**
+ * 部分请求头处理。
+ */
+location：AbstractMessageConverterMethodProcessor
+private void addContentDispositionHeader(ServletServerHttpRequest request, ServletServerHttpResponse response) {
+	
+	/**
+	 * 可以具体看下有哪些响应头HttpHeaders。
+	 */
+	HttpHeaders headers = response.getHeaders();
+	
+	if (headers.containsKey(HttpHeaders.CONTENT_DISPOSITION)) {
+		return;
+	}
+
+	try {
+		int status = response.getServletResponse().getStatus();
+		if (status < 200 || status > 299) {
+			return;
+		}
+	} catch (Throwable ex) {
+		
+	}
+
+	HttpServletRequest servletRequest = request.getServletRequest();
+	String requestUri = RAW_URL_PATH_HELPER.getOriginatingRequestUri(servletRequest);
+
+	int index = requestUri.lastIndexOf('/') + 1;
+	String filename = requestUri.substring(index);
+	String pathParams = "";
+
+	index = filename.indexOf(';');
+	if (index != -1) {
+		pathParams = filename.substring(index);
+		filename = filename.substring(0, index);
+	}
+
+	filename = DECODING_URL_PATH_HELPER.decodeRequestString(servletRequest, filename);
+	String ext = StringUtils.getFilenameExtension(filename);
+
+	pathParams = DECODING_URL_PATH_HELPER.decodeRequestString(servletRequest, pathParams);
+	String extInPathParams = StringUtils.getFilenameExtension(pathParams);
+
+	if (!safeExtension(servletRequest, ext) || !safeExtension(servletRequest, extInPathParams)) {
+		headers.add(HttpHeaders.CONTENT_DISPOSITION, "inline;filename=f.txt");
+	}
+}
+
+
+/**
+ * This ===  StringHttpMessageConverter
+ */
+location：AbstractHttpMessageConverter
+public final void write(final T t, MediaType contentType, HttpOutputMessage outputMessage) throws IOException, HttpMessageNotWritableException {
+
+	/**
+	 * 设置默认的请求头。
+	 */
+	final HttpHeaders headers = outputMessage.getHeaders();
+	addDefaultHeaders(headers, t, contentType);
+
+	if (outputMessage instanceof StreamingHttpOutputMessage) {
+		StreamingHttpOutputMessage streamingOutputMessage = (StreamingHttpOutputMessage) outputMessage;
+		streamingOutputMessage.setBody(new StreamingHttpOutputMessage.Body() {
+			@Override
+			public void writeTo(final OutputStream outputStream) throws IOException {
+				writeInternal(t, new HttpOutputMessage() {
+					@Override
+					public OutputStream getBody() throws IOException {
+						return outputStream;
+					}
+					
+					@Override
+					public HttpHeaders getHeaders() {
+						return headers;
+					}
+				});
+			}
+		});
+	} else {
+		writeInternal(t, outputMessage);
+		outputMessage.getBody().flush();
+	}
+}
+
+/**
+ * 把响应信息写入输出流中。
+ */
+location：StringHttpMessageConverter
+protected void writeInternal(String str, HttpOutputMessage outputMessage) throws IOException {
+	if (this.writeAcceptCharset) {
+		outputMessage.getHeaders().setAcceptCharset(getAcceptedCharsets());
+	}
+	Charset charset = getContentTypeCharset(outputMessage.getHeaders().getContentType());
+	StreamUtils.copy(str, charset, outputMessage.getBody());
+}
+
+
+/**
+ * 写入流操作。
+ */
+location：StreamUtils
+public static void copy(String in, Charset charset, OutputStream out) throws IOException {
+	Assert.notNull(in, "No input String specified");
+	Assert.notNull(charset, "No charset specified");
+	Assert.notNull(out, "No OutputStream specified");
+
+	Writer writer = new OutputStreamWriter(out, charset);
+	writer.write(in);
+	writer.flush();
+}
+
+
+
+#################################################
+#				获取ModelAndView				#
+#################################################
+/**
+ *
+ */
+location：RequestMappingHandlerAdapter
+private ModelAndView getModelAndView(ModelAndViewContainer mavContainer, ModelFactory modelFactory, NativeWebRequest webRequest) throws Exception {
+
+	/**
+	 *
+	 */
+	modelFactory.updateModel(webRequest, mavContainer);
+	
+	/**
+	 * 判断该请求是否处理完成，如果完成，就直接放回，例如使用@ResponseBody修饰的控制器，到这里就结束了。
+	 */
+	if (mavContainer.isRequestHandled()) {
+		return null;
+	}
+	
+	/**
+	 * 获取model信息。
+	 */
+	ModelMap model = mavContainer.getModel();
+	
+	/**
+	 * 构建ModelAndView
+	 */
+	ModelAndView mav = new ModelAndView(mavContainer.getViewName(), model, mavContainer.getStatus());
+	
+	if (!mavContainer.isViewReference()) {
+		mav.setView((View) mavContainer.getView());
+	}
+	
+	if (model instanceof RedirectAttributes) {
+		Map<String, ?> flashAttributes = ((RedirectAttributes) model).getFlashAttributes();
+		HttpServletRequest request = webRequest.getNativeRequest(HttpServletRequest.class);
+		RequestContextUtils.getOutputFlashMap(request).putAll(flashAttributes);
+	}
+	
+	return mav;
+}
+
+/**
+ *
+ */
+location：ModelFactory
+public void updateModel(NativeWebRequest request, ModelAndViewContainer container) throws Exception {
+	ModelMap defaultModel = container.getDefaultModel();
+	if (container.getSessionStatus().isComplete()){
+		this.sessionAttributesHandler.cleanupAttributes(request);
+	}
+	else {
+		this.sessionAttributesHandler.storeAttributes(request, defaultModel);
+	}
+	if (!container.isRequestHandled() && container.getModel() == defaultModel) {
+		updateBindingResult(request, defaultModel);
+	}
+}
+
+
+/**
+ *
+ */
+location：ModelAndView
+public ModelAndView(String viewName, Map<String, ?> model, HttpStatus status) {
+	this.view = viewName;
+	if (model != null) {
+		getModelMap().addAllAttributes(model);
+	}
+	this.status = status;
+}
+
+/**
+ *
+ */
+location：ModelAndView
+public boolean isViewReference() {
+	return (this.view instanceof String);
+}
+

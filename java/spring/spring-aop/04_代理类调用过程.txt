@@ -1,0 +1,514 @@
+
+
+一、总结
+	1、Cglib一般会注入下面七个Callback，一般情况下，都是使用第一个DynamicAdvisedInterceptor。
+		DynamicAdvisedInterceptor：
+		StaticUnadvisedInterceptor：方法拦截器 用于没有Advisor链的静态目标。该调用将直接传递给目标。 在需要公开代理并且无法确定方法不会返回时使用。
+		SerializableNoOp：没有MethodInterceptor接口。但是实现了NoOp接口。这个类什么事都没有做。
+		StaticDispatcher：没有MethodInterceptor接口。但是实现了Dispatcher接口。
+		AdvisedDispatcher：没有MethodInterceptor接口。但是实现了Dispatcher接口。
+		EqualsInterceptor：实现了MethodInterceptor
+		HashCodeInterceptor：实现了MethodInterceptor
+	
+
+
+	2、自动以before/after/around/..方法的参数。
+		before/after/afterReturning/afterThrowing：参数都是JoinPoint。
+		around：参数是ProceedingJoinPoint。在around方法中要使用ProceedingJoinPoint.proceed()，一般为MethodInvocationProceedingJoinPoint类的实例。
+	
+/**
+ * DynamicAdvisedInterceptor是CglibAopProxy内部类。
+ */
+location：DynamicAdvisedInterceptor
+public Object intercept(Object proxy, Method method, Object[] args, MethodProxy methodProxy) throws Throwable {
+	Object oldProxy = null;
+	boolean setProxyContext = false;
+	Class<?> targetClass = null;
+	Object target = null;
+	try {
+		if (this.advised.exposeProxy) {
+			oldProxy = AopContext.setCurrentProxy(proxy);
+			setProxyContext = true;
+		}
+		
+		// 获取目标类。
+		target = getTarget();
+		if (target != null) {
+			targetClass = target.getClass();
+		}
+		
+		
+		List<Object> chain = this.advised.getInterceptorsAndDynamicInterceptionAdvice(method, targetClass);
+		
+		
+		Object retVal;
+		
+		
+		if (chain.isEmpty() && Modifier.isPublic(method.getModifiers())) {
+			Object[] argsToUse = AopProxyUtils.adaptArgumentsIfNecessary(method, args);
+			retVal = methodProxy.invoke(target, argsToUse);
+		
+		
+		} else {
+			/**
+			 * ##############################
+			 * #		调用过程。			#
+			 * ##############################
+			 */
+			retVal = new CglibMethodInvocation(proxy, target, method, args, targetClass, chain, methodProxy).proceed();
+		}
+		retVal = processReturnType(proxy, target, method, retVal);
+		return retVal;
+	
+	
+	} finally {	
+		if (target != null) {
+			releaseTarget(target);
+		}
+		if (setProxyContext) {
+			AopContext.setCurrentProxy(oldProxy);
+		}
+	}
+}
+
+
+/**
+ * 获取Advisor调用链。
+ */
+location：AdvisedSupport
+public List<Object> getInterceptorsAndDynamicInterceptionAdvice(Method method, Class<?> targetClass) {
+	MethodCacheKey cacheKey = new MethodCacheKey(method);
+	List<Object> cached = this.methodCache.get(cacheKey);
+	if (cached == null) {
+		cached = this.advisorChainFactory.getInterceptorsAndDynamicInterceptionAdvice(this, method, targetClass);
+		this.methodCache.put(cacheKey, cached);
+	}
+	
+	return cached;
+}
+
+
+/**
+ * 
+ */
+location：DefaultAdvisorChainFactory
+public List<Object> getInterceptorsAndDynamicInterceptionAdvice(Advised config, Method method, Class<?> targetClass) {
+
+	List<Object> interceptorList = new ArrayList<Object>(config.getAdvisors().length);
+	Class<?> actualClass = (targetClass != null ? targetClass : method.getDeclaringClass());
+	boolean hasIntroductions = hasMatchingIntroductions(config, actualClass);
+	AdvisorAdapterRegistry registry = GlobalAdvisorAdapterRegistry.getInstance();
+
+	// 获取所有的Advisor。并遍历。
+	for (Advisor advisor : config.getAdvisors()) {
+	
+		// 判断advisor是否是PointcutAdvisor类的实例。
+		if (advisor instanceof PointcutAdvisor) {
+			PointcutAdvisor pointcutAdvisor = (PointcutAdvisor) advisor;
+			
+			// 判断是否满足切点表达式。
+			if (config.isPreFiltered() || pointcutAdvisor.getPointcut().getClassFilter().matches(actualClass)) {
+				MethodInterceptor[] interceptors = registry.getInterceptors(advisor);
+				MethodMatcher mm = pointcutAdvisor.getPointcut().getMethodMatcher();
+				if (MethodMatchers.matches(mm, method, actualClass, hasIntroductions)) {
+					if (mm.isRuntime()) {	
+						for (MethodInterceptor interceptor : interceptors) {
+							interceptorList.add(new InterceptorAndDynamicMethodMatcher(interceptor, mm));
+						}
+					} else {
+						interceptorList.addAll(Arrays.asList(interceptors));
+					}
+				}
+			}
+		} else if (advisor instanceof IntroductionAdvisor) {
+			IntroductionAdvisor ia = (IntroductionAdvisor) advisor;
+			if (config.isPreFiltered() || ia.getClassFilter().matches(actualClass)) {
+				Interceptor[] interceptors = registry.getInterceptors(advisor);
+				interceptorList.addAll(Arrays.asList(interceptors));
+			}
+		} else {
+			Interceptor[] interceptors = registry.getInterceptors(advisor);
+			interceptorList.addAll(Arrays.asList(interceptors));
+		}
+	}
+
+	return interceptorList;
+}
+
+
+
+
+
+
+/**
+ * CglibMethodInvocation是CglibAopProxy私有的静态的内部类
+ */
+location：CglibMethodInvocation
+public CglibMethodInvocation(Object proxy, Object target, Method method, Object[] arguments, Class<?> targetClass, List<Object> interceptorsAndDynamicMethodMatchers, MethodProxy methodProxy) {
+
+	super(proxy, target, method, arguments, targetClass, interceptorsAndDynamicMethodMatchers);
+	this.methodProxy = methodProxy;
+	this.publicMethod = Modifier.isPublic(method.getModifiers());
+}
+
+/**
+ * ReflectiveMethodInvocation
+ * 			CglibMethodInvocation
+ *
+ *
+ * interceptorsAndDynamicMethodMatchers内部保存着Advisor调用链。
+ */
+location：ReflectiveMethodInvocation
+protected ReflectiveMethodInvocation(Object proxy, Object target, Method method, Object[] arguments, Class<?> targetClass, List<Object> interceptorsAndDynamicMethodMatchers) {
+
+	this.proxy = proxy;
+	this.target = target;
+	this.targetClass = targetClass;
+	this.method = BridgeMethodResolver.findBridgedMethod(method);
+	this.arguments = AopProxyUtils.adaptArgumentsIfNecessary(method, arguments);
+	this.interceptorsAndDynamicMethodMatchers = interceptorsAndDynamicMethodMatchers;
+}
+
+
+/**
+ * interceptorsAndDynamicMethodMatchers：
+ * 		ExposeInvocationInterceptor
+ *		AspectJAfter
+ *		AspectJMethodBeforeAdvice
+ *
+ *
+ * CglibMethodInvocation extends ReflectiveMethodInvocation
+ */
+location：ReflectiveMethodInvocation
+public Object proceed() throws Throwable {
+
+	/**
+	 * 如果所有调用链都调用过了，就执行被代理类的内容。
+	 *
+	 * invokeJoinpoint(); 执行切点的内容。也就是被代理类的内容。
+	 */
+	if (this.currentInterceptorIndex == this.interceptorsAndDynamicMethodMatchers.size() - 1) {
+		return invokeJoinpoint();
+	}
+
+	/**
+	 * 获取第几个Advisor。
+	 */
+	Object interceptorOrInterceptionAdvice = this.interceptorsAndDynamicMethodMatchers.get(++this.currentInterceptorIndex);
+	
+	
+	/**
+	 * 默认第一都是ExposeInvocationInterceptor。
+	 */
+	if (interceptorOrInterceptionAdvice instanceof InterceptorAndDynamicMethodMatcher) {
+		InterceptorAndDynamicMethodMatcher dm = (InterceptorAndDynamicMethodMatcher) interceptorOrInterceptionAdvice;
+		if (dm.methodMatcher.matches(this.method, this.targetClass, this.arguments)) {
+			return dm.interceptor.invoke(this);
+		} else {
+			return proceed();
+		}
+	} else {
+	
+		/**
+		 * 
+		 */
+		return ((MethodInterceptor) interceptorOrInterceptionAdvice).invoke(this);
+	}
+}
+
+
+/**
+ *
+ *	Advice
+ *				Interceptor
+ *							MethodInterceptor【有一个invoke(MethodInvocation invocation)方法】
+ *
+ *	这里的链，就是Advice链，默认使用。
+ *
+ *
+ *
+ *	Joinpoint【有一个Object proceed()方法】
+ *				Invocation
+ *							MethodInvocation
+ *									 		ProxyMethodInvocation
+ *									 						ReflectiveMethodInvocation
+ *																		CglibMethodInvocation
+ *
+ *	CglibMethodInvocation相当于控制器。（用于判断是否调用链是否执行完成，获取下一个执行的Advice）；
+ *
+ *
+ *
+ */
+
+/**
+ * Advisor调用链的第一。
+ * ExposeInvocationInterceptor基础了MethodInterceptor。其也是Advice。
+ */
+location：ExposeInvocationInterceptor
+public Object invoke(MethodInvocation mi) throws Throwable {
+
+	MethodInvocation oldInvocation = invocation.get();
+
+	invocation.set(mi);
+
+	try {
+		/**
+		 * 这里正式开始调用自定义Advisor调用链了。
+		 */
+		return mi.proceed();
+	} finally {
+		invocation.set(oldInvocation);
+	}
+}
+
+
+/**
+ * 第一执行的：   afterThrow对应的Advice。但是这里没有做任何处理，直接进入下一个Advice。默认只有出现异常的时候才会调用。
+ */
+location：AspectJAfterThrowingAdvice
+public Object invoke(MethodInvocation mi) throws Throwable {
+	try {
+		return mi.proceed();
+	} catch (Throwable ex) {
+		if (shouldInvokeOnThrowing(ex)) {
+			invokeAdviceMethod(getJoinPointMatch(), null, ex);
+		}
+		throw ex;
+	}
+}
+
+
+/** 
+ *	第二执行的：   afterReturning对应的Advice。但是先执行直接进入下一个，然后在处理自己逻辑。
+ */
+location：AfterReturningAdviceInterceptor
+public Object invoke(MethodInvocation mi) throws Throwable {
+	Object retVal = mi.proceed();
+	this.advice.afterReturning(retVal, mi.getMethod(), mi.getArguments(), mi.getThis());
+	return retVal;
+}
+
+
+/**
+ *	第三执行的：    after对应的Advice。但是先执行直接进入下一个，然后在处理自己逻辑。：：：注意：：：不管是什么，就算是异常也会执行。
+ */
+location：AspectJAfterAdvice
+public Object invoke(MethodInvocation mi) throws Throwable {
+	try {
+		return mi.proceed();
+	} finally {
+		/**
+		 * 调用后置处理。
+		 */
+		invokeAdviceMethod(getJoinPointMatch(), null, null);
+	}
+}
+
+
+/**
+ *  第四执行的：    before对应的Advice。这里直接调用Advice。然后调用下一个Advice。78
+ */ 
+location：MethodBeforeAdviceInterceptor
+public Object invoke(MethodInvocation mi) throws Throwable {
+	this.advice.before(mi.getMethod(), mi.getArguments(), mi.getThis() );
+	return mi.proceed();
+}
+
+
+
+/**
+ *  第五执行的：    around对应的Advice。
+ */
+location：AspectJAroundAdvice
+public Object invoke(MethodInvocation mi) throws Throwable {
+	if (!(mi instanceof ProxyMethodInvocation)) {
+		throw new IllegalStateException("MethodInvocation is not a Spring ProxyMethodInvocation: " + mi);
+	}
+	ProxyMethodInvocation pmi = (ProxyMethodInvocation) mi;
+	ProceedingJoinPoint pjp = lazyGetProceedingJoinPoint(pmi);
+	JoinPointMatch jpm = getJoinPointMatch(pmi);
+	return invokeAdviceMethod(pjp, jpm, null, null);
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+######################  afterThrowing对应的细节 #######################
+
+/**
+ *  
+ */ 
+location：AbstractAspectJAdvice
+protected Object invokeAdviceMethod(JoinPointMatch jpMatch, Object returnValue, Throwable ex) throws Throwable {
+	return invokeAdviceMethodWithGivenArgs(argBinding(getJoinPoint(), jpMatch, returnValue, ex));
+}
+
+/**
+ *  
+ */ 
+location：AbstractAspectJAdvice
+protected Object invokeAdviceMethodWithGivenArgs(Object[] args) throws Throwable {
+	Object[] actualArgs = args;
+	if (this.aspectJAdviceMethod.getParameterTypes().length == 0) {
+		actualArgs = null;
+	} try {
+		ReflectionUtils.makeAccessible(this.aspectJAdviceMethod);
+		return this.aspectJAdviceMethod.invoke(this.aspectInstanceFactory.getAspectInstance(), actualArgs);
+	} catch (IllegalArgumentException ex) {
+		throw new AopInvocationException("Mismatch on arguments to advice method [" + this.aspectJAdviceMethod + "]; pointcut expression [" + this.pointcut.getPointcutExpression() + "]", ex);
+	} catch (InvocationTargetException ex) {
+		throw ex.getTargetException();
+	}
+}
+
+######################  afterReturning对应的细节 #######################
+/**
+ *  
+ */ 
+location：AspectJAfterReturningAdvice
+public void afterReturning(Object returnValue, Method method, Object[] args, Object target) throws Throwable {
+	if (shouldInvokeOnReturnValueOf(method, returnValue)) {
+		invokeAdviceMethod(getJoinPointMatch(), returnValue, null);
+	}
+}
+
+/**
+ *  
+ */ 
+location：AbstractAspectJAdvice
+protected Object invokeAdviceMethod(JoinPointMatch jpMatch, Object returnValue, Throwable ex) throws Throwable {
+	return invokeAdviceMethodWithGivenArgs(argBinding(getJoinPoint(), jpMatch, returnValue, ex));
+}
+
+/**
+ *  
+ */ 
+location：AbstractAspectJAdvice
+protected Object invokeAdviceMethodWithGivenArgs(Object[] args) throws Throwable {
+	Object[] actualArgs = args;
+	if (this.aspectJAdviceMethod.getParameterTypes().length == 0) {
+		actualArgs = null;
+	} try {
+		ReflectionUtils.makeAccessible(this.aspectJAdviceMethod);
+		return this.aspectJAdviceMethod.invoke(this.aspectInstanceFactory.getAspectInstance(), actualArgs);
+	} catch (IllegalArgumentException ex) {
+		throw new AopInvocationException("Mismatch on arguments to advice method [" + this.aspectJAdviceMethod + "]; pointcut expression [" + this.pointcut.getPointcutExpression() + "]", ex);
+	} catch (InvocationTargetException ex) {
+		throw ex.getTargetException();
+	}
+}
+
+######################  after对应的细节 #######################
+/**
+ *  
+ */ 
+location：AbstractAspectJAdvice
+protected Object invokeAdviceMethod(JoinPointMatch jpMatch, Object returnValue, Throwable ex) throws Throwable {
+	return invokeAdviceMethodWithGivenArgs(argBinding(getJoinPoint(), jpMatch, returnValue, ex));
+}
+
+/**
+ *  
+ */ 
+location：AbstractAspectJAdvice
+protected Object invokeAdviceMethodWithGivenArgs(Object[] args) throws Throwable {
+	Object[] actualArgs = args;
+	if (this.aspectJAdviceMethod.getParameterTypes().length == 0) {
+		actualArgs = null;
+	} try {
+		ReflectionUtils.makeAccessible(this.aspectJAdviceMethod);
+		return this.aspectJAdviceMethod.invoke(this.aspectInstanceFactory.getAspectInstance(), actualArgs);
+	} catch (IllegalArgumentException ex) {
+		throw new AopInvocationException("Mismatch on arguments to advice method [" + this.aspectJAdviceMethod + "]; pointcut expression [" + this.pointcut.getPointcutExpression() + "]", ex);
+	} catch (InvocationTargetException ex) {
+		throw ex.getTargetException();
+	}
+}
+
+
+######################  before对应的细节 #######################
+/**
+ *  
+ */ 
+location：
+
+
+
+######################  around对应的细节 #######################
+
+/**
+ *  
+ */ 
+location：AspectJAroundAdvice
+protected ProceedingJoinPoint lazyGetProceedingJoinPoint(ProxyMethodInvocation rmi) {
+	return new MethodInvocationProceedingJoinPoint(rmi);
+} 
+
+/**
+ *  
+ */ 
+location：AspectJAroundAdvice
+protected JoinPointMatch getJoinPointMatch(ProxyMethodInvocation pmi) {
+	return (JoinPointMatch) pmi.getUserAttribute(this.pointcut.getExpression());
+}
+
+/**
+ *  
+ */ 
+location：AspectJAroundAdvice
+protected Object invokeAdviceMethod(JoinPoint jp, JoinPointMatch jpMatch, Object returnValue, Throwable t) throws Throwable {
+	return invokeAdviceMethodWithGivenArgs(argBinding(jp, jpMatch, returnValue, t));
+}
+
+/**
+ *  
+ */ 
+location：AspectJAroundAdvice
+protected Object invokeAdviceMethodWithGivenArgs(Object[] args) throws Throwable {
+	Object[] actualArgs = args;
+	if (this.aspectJAdviceMethod.getParameterTypes().length == 0) {
+		actualArgs = null;
+	} try {
+		ReflectionUtils.makeAccessible(this.aspectJAdviceMethod);
+		return this.aspectJAdviceMethod.invoke(this.aspectInstanceFactory.getAspectInstance(), actualArgs);
+	} catch (IllegalArgumentException ex) {
+		throw new AopInvocationException("Mismatch on arguments to advice method [" + this.aspectJAdviceMethod + "]; pointcut expression [" + this.pointcut.getPointcutExpression() + "]", ex);
+	} catch (InvocationTargetException ex) {
+		throw ex.getTargetException();
+	}
+}
+
+
+
+public void before(Method method, Object[] args, Object target) throws Throwable {
+	invokeAdviceMethod(getJoinPointMatch(), null, null);
+}
+
+/**
+ * 调用具体的业务方法。 
+ *
+ *  CglibMethodInvocation是CglibAopProxy私有的静态的内部类
+ */ 
+location：CglibMethodInvocation
+protected Object invokeJoinpoint() throws Throwable {
+	if (this.publicMethod) {
+		/**
+		 * 调用过程。
+		 */
+		return this.methodProxy.invoke(this.target, this.arguments);
+	} else {
+		return super.invokeJoinpoint();
+	}
+}
