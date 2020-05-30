@@ -1,0 +1,626 @@
+
+
+#############################################################################################################################
+#######   附件一      ##########################      02、获取对应的HandlerExecutionChain       #############################
+#############################################################################################################################
+/**
+ * 01、AbstractUrlHandlerMapping
+ * 	   获取处理器执行链
+ */
+location：AbstractUrlHandlerMapping
+protected Object getHandlerInternal(HttpServletRequest request) throws Exception {
+	// 获取请求的url
+	String lookupPath = getUrlPathHelper().getLookupPathForRequest(request);
+	
+	// 获取处理器执行链
+	Object handler = lookupHandler(lookupPath, request);
+	
+	if (handler == null) {
+		Object rawHandler = null;
+		
+		if ("/".equals(lookupPath)) {
+			rawHandler = getRootHandler();
+		}
+		
+		if (rawHandler == null) {
+			rawHandler = getDefaultHandler();
+		}
+		
+		if (rawHandler != null) {
+		
+			if (rawHandler instanceof String) {
+				String handlerName = (String) rawHandler;
+				rawHandler = getApplicationContext().getBean(handlerName);
+			}
+			validateHandler(rawHandler, request);
+			handler = buildPathExposingHandler(rawHandler, lookupPath, lookupPath, null);
+		}
+	}
+	
+	if (handler != null && logger.isDebugEnabled()) {
+		logger.debug("Mapping [" + lookupPath + "] to " + handler);
+	} else if (handler == null && logger.isTraceEnabled()) {
+		logger.trace("No handler mapping found for [" + lookupPath + "]");
+	}
+	return handler;
+}
+
+/**
+ * 获取对应请求路径。
+ */
+location：UrlPathHelper
+public String getLookupPathForRequest(HttpServletRequest request) {
+	// alwaysUseFullPath初始化为false。
+	if (this.alwaysUseFullPath) {
+		return getPathWithinApplication(request);
+	}
+	
+	String rest = getPathWithinServletMapping(request);
+	if (!"".equals(rest)) {
+		return rest;
+	} else {
+		return getPathWithinApplication(request);
+	}
+}
+
+/**
+ * 
+ */
+location：UrlPathHelper
+public String getPathWithinApplication(HttpServletRequest request) {
+	// 获取请求的ContextPath。
+	String contextPath = getContextPath(request);
+	
+	// 获取请求的RequestURI。
+	String requestUri = getRequestUri(request);
+	
+	// 返回requestURI出去ContextPath部分。
+	String path = getRemainingPath(requestUri, contextPath, true);
+	
+	if (path != null) {
+		return (StringUtils.hasText(path) ? path : "/");
+	} else {
+		return requestUri;
+	}
+}
+
+/**
+ * 获取ContextPath。
+ */
+location：UrlPathHelper
+public String getContextPath(HttpServletRequest request) {
+	// INCLUDE_CONTEXT_PATH_ATTRIBUTE = "javax.servlet.include.context_path"
+	String contextPath = (String) request.getAttribute(WebUtils.INCLUDE_CONTEXT_PATH_ATTRIBUTE);
+	
+	if (contextPath == null) {
+		contextPath = request.getContextPath();
+	}
+	
+	if ("/".equals(contextPath)) {
+		contextPath = "";
+	}
+	
+	// 解码。
+	return decodeRequestString(request, contextPath);
+}
+
+/**
+ * 获取RequestURI。
+ */
+public String getRequestUri(HttpServletRequest request) {
+	String uri = (String) request.getAttribute(WebUtils.INCLUDE_REQUEST_URI_ATTRIBUTE);
+	if (uri == null) {
+		uri = request.getRequestURI();
+	}
+	return decodeAndCleanUriString(request, uri);
+}
+
+/**
+ * 
+ */
+location：AbstractUrlHandlerMapping
+protected Object lookupHandler(String urlPath, HttpServletRequest request) throws Exception {
+	
+	// 通过给定的urlpath获取到Handler。也就是用Controller修饰的类。
+	Object handler = this.handlerMap.get(urlPath);
+	
+	if (handler != null) {
+		if (handler instanceof String) {
+			String handlerName = (String) handler;
+			
+			// 获取对应的Bean。
+			handler = getApplicationContext().getBean(handlerName);
+		}
+		
+		
+		validateHandler(handler, request);
+		return buildPathExposingHandler(handler, urlPath, urlPath, null);
+	}
+
+	List<String> matchingPatterns = new ArrayList<String>();
+	for (String registeredPattern : this.handlerMap.keySet()) {
+		if (getPathMatcher().match(registeredPattern, urlPath)) {
+			matchingPatterns.add(registeredPattern);
+		} else if (useTrailingSlashMatch()) {
+			if (!registeredPattern.endsWith("/") && getPathMatcher().match(registeredPattern + "/", urlPath)) {
+				matchingPatterns.add(registeredPattern +"/");
+			}
+		}
+	}
+
+	String bestMatch = null;
+	Comparator<String> patternComparator = getPathMatcher().getPatternComparator(urlPath);
+	
+	if (!matchingPatterns.isEmpty()) {
+		Collections.sort(matchingPatterns, patternComparator);
+		if (logger.isDebugEnabled()) {
+			logger.debug("Matching patterns for request [" + urlPath + "] are " + matchingPatterns);
+		}
+		bestMatch = matchingPatterns.get(0);
+	}
+	
+	if (bestMatch != null) {
+		handler = this.handlerMap.get(bestMatch);
+		if (handler == null) {
+			if (bestMatch.endsWith("/")) {
+				handler = this.handlerMap.get(bestMatch.substring(0, bestMatch.length() - 1));
+			}
+			if (handler == null) {
+				throw new IllegalStateException("Could not find handler for best pattern match [" + bestMatch + "]");
+			}
+		}
+		
+		if (handler instanceof String) {
+			String handlerName = (String) handler;
+			handler = getApplicationContext().getBean(handlerName);
+		}
+		validateHandler(handler, request);
+		String pathWithinMapping = getPathMatcher().extractPathWithinPattern(bestMatch, urlPath);
+
+		Map<String, String> uriTemplateVariables = new LinkedHashMap<String, String>();
+		
+		for (String matchingPattern : matchingPatterns) {
+			if (patternComparator.compare(bestMatch, matchingPattern) == 0) {
+				Map<String, String> vars = getPathMatcher().extractUriTemplateVariables(matchingPattern, urlPath);
+				Map<String, String> decodedVars = getUrlPathHelper().decodePathVariables(request, vars);
+				uriTemplateVariables.putAll(decodedVars);
+			}
+		}
+		
+		if (logger.isDebugEnabled()) {
+			logger.debug("URI Template variables for request [" + urlPath + "] are " + uriTemplateVariables);
+		}
+		return buildPathExposingHandler(handler, bestMatch, pathWithinMapping, uriTemplateVariables);
+	}
+
+	return null;
+}
+
+/**
+ * 构建一个HandlerExecutionChain，并添加拦截器。
+ */
+location：AbstractUrlHandlerMapping
+protected Object buildPathExposingHandler(Object rawHandler, String bestMatchingPattern, String pathWithinMapping, Map<String, String> uriTemplateVariables) {
+	// 实例化一个处理执行链。责任链模式？？？？
+	HandlerExecutionChain chain = new HandlerExecutionChain(rawHandler);
+	// 添加拦截器。
+	chain.addInterceptor(new PathExposingHandlerInterceptor(bestMatchingPattern, pathWithinMapping));
+	if (!CollectionUtils.isEmpty(uriTemplateVariables)) {
+		chain.addInterceptor(new UriTemplateVariablesHandlerInterceptor(uriTemplateVariables));
+	}
+	return chain;
+}
+
+
+
+
+#############################################################################################################################
+#######   附件二      ##########################         05、调用HandlerAdapter的handler方法     ############################
+#############################################################################################################################
+/**
+ * 以AnnotationMethodHandlerAdapter【HandlerAdapter】为例，Handler的执行过程。
+ * 05、真正执行handler过程
+ */
+location：AnnotationMethodHandlerAdapter
+public ModelAndView handle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
+	
+	// 获取HandlerAdapter的Class对象。
+	Class<?> clazz = ClassUtils.getUserClass(handler);
+	
+	// false。session注解类缓存
+	Boolean annotatedWithSessionAttributes = this.sessionAnnotatedClassesCache.get(clazz);
+	if (annotatedWithSessionAttributes == null) {
+		annotatedWithSessionAttributes = (AnnotationUtils.findAnnotation(clazz, SessionAttributes.class) != null);
+		this.sessionAnnotatedClassesCache.put(clazz, annotatedWithSessionAttributes);
+	}
+
+	// 检查请求，准备相应。
+	if (annotatedWithSessionAttributes) {
+		checkAndPrepare(request, response, this.cacheSecondsForSessionAttributeHandlers, true);
+	} else {
+		checkAndPrepare(request, response, true);
+	}
+
+	// 判读是否需要同步执行invokeHandlerMethod(...)
+	if (this.synchronizeOnSession) {
+		HttpSession session = request.getSession(false);
+		
+		if (session != null) {
+			Object mutex = WebUtils.getSessionMutex(session);
+			synchronized (mutex) {
+				return invokeHandlerMethod(request, response, handler);
+			}
+		}
+	}
+
+	return invokeHandlerMethod(request, response, handler);
+}
+
+/**
+ * 
+ */
+location：WebContentGenerator
+protected final void checkAndPrepare(HttpServletRequest request, HttpServletResponse response, boolean lastModified) throws ServletException {
+	checkRequest(request);
+	prepareResponse(response);
+}
+
+/**
+ * 检查请求。检查请求方法，和session。
+ */
+location：WebContentGenerator
+protected final void checkRequest(HttpServletRequest request) throws ServletException {
+
+	String method = request.getMethod();
+	if (this.supportedMethods != null && !this.supportedMethods.contains(method)) {
+		throw new HttpRequestMethodNotSupportedException(method, this.supportedMethods);
+	}
+
+	if (this.requireSession && request.getSession(false) == null) {
+		throw new HttpSessionRequiredException("Pre-existing session required but none found");
+	}
+}
+
+/**
+ * 准备相应。设置一些相应头参数。
+ */
+location：WebContentGenerator
+protected final void prepareResponse(HttpServletResponse response) {
+	if (this.cacheControl != null) {
+		applyCacheControl(response, this.cacheControl);
+	} else {
+		applyCacheSeconds(response, this.cacheSeconds);
+	}
+	
+	if (servlet3Present && this.varyByRequestHeaders != null) {
+		for (String value : getVaryRequestHeadersToAdd(response)) {
+			response.addHeader("Vary", value);
+		}
+	}
+}
+
+protected final void applyCacheControl(HttpServletResponse response, CacheControl cacheControl) {
+	String ccValue = cacheControl.getHeaderValue();
+	if (ccValue != null) {
+		response.setHeader(HEADER_CACHE_CONTROL, ccValue);
+
+		if (response.containsHeader(HEADER_PRAGMA)) {
+			response.setHeader(HEADER_PRAGMA, "");
+		}
+		if (response.containsHeader(HEADER_EXPIRES)) {
+			response.setHeader(HEADER_EXPIRES, "");
+		}
+	}
+}
+
+/**
+ * 调用HandlerMethod。
+ */
+location：AnnotationMethodHandlerAdapter
+protected ModelAndView invokeHandlerMethod(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
+	
+	// 01、获取ServletHandlerMethodResolver实例。
+	ServletHandlerMethodResolver methodResolver = getMethodResolver(handler);
+	
+	// 02、获取对应的要执行的方法。
+	Method handlerMethod = methodResolver.resolveHandlerMethod(request);
+	
+	// 创建一个ServletHandlerMethodInvoker。
+	ServletHandlerMethodInvoker methodInvoker = new ServletHandlerMethodInvoker(methodResolver);
+	
+	// 组织一个ServletWebRequest实例。
+	ServletWebRequest webRequest = new ServletWebRequest(request, response);
+	
+	ExtendedModelMap implicitModel = new BindingAwareModelMap();
+
+	// 调用对应的方法。
+	Object result = methodInvoker.invokeHandlerMethod(handlerMethod, handler, webRequest, implicitModel);
+	
+	// 获取ModelAndView。
+	ModelAndView mav = methodInvoker.getModelAndView(handlerMethod, handler.getClass(), result, implicitModel, webRequest);
+	
+	methodInvoker.updateModelAttributes(handler, (mav != null ? mav.getModel() : null), implicitModel, webRequest);
+	
+	return mav;
+}
+
+/**
+ * 获取ServletHandlerMethodResolver。
+ * ServletHandlerMethodResolver extends HandlerMethodResolver：用于处理程序类型中 解析Web方法注释 的支持类。能够处理@RequestMapping、
+ *		@InitBinder、@ModelAttribute、@SessionAttributes
+ */
+location：AnnotationMethodHandlerAdapter
+private ServletHandlerMethodResolver getMethodResolver(Object handler) {
+
+	// 获取Handler的Class对象。handler是@Controller修饰的类。
+	Class<?> handlerClass = ClassUtils.getUserClass(handler);
+	
+	// 从缓存中获取对应的ServletHandlerMethodResolver实例对象。
+	ServletHandlerMethodResolver resolver = this.methodResolverCache.get(handlerClass);
+	
+	if (resolver == null) {
+		synchronized (this.methodResolverCache) {
+			resolver = this.methodResolverCache.get(handlerClass);
+			
+			// 如果缓存中没有，new一个ServletHandlerMethodResolver，并放入缓存。
+			if (resolver == null) {
+				resolver = new ServletHandlerMethodResolver(handlerClass);
+				this.methodResolverCache.put(handlerClass, resolver);
+			}
+		}
+	}
+	
+	return resolver;
+}
+
+/**
+ * 
+ */
+location：ServletHandlerMethodResolver
+public Method resolveHandlerMethod(HttpServletRequest request) throws ServletException {
+	
+	// 获取请求RUI
+	String lookupPath = urlPathHelper.getLookupPathForRequest(request);
+	Comparator<String> pathComparator = pathMatcher.getPatternComparator(lookupPath);
+	
+	Map<RequestSpecificMappingInfo, Method> targetHandlerMethods = new LinkedHashMap<RequestSpecificMappingInfo, Method>();
+	Set<String> allowedMethods = new LinkedHashSet<String>(7);
+	String resolvedMethodName = null;
+	
+	// getHandlerMethods()  ----> Set<Method> handlerMethods = new LinkedHashSet<Method>();
+	for (Method handlerMethod : getHandlerMethods()) {
+		RequestSpecificMappingInfo mappingInfo = new RequestSpecificMappingInfo(this.mappings.get(handlerMethod));
+		boolean match = false;
+		if (mappingInfo.hasPatterns()) {
+			for (String pattern : mappingInfo.getPatterns()) {
+				if (!hasTypeLevelMapping() && !pattern.startsWith("/")) {
+					pattern = "/" + pattern;
+				}
+				String combinedPattern = getCombinedPattern(pattern, lookupPath, request);
+				if (combinedPattern != null) {
+					if (mappingInfo.matches(request)) {
+						match = true;
+						mappingInfo.addMatchedPattern(combinedPattern);
+					}
+					else {
+						if (!mappingInfo.matchesRequestMethod(request)) {
+							allowedMethods.addAll(mappingInfo.methodNames());
+						}
+						break;
+					}
+				}
+			}
+			mappingInfo.sortMatchedPatterns(pathComparator);
+		} else if (useTypeLevelMapping(request)) {
+			String[] typeLevelPatterns = getTypeLevelMapping().value();
+			for (String typeLevelPattern : typeLevelPatterns) {
+				if (!typeLevelPattern.startsWith("/")) {
+					typeLevelPattern = "/" + typeLevelPattern;
+				}
+				boolean useSuffixPattern = useSuffixPattern(request);
+				if (getMatchingPattern(typeLevelPattern, lookupPath, useSuffixPattern) != null) {
+					if (mappingInfo.matches(request)) {
+						match = true;
+						mappingInfo.addMatchedPattern(typeLevelPattern);
+					}
+					else {
+						if (!mappingInfo.matchesRequestMethod(request)) {
+							allowedMethods.addAll(mappingInfo.methodNames());
+						}
+						break;
+					}
+				}
+			}
+			mappingInfo.sortMatchedPatterns(pathComparator);
+		} else {
+			match = mappingInfo.matches(request);
+			if (match && mappingInfo.getMethodCount() == 0 && mappingInfo.getParamCount() == 0 &&
+					resolvedMethodName != null && !resolvedMethodName.equals(handlerMethod.getName())) {
+				match = false;
+			}
+			else {
+				if (!mappingInfo.matchesRequestMethod(request)) {
+					allowedMethods.addAll(mappingInfo.methodNames());
+				}
+			}
+		}
+		
+		if (match) {
+			Method oldMappedMethod = targetHandlerMethods.put(mappingInfo, handlerMethod);
+			if (oldMappedMethod != null && oldMappedMethod != handlerMethod) {
+				if (methodNameResolver != null && !mappingInfo.hasPatterns()) {
+					if (!oldMappedMethod.getName().equals(handlerMethod.getName())) {
+						if (resolvedMethodName == null) {
+							resolvedMethodName = methodNameResolver.getHandlerMethodName(request);
+						}
+						if (!resolvedMethodName.equals(oldMappedMethod.getName())) {
+							oldMappedMethod = null;
+						}
+						if (!resolvedMethodName.equals(handlerMethod.getName())) {
+							if (oldMappedMethod != null) {
+								targetHandlerMethods.put(mappingInfo, oldMappedMethod);
+								oldMappedMethod = null;
+							}
+							else {
+								targetHandlerMethods.remove(mappingInfo);
+							}
+						}
+					}
+				}
+				if (oldMappedMethod != null) {
+					throw new IllegalStateException("Ambiguous handler methods mapped for HTTP path '" + lookupPath + "': {" + oldMappedMethod + ", " + handlerMethod +
+							"}. If you intend to handle the same path in multiple methods, then factor " + "them out into a dedicated handler class with that path mapped at the type level!");
+				}
+			}
+		}
+	}
+	if (!targetHandlerMethods.isEmpty()) {
+		List<RequestSpecificMappingInfo> matches = new ArrayList<RequestSpecificMappingInfo>(targetHandlerMethods.keySet());
+		RequestSpecificMappingInfoComparator requestMappingInfoComparator = new RequestSpecificMappingInfoComparator(pathComparator, request);
+		Collections.sort(matches, requestMappingInfoComparator);
+		RequestSpecificMappingInfo bestMappingMatch = matches.get(0);
+		String bestMatchedPath = bestMappingMatch.bestMatchedPattern();
+		
+		if (bestMatchedPath != null) {
+			extractHandlerMethodUriTemplates(bestMatchedPath, lookupPath, request);
+		}
+		return targetHandlerMethods.get(bestMappingMatch);
+	} else {
+		if (!allowedMethods.isEmpty()) {
+			throw new HttpRequestMethodNotSupportedException(request.getMethod(), StringUtils.toStringArray(allowedMethods));
+		}
+		throw new org.springframework.web.servlet.mvc.multiaction.NoSuchRequestHandlingMethodException( lookupPath, request.getMethod(), request.getParameterMap());
+	}
+}
+
+
+/**
+ * 执行对应的方法。
+ */ 
+location：HandlerMethodInvoker
+public final Object invokeHandlerMethod(Method handlerMethod, Object handler, NativeWebRequest webRequest, ExtendedModelMap implicitModel) throws Exception {
+
+	Method handlerMethodToInvoke = BridgeMethodResolver.findBridgedMethod(handlerMethod);
+	
+	try {
+		boolean debug = logger.isDebugEnabled();
+		for (String attrName : this.methodResolver.getActualSessionAttributeNames()) {
+			Object attrValue = this.sessionAttributeStore.retrieveAttribute(webRequest, attrName);
+			if (attrValue != null) {
+				implicitModel.addAttribute(attrName, attrValue);
+			}
+		}
+		
+		for (Method attributeMethod : this.methodResolver.getModelAttributeMethods()) {
+			Method attributeMethodToInvoke = BridgeMethodResolver.findBridgedMethod(attributeMethod);
+			
+			Object[] args = resolveHandlerArguments(attributeMethodToInvoke, handler, webRequest, implicitModel);
+			
+			if (debug) {
+				logger.debug("Invoking model attribute method: " + attributeMethodToInvoke);
+			}
+			String attrName = AnnotationUtils.findAnnotation(attributeMethod, ModelAttribute.class).value();
+			
+			if (!"".equals(attrName) && implicitModel.containsAttribute(attrName)) {
+				continue;
+			}
+			ReflectionUtils.makeAccessible(attributeMethodToInvoke);
+			Object attrValue = attributeMethodToInvoke.invoke(handler, args);
+			
+			if ("".equals(attrName)) {
+				Class<?> resolvedType = GenericTypeResolver.resolveReturnType(attributeMethodToInvoke, handler.getClass());
+				attrName = Conventions.getVariableNameForReturnType(attributeMethodToInvoke, resolvedType, attrValue);
+			}
+			
+			if (!implicitModel.containsAttribute(attrName)) {
+				implicitModel.addAttribute(attrName, attrValue);
+			}
+		}
+		
+		// 获取参数。
+		Object[] args = resolveHandlerArguments(handlerMethodToInvoke, handler, webRequest, implicitModel);
+		
+		if (debug) {
+			logger.debug("Invoking request handler method: " + handlerMethodToInvoke);
+		}
+		
+		ReflectionUtils.makeAccessible(handlerMethodToInvoke);
+		
+		// ########## 真正调用Mapping #########
+		return handlerMethodToInvoke.invoke(handler, args);
+	}
+	catch (IllegalStateException ex) {
+		throw new HandlerMethodInvocationException(handlerMethodToInvoke, ex);
+	} catch (InvocationTargetException ex) {
+		ReflectionUtils.rethrowException(ex.getTargetException());
+		return null;
+	}
+}
+
+/**
+ * 获取对应的ModelAndView。
+ */
+location：AnnotationMethodHandlerAdapter.ServletHandlerMethodInvoker
+public ModelAndView getModelAndView(Method handlerMethod, Class<?> handlerType, Object returnValue, ExtendedModelMap implicitModel, ServletWebRequest webRequest) throws Exception {
+
+	// 获取相应结果。
+	ResponseStatus responseStatus = AnnotatedElementUtils.findMergedAnnotation(handlerMethod, ResponseStatus.class);
+	
+	if (responseStatus != null) {
+		HttpStatus statusCode = responseStatus.code();
+		String reason = responseStatus.reason();
+		
+		if (!StringUtils.hasText(reason)) {
+			webRequest.getResponse().setStatus(statusCode.value());
+		} else {
+			webRequest.getResponse().sendError(statusCode.value(), reason);
+		}
+
+		webRequest.getRequest().setAttribute(View.RESPONSE_STATUS_ATTRIBUTE, statusCode);
+
+		this.responseArgumentUsed = true;
+	}
+
+	if (customModelAndViewResolvers != null) {
+		for (ModelAndViewResolver mavResolver : customModelAndViewResolvers) {
+			ModelAndView mav = mavResolver.resolveModelAndView(handlerMethod, handlerType, returnValue, implicitModel, webRequest);
+			if (mav != ModelAndViewResolver.UNRESOLVED) {
+				return mav;
+			}
+		}
+	}
+
+	if (returnValue instanceof HttpEntity) {
+		handleHttpEntityResponse((HttpEntity<?>) returnValue, webRequest);
+		return null;
+	} else if (AnnotationUtils.findAnnotation(handlerMethod, ResponseBody.class) != null) {
+		handleResponseBody(returnValue, webRequest);
+		return null;
+	} else if (returnValue instanceof ModelAndView) {
+		ModelAndView mav = (ModelAndView) returnValue;
+		mav.getModelMap().mergeAttributes(implicitModel);
+		return mav;
+	} else if (returnValue instanceof Model) {
+		return new ModelAndView().addAllObjects(implicitModel).addAllObjects(((Model) returnValue).asMap());
+	} else if (returnValue instanceof View) {
+		return new ModelAndView((View) returnValue).addAllObjects(implicitModel);
+	} else if (AnnotationUtils.findAnnotation(handlerMethod, ModelAttribute.class) != null) {
+		addReturnValueAsModelAttribute(handlerMethod, handlerType, returnValue, implicitModel);
+		return new ModelAndView().addAllObjects(implicitModel);
+	} else if (returnValue instanceof Map) {
+		return new ModelAndView().addAllObjects(implicitModel).addAllObjects((Map<String, ?>) returnValue);
+	} else if (returnValue instanceof String) {
+		return new ModelAndView((String) returnValue).addAllObjects(implicitModel);
+	} else if (returnValue == null) {
+		if (this.responseArgumentUsed || webRequest.isNotModified()) {
+			return null;
+		} else {
+			return new ModelAndView().addAllObjects(implicitModel);
+		}
+	} else if (!BeanUtils.isSimpleProperty(returnValue.getClass())) {
+		addReturnValueAsModelAttribute(handlerMethod, handlerType, returnValue, implicitModel);
+		return new ModelAndView().addAllObjects(implicitModel);
+	} else {
+		throw new IllegalArgumentException("Invalid handler method return value: " + returnValue);
+	}
+}

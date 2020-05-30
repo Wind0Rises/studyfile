@@ -1,0 +1,70 @@
+
+
+
+一、AOP过程的描述。
+
+	1)、AOP如何接入到spring中的？
+		1、在refresh()方法第二步中，要加载BeanDefinition需要构建一个BeanDefinitionDocumentReader实例（发生在XmlBeanDefinitionReader类汇总），并调用其
+		   registerBeanDefinitions(Document doc, XmlReaderContext readerContext).
+		2、调用需要registerBeanDefinitions(...)需要一个XmlReaderContext的对象。
+		3、构建XmlReaderContext由需要NamespaceHandlerResolver【提供了NamespaceHandler resolve(String namespaceUri)方法】对象。在XmlBeanDefinitionReader
+		   类中默认构建DefaultNamespaceHandlerResolver实例对象。
+		4、在DefaultNamespaceHandlerResolver中已经定义好规则了。【【默认加载MATE-INF/spring.handlers文件】】，这个文件中保存着命名空间与对应的处理器。
+		
+		#############################   
+		#	源码请看01_生成...		#  
+		#############################  
+	
+	
+	
+	
+		
+	2)、以xml配置为例，如何加载和解析标签，
+		1、在AopNamespaceHandler的初始化的时候会注册对应的BeanDefinitionParser。然后从AopNamespaceHandler的parser(Element element, ParserContext parserContext)
+		   方法进入解析处理流程。在这个方法中会根据传入的标签获取对应的BeanDefinitionParaser，然后进入具体的解析流程。
+		2、每一个Advice标签都会创建一个AspectJPointcutAdvisor【这是Advisor的子类】对应的BeanDefinition，AspectJPointcutAdvisor的构造函数需要传入一个AbstractAspectJAdvice
+		   实例对象，AbstractAspectJAdvice是Advice的子类。所以一个AspectJPointcutAdvisor有会对应一个真实的Advice。并注入到BeanFactory中。
+			########################################################################
+			#		before 				AspectJMethodBeforeAdvice	               #
+			#       after				AspectJAfterAdvice			               #
+			#       after-returning 	AspectJAfterReturningAdvice	               #
+			#       after-throwing 		AspectJAfterThrowingAdvice	               #
+			#       around 				AspectJAroundAdvice			               #
+		    ########################################################################
+		3、创建pointCut标签，创建AspectJExpressionPointcut对应的BeanDefinition，并把这个BeanDefinition注册到BeanFactory中。	
+				
+		#############################   
+		#	源码请看01_生成...		#  
+		#############################  
+	
+	
+	
+	
+	3)、如何生成代理类的。
+		1、这个时候BeanFactory已经有了对应的BeanDefinition了。在Aop这个jar中AbstractAutoProxyCreator这类，这个类实现了BeanPostProcessor，实际是
+		   SmartInstantiationAwareBeanPostProcessor（extends InstantiationAwareBeanPostProcessor extends BeanPostProcessor）。创建的代理类的入口是
+		   BeanPostProcessor的postProcessAfterInitialization(Object bean, String beanName)方法。
+		2、注意要生成的代理的都是切点类【具体前后要被插入的类】。判断给定的BeanDefinition是否是要生成代理的Bean。
+		3、筛选出要操作的BeanDefinition，然后获取符合条件Advisor，这里会默认创建一个扩展的Advisor【DefaultPointcutAdvisor】。
+		4、创建ProxyFactory类，通过ProxyFactory环境，这里会选择什么AopProxy，是使用JdkDynamicAopProxy还是ObjenesisCglibAopProxy。
+		5、使用的对应AopProxy创建代理，并把代理返回。
+		
+		#############################   
+		#	源码请看02_生成对象.	#  
+		############################# .
+		
+		
+	4)、AOP的调用流程（以Cglib代理类为例）。
+		1、使用Cglib生成代理的时候，默认会使用DynamicAdvisedInterceptor这个拦截器，这个类实现了MethodInterceptor接口，实现了intercept(..)方法。这个方法的就是
+		   代理类的入口【这里可以看Cglib的Enhance这个方法的使用】。
+		2、创建一个CglibMethodInvocation类，这个类实现了MethodInvocation接口，其有一个proceed(..)。这个类相当于一个控制器，什么时候调用Advisor链中的哪一个，什
+		   么时候调用调用被代理的业务。
+		3、CglibMethodInvocation这里保存着Advisor的list，这里有这个链的具体调用流程。CglibMethodInvocation.proceed(..)使用了递归操作。
+		4、Advice的调用顺序，AspectJAfterThrowingAdvice ==>  AfterReturningAdviceInterceptor  ==>  AspectJAfterAdvice   ==>   MethodBeforeAdvice   ==>
+		   AspectJAroundAdvice。【【注意这是Advice的执行顺序，不是具体业务执行顺序，具体的可以看对应的Advice的处理流程】】
+		   
+		#############################   
+		#	源码请看04_代理...		#  
+		#############################  
+		
+		

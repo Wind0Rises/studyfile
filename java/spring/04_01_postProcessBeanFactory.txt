@@ -1,27 +1,30 @@
 refresh()
-	postProcessBeanFactory()：允许在上下文子类中对bean factory进行后处理。
+	postProcessBeanFactory()：允许在上下文子类中对beanfactory进行后处理。在BeanFactory准备工作完成后做一些定制化的处理，一般结合BeanPostProcessor接口的实现类
+							  一起使用，注入一些重要资源（类似Application的属性和ServletContext的属性）。最后需要设置忽略这类BeanPostProcessor子接口的自动装配。
 
-
-
-上一步：
+		主要处理的有：
+							  
+							  
+上一步注册的：
 	beanPostProcessors：ApplicationContextAwareProcessor、ApplicationListenerDetector
 
-
-这一步：
+这一步注册的：
 	beanPostProcessors：ServletContextAwareProcessor
 	ignoredDependencyInterfaces：ServletContextAware、ServletConfigAware
 	resolvableDependencies：ServletRequest、ServletResponse、HttpSession、WebRequest
-	
-	
-	
 
+
+	
+#############################################################################################################################################
+###################################################   	BeanFactory后置处理过程。		#####################################################
+#############################################################################################################################################
 /**
- * BeanFactory后置处理过程。
+ *
+ *
  */
 location；AbstractRefreshableWebApplicationContext
 protected void postProcessBeanFactory(ConfigurableListableBeanFactory beanFactory) {
-	// beanFactory：为内部创建的BeanFactory。
-	// 添加后置处理对应。ServletContextAware实现的基础。
+	// beanFactory：为内部创建的BeanFactory。向BeanFactory中添加ServletContextAware。
 	beanFactory.addBeanPostProcessor(new ServletContextAwareProcessor(this.servletContext, this.servletConfig));
 
 	// 忽略依赖接口。
@@ -32,7 +35,10 @@ protected void postProcessBeanFactory(ConfigurableListableBeanFactory beanFactor
 	WebApplicationContextUtils.registerEnvironmentBeans(beanFactory, this.servletContext, this.servletConfig);
 }
 
-// 注册WebApplication的域
+/**
+ * 注册WebApplication的域
+ *
+ */
 location：WebApplicationContextUtils
 public static void registerWebApplicationScopes(ConfigurableListableBeanFactory beanFactory, ServletContext sc) {
 	// 设置WebApplication的域
@@ -62,7 +68,9 @@ public static void registerWebApplicationScopes(ConfigurableListableBeanFactory 
 }
 
 
-//
+/**
+ *
+ */
 location：WebApplicationContextUtils
 public static void registerEnvironmentBeans(ConfigurableListableBeanFactory bf, ServletContext servletContext, ServletConfig servletConfig) {
 	// bf内置BeanFactory、servletContext=WebAppContext、servletConfig=null

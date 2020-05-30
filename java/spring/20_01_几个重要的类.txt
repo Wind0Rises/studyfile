@@ -1,0 +1,29 @@
+DefaultListableBeanFactory 实现了 BeanDefinitionRegistry
+
+
+BeanDefinitionReader：
+	接口的作用是读取Spring的配置文件的内容，并将其转换成 Ioc 容器内部的数据结构，而容器的数据结构就是 BeanDefinition。
+	该接口提供的功能概括的讲可分为两步：负责BeanDefinition的资源定位；负责BeanDefinition的载入。
+	
+BeanDefinitionRegistry：
+	接口定义了对注册表的操作，包括向注册表添加BeanDefinition、删除BeanDefinition、判断是否已经注册等，包括对别名的处理。
+	
+XmlReaderContext：
+	XmlReaderContext中有XmlBeanDefinitionReader和NamespaceHandlerResolver两个属性，
+
+	
+NamespaceHandler：
+
+
+
+
+BeanDefinitionParserDelegate：BeanDefinition解析的真正过程。
+	
+	
+
+	
+BeanDefinition：
+	一个BeanDefinition能够包含一个Bean所有信息。
+
+BeanDefinitionHolder：
+	持有一个BeanDefinition的名称和别名，

@@ -1,0 +1,16 @@
+
+location：ConfigurationClassUtils
+checkConfigurationClassCandidate
+	使用@Configuration注解
+	使用@order
+	使用@Condition
+	
+	@PropertySource
+	@ComponentScan
+	@Import
+	@ImportResource
+
+注意ConfigurationCondition和Condition的区别。
+
+
+finishRefresh   aware接口。

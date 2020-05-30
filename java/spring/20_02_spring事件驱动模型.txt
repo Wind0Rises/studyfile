@@ -1,0 +1,134 @@
+################   事件对象   ###########################
+
+			EventObject（source：事件最初发生的对象。）
+				
+		  ApplicationEvent
+		  
+		SpringApplicationEvent(事件对象，机会所有的事件的source都是ApplicationContext,其他事件都会带着他们需要的参数.)
+		
+ApplicationContextInitializedEvent、ApplicationEnvironmentPreparedEvent、ApplicationFailedEvent、ApplicationPreparedEvent、ApplicationReadyEvent、ApplicationStartedEvent、ApplicationStartingEvent
+
+
+
+################   事件监听对象   ###########################
+	
+			  EventListener
+
+			ApplicationListener（void onApplicationEvent(E event)处理事件的方法）void onApplicationEvent(E event);
+			
+			
+################   事件源  ---》 事件的发布  ########################
+			
+			ApplicationEventMulticaster 【实现该接口的对象可以管理一些ApplicationListener对象，并且可以发布事件】常用方法：addApplicationListener添加监听器。removeApplicationListener移除监听器。multicastEvent广播给定的事件对象给监听器。
+			
+		AbstractApplicationEventMulticaster【ListenerRetriever用于封装（存储）Listener对象的。主要是对事件的增删操作。将】
+		
+		SimpleApplicationEventMulticaster【主要是事件的发布】
+
+public void multicastEvent(final ApplicationEvent event, @Nullable ResolvableType eventType) {
+	// type：事件的对象的ResolvableType的表示。
+	ResolvableType type = (eventType != null ? eventType : resolveDefaultEventType(event));
+	
+	// 线程池。
+	Executor executor = getTaskExecutor();
+	
+	//  getApplicationListeners(event, type)获取给定事件、type（事件的ResolvableType表示）对应的监听器。
+	for (ApplicationListener<?> listener : getApplicationListeners(event, type)) {
+		if (executor != null) {
+			executor.execute(() -> invokeListener(listener, event));
+		}
+		else {
+			invokeListener(listener, event);
+		}
+	}
+}
+
+// 通过事件监听器去处理事件
+protected void invokeListener(ApplicationListener<?> listener, ApplicationEvent event) {
+	ErrorHandler errorHandler = getErrorHandler();
+	if (errorHandler != null) {
+		try {
+			doInvokeListener(listener, event);
+		} catch (Throwable err) {
+			errorHandler.handleError(err);
+		}
+	} else {
+		doInvokeListener(listener, event);
+	}
+}
+
+// 通过事件监听器去处理事件
+private void doInvokeListener(ApplicationListener listener, ApplicationEvent event) {
+	try {
+		listener.onApplicationEvent(event);
+	} catch (ClassCastException ex) {
+		String msg = ex.getMessage();
+		if (msg == null || matchesClassCastMessage(msg, event.getClass())) {
+			Log logger = LogFactory.getLog(getClass());
+			if (logger.isTraceEnabled()) {
+				logger.trace("Non-matching event type for listener: " + listener, ex);
+			}
+		} else {
+			throw ex;
+		}
+	}
+}
+
+
+
+
+
+
+
+
+
+
+
+##############################################################################################
+
+SpringApplicationRunListeners : 维护着SpringApplicationRunListener集合对象.SpringApplicationRunListener(包含着)
+SpringApplicationRunListener  : 监听SpringApplication的run()方法。
+		starting()：首次启动run方法时立即调用。 可用于非常早期的初始化。
+		environmentPrepared(ConfigurableEnvironment environment)：	一旦准备好环境，并且在创建{@link ApplicationContext}之前调用。
+		contextPrepared(ConfigurableApplicationContext context)：一旦{@link ApplicationContext}被创建并准备好，并且在加载源之前调用。
+		contextLoaded(ConfigurableApplicationContext context)：一旦应用程序上下文已加载并且在刷新之前调用。
+		started(ConfigurableApplicationContext context)：上下文已刷新且应用程序已启动但未调用{@link CommandLineRunner CommandLineRunners}和{@link ApplicationRunner ApplicationRunners}
+		running(ConfigurableApplicationContext context)：在run方法完成之前立即调用，刷新应用程序上下文并调用所有{@link CommandLineRunner CommandLineRunners}和{@link ApplicationRunner ApplicationRunners}。
+		failed(ConfigurableApplicationContext context, Throwable exception)：在运行应用程序时发生故障时调用。
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,105 @@
+
+一、总结、
+	1)、线程池参数已经说明
+		1、corePoolSize必须要小于maximumPoolSize。
+		2、新建一个线程的时候，【不会】初始化corePoolSize数量的线程，只有添加任务到线程的时候才会创建线程。
+
+二、
+
+1、常用的线程池。
+	单个线程的线程池【newSingleThreadExecutor】：核心线程数和最大线程数都是1。
+	固定线程的线程池【newFixedThreadPool】：核心线程数等于最大线程数量。
+	批量线程池【newScheduleThreadPool】：堵塞队里使用的是DelayedWorkQueue。
+	缓存线程池【newCacheThreadPool】：核心线程数量为0。所有的线程进来以后就会放入SynchronousQueue中，然后再处理。
+	forkjoin框架使用的线程池【ForkJoinPool】：
+	
+	常用的拒绝策略有哪些【都是实现RejectedExecutionHandler】：AbortPolicy、CallerRunsPolicy、DiscardPolicy、DiscardOldestPolicy
+		AbortPolicy：直接抛出异常。
+		CallerRunsPolic：运行当前的。
+		DiscardPolicy：直接抛弃。
+		DiscardOldestPolicy：删除等待队列中队尾的一个，然后把新的添加进入。
+
+
+/**
+ *	Executor
+ *			ExecutorService
+ *						AbstractExecutorService
+ *									ForkJoinPool	
+ *									ThreadPoolExecutor	
+ *													ScheduledThreadPoolExecutor		
+ *					
+ *						ScheduledExecutorService【接口】
+ *									ScheduledThreadPoolExecutor
+ *													ScheduledThreadPoolExectuorWithDynamicSize
+ *							
+ *
+ */ 
+		
+		
+三、源码
+
+/**
+ *
+ */
+location：ThreadPoolExecutor
+public ThreadPoolExecutor(int corePoolSize, int maximumPoolSize, long keepAliveTime, TimeUnit unit,
+						  BlockingQueue<Runnable> workQueue, ThreadFactory threadFactory, RejectedExecutionHandler handler) {
+	/**
+	 * 核心线程必须小于最大线程数。
+	 */
+	if (corePoolSize < 0 || maximumPoolSize <= 0 || maximumPoolSize < corePoolSize || keepAliveTime < 0) {
+		throw new IllegalArgumentException();
+	}
+	
+	if (workQueue == null || threadFactory == null || handler == null) {
+		throw new NullPointerException();
+	}
+	
+	this.acc = System.getSecurityManager() == null ? null : AccessController.getContext();
+	this.corePoolSize = corePoolSize;
+	this.maximumPoolSize = maximumPoolSize;
+	this.workQueue = workQueue;
+	this.keepAliveTime = unit.toNanos(keepAliveTime);
+	this.threadFactory = threadFactory;
+	this.handler = handler;
+}
+
+
+/**
+ *
+ */
+location：ThreadPoolExecutor
+public void execute(Runnable command) {
+	if (command == null) {
+		throw new NullPointerException();
+	}
+	
+	/**
+	 * ctl：可以标记线程池的状态和记录线程池中的线程大小
+	 */
+	int c = ctl.get();
+	
+	/**
+	 * 如果线程池中的线程数量【小于】核心线程数量时。
+	 */
+	if (workerCountOf(c) < corePoolSize) {
+		if (addWorker(command, true)) {
+			return;
+		}
+		c = ctl.get();
+	}
+	
+	if (isRunning(c) && workQueue.offer(command)) {
+		int recheck = ctl.get();
+		if (!isRunning(recheck) && remove(command)) {
+			reject(command);
+		} else if (workerCountOf(recheck) == 0) {
+			addWorker(null, false);
+		}
+	
+	} else if (!addWorker(command, false)) {
+		reject(command);
+	}
+}
+
+	

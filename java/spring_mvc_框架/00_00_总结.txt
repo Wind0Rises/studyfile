@@ -3,6 +3,13 @@
 学习一下@InitBinder注解。@ModelAttribute
 
 
+
+
+
+
+
+
+
 一、MVC一个完整的请求？？
 	* 用户发起一个请求，被DispatcherServlet捕获。因为在web.xml配置DispatcherServlet，并且DispatcherServlet本身就是一个Servlet，所以符合web.xml配置的拦截
 	条件都是会被拦截的。

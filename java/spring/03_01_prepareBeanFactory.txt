@@ -1,7 +1,14 @@
 refresh()方法的第三步骤。
-	prepareBeanFactory(beanFactory)：准备BeanFactory的过程。
-
-现在的重心转移到BeanFactory上 === DefaultListableBeanFactory
+	prepareBeanFactory(beanFactory)：准备BeanFactory的过程，这里主要操作就是Context的标准的特性，如Context的类加载器、Post-processor【ApplicationContextAwareProcessor、
+			ApplicationListenerDetector】。 设置一些特定的bean。
+	
+	主要处理的类有：
+		beanPostProcessors：ApplicationContextAwareProcessor、ApplicationListenerDetector
+		propertyEditorRegistrars：ResourceEditorRegistrar
+		ignoredDependencyInterfaces：EnvironmentAware、EmbeddedValueResolverAware、ResourceLoaderAware、ApplicationEventPublisherAware、MessageSourceAware、ApplicationContextAware
+		resolvableDependencies：BeanFactory、ResourceLoader、ApplicationEventPublisher、ApplicationContext
+		manualSingletonNames：environment、systemProperties、systemEnvironment
+	
 
 其中非常重要的一条线。
 AliasRegistry（接口管理aliases的）
@@ -13,14 +20,7 @@ AliasRegistry（接口管理aliases的）
 				AbstractBeanFactory
 					AbstractAutowireCapableBeanFactory
 						DefaultListableBeanFactory 
-
-
-##########  总结：
-		beanPostProcessors：ApplicationContextAwareProcessor、ApplicationListenerDetector
-		propertyEditorRegistrars：ResourceEditorRegistrar
-		ignoredDependencyInterfaces：EnvironmentAware、EmbeddedValueResolverAware、ResourceLoaderAware、ApplicationEventPublisherAware、MessageSourceAware、ApplicationContextAware
-		resolvableDependencies：BeanFactory、ResourceLoader、ApplicationEventPublisher、ApplicationContext
-		manualSingletonNames：environment、systemProperties、systemEnvironment
+		
 
 DefaultSingletonBeanRegistry
 	// 缓存单例对象。key-->bean name;vaule-->bean instance
@@ -203,34 +203,24 @@ protected void prepareBeanFactory(ConfigurableListableBeanFactory beanFactory) {
 	// 添加属性编辑注册器(注册属性编辑器)，属性编辑器实际上是属性的类型转换器，
     // 因为bean的属性配置都是字符串类型的 实例化的时候要将这些属性转换为实际类型 
 	beanFactory.addPropertyEditorRegistrar(new ResourceEditorRegistrar(this, getEnvironment()));
+	
 
-	/**
-	 * 引用--》https://www.jianshu.com/p/5836d3d6dc72
-	 * 使用上下文回调配置工程。添加Bean的后置处理器。
-	 * 添加BeanPostProcessor(Bean后置处理器)：ApplicationContextAwareProcessor
-     * 在Bean初始化之前，调用ApplicationContextAwareProcessor的postProcessBeforeInitialization.可以看下ApplicationContextAwareProcessor的类的源码。
-     * 处理所有的Aware接口，进行如下操作：
-     * 		如果bean实现了EnvironmentAware接口，调用bean.setEnvironment()，
-     * 		如果bean实现了EmbeddedValueResolverAware接口，调用bean.setEmbeddedValueResolver
-     * 		如果bean实现了ResourceLoaderAware接口，调用bean.setResourceLoader
-     * 		如果bean实现了ApplicationEventPublisherAware接口，调用bean.setApplicationEventPublisher
-     * 		如果bean实现了MessageSourceAware接口，调用bean.setMessageSource
-     * 		如果bean实现了ApplicationContextAware接口，调用bean.setApplicationContext
-	 * 		也就是说ApplicationContextAwareProcessor是Aware实现的基础，这个类继承了BeanPostProcessor
-	 */
+	// 引用--》https://www.jianshu.com/p/5836d3d6dc72
+	// 使用上下文回调配置工程。添加Bean的后置处理器。
+	// 添加BeanPostProcessor(Bean后置处理器)：ApplicationContextAwareProcessor
+    // 在Bean初始化之前，调用ApplicationContextAwareProcessor的postProcessBeforeInitialization
+    // 处理所有的Aware接口，进行如下操作：
+    // 如果bean实现了EnvironmentAware接口，调用bean.setEnvironment()，
+    // 如果bean实现了EmbeddedValueResolverAware接口，调用bean.setEmbeddedValueResolver
+    // 如果bean实现了ResourceLoaderAware接口，调用bean.setResourceLoader
+    // 如果bean实现了ApplicationEventPublisherAware接口，调用bean.setApplicationEventPublisher
+    // 如果bean实现了MessageSourceAware接口，调用bean.setMessageSource
+    // 如果bean实现了ApplicationContextAware接口，调用bean.setApplicationContext
+	// 也就是说ApplicationContextAwareProcessor是Aware实现的基础，这个类继承了BeanPostProcessor
 	beanFactory.addBeanPostProcessor(new ApplicationContextAwareProcessor(this));
 
-	
-	/**
-	 * ignoreDependencyInterface:
-	 * 		典型应用是通过其他方式解析Application上下文注册依赖，也就是当有忽略的接口类，自动装配会忽略这部分类的初始化装配。
-	 *		类似BeanFactory通过BeanFactoryAware进行诸如或者ApplicationContext通过ApplicationContextAware进行注入。
-	 *
-	 * 比如：类A中有类型为B的属性b；private B b；这个小b是通过@Autowired修饰，这就是自动注入，如果B使用了ignoreDependencyInterface(..)
-	 *		 那么B将无法注入其中。
-	 *
-	 * https://www.jianshu.com/p/3c7e0608ff1f。
-	 */
+	// 取消ResourceLoaderAware、ApplicationEventPublisherAware、MessageSourceAware、ApplicationContextAware、EnvironmentAware这5个接口的自动注入。
+	// 因为ApplicationContextAwareProcessor把这5个接口的实现工作做了
 	beanFactory.ignoreDependencyInterface(EnvironmentAware.class);
 	beanFactory.ignoreDependencyInterface(EmbeddedValueResolverAware.class);
 	beanFactory.ignoreDependencyInterface(ResourceLoaderAware.class);
@@ -238,10 +228,10 @@ protected void prepareBeanFactory(ConfigurableListableBeanFactory beanFactory) {
 	beanFactory.ignoreDependencyInterface(MessageSourceAware.class);
 	beanFactory.ignoreDependencyInterface(ApplicationContextAware.class);
 
-	/**
-     * 设置了几个自动装配的特殊规则。
-	 * 类型  ===  对应的实例
-	 */
+    // 注册可以解析的依赖关系，当注入的类型为dependencyType的时候，注入autowiredValue。注入类型与注入值的关系存储在resolvableDependencies中。
+	// BeanFactory接口未在普通factory.MessageSource中注册为可解析类型，并将其注册（并找到用于自动装配）作为bean。
+	// 设置几个自动装配的特殊规则
+	// 使用相应的自动装配值--注册特殊依赖关系类型。这适用于应该是  可自动操作但在工厂中未定义为bean的工厂引用：例如 ApplicationContext类型的依赖关系解析为bean所在的ApplicationContext实例
 	beanFactory.registerResolvableDependency(BeanFactory.class, beanFactory);
 	beanFactory.registerResolvableDependency(ResourceLoader.class, this);
 	beanFactory.registerResolvableDependency(ApplicationEventPublisher.class, this);
@@ -252,14 +242,17 @@ protected void prepareBeanFactory(ConfigurableListableBeanFactory beanFactory) {
     // 是则加入当前的applicationContext的applicationListeners列表
 	beanFactory.addBeanPostProcessor(new ApplicationListenerDetector(this));
 
+	// Detect a LoadTimeWeaver and prepare for weaving, if found.
+	注入一些其它信息的bean，比如environment、systemProperties等
 
 	// 检测到LoadTimeWeaver并准备编织（如果找到）。
 	if (beanFactory.containsBean(LOAD_TIME_WEAVER_BEAN_NAME)) {
 		beanFactory.addBeanPostProcessor(new LoadTimeWeaverAwareProcessor(beanFactory));
+		// Set a temporary ClassLoader for type matching.
 		beanFactory.setTempClassLoader(new ContextTypeMatchClassLoader(beanFactory.getBeanClassLoader()));
 	}
 
-	// 注册默认的"环境"Bean。
+	// 注册默认的 “环境” Bean
 	if (!beanFactory.containsLocalBean(ENVIRONMENT_BEAN_NAME)) {
 		beanFactory.registerSingleton(ENVIRONMENT_BEAN_NAME, getEnvironment());
 	}
@@ -271,7 +264,7 @@ protected void prepareBeanFactory(ConfigurableListableBeanFactory beanFactory) {
 	}
 }
 
-/** 
+/**
  * List<BeanPostProcessor> beanPostProcessors,添加后置处理器
  */
 location：AbstractBeanFactory
@@ -279,7 +272,6 @@ public void addBeanPostProcessor(BeanPostProcessor beanPostProcessor) {
 	Assert.notNull(beanPostProcessor, "BeanPostProcessor must not be null");
 	// 移除旧的
 	this.beanPostProcessors.remove(beanPostProcessor);
-	
 	// 添加的
 	this.beanPostProcessors.add(beanPostProcessor);
 	if (beanPostProcessor instanceof InstantiationAwareBeanPostProcessor) {
@@ -296,7 +288,6 @@ public void registerSingleton(String beanName, Object singletonObject) throws Il
 	super.registerSingleton(beanName, singletonObject);
 
 	if (hasBeanCreationStarted()) {
-		// Cannot modify startup-time collection elements anymore (for stable iteration)
 		synchronized (this.beanDefinitionMap) {
 			if (!this.beanDefinitionMap.containsKey(beanName)) {	
 				// 获取已经注册的单例的 Bean name
@@ -334,6 +325,9 @@ public void registerSingleton(String beanName, Object singletonObject) throws Il
 	}
 }
 
+/**
+ *
+ */
 location：DefaultSingleton
 protected void addSingleton(String beanName, Object singletonObject) {
 	synchronized (this.singletonObjects) {
@@ -351,8 +345,10 @@ protected void addSingleton(String beanName, Object singletonObject) {
 	}
 }
 
-// 用相应的自动装配值注册特殊依赖关系类型。在Factory中这适用于Factory/Context引用，但是不允许可以自动装配的但是没有定义的bean。
-// 注意：在普通的BeanFactory中没有注册这样的默认类型，甚至不是BeanFactory接口本身。
+/**
+ * 用相应的自动装配值注册特殊依赖关系类型。在Factory中这适用于Factory/Context引用，但是不允许可以自动装配的但是没有定义的bean。
+ * 注意：在普通的BeanFactory中没有注册这样的默认类型，甚至不是BeanFactory接口本身。
+ */
 location：DefaultSingletonBeanFactory
 public void registerResolvableDependency(Class<?> dependencyType, Object autowiredValue) {
 	Assert.notNull(dependencyType, "Dependency type must not be null");
@@ -369,7 +365,9 @@ public void registerResolvableDependency(Class<?> dependencyType, Object autowir
 }
 
 
-// 注册单例Bean
+/**
+ * 注册单例Bean
+ */
 location：DefaultListableBeanFactory
 public void registerSingleton(String beanName, Object singletonObject) throws IllegalStateException {
 		// 调用父的注册方法
@@ -400,7 +398,9 @@ public void registerSingleton(String beanName, Object singletonObject) throws Il
 		clearByTypeCache();
 	}
 
-// 注册单例Bean
+/**
+ * 注册单例Bean
+ */
 location：DefaultSingletonBeanRegistry
 public void registerSingleton(String beanName, Object singletonObject) throws IllegalStateException {
 	Assert.notNull(beanName, "'beanName' must not be null");

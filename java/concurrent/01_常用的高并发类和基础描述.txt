@@ -1,3 +1,4 @@
+
 1、常用的线程池。
 	单个线程的线程池【newSingleThreadExecutor】：核心线程数和最大线程数都是1。
 	固定线程的线程池【newFixedThreadPool】：核心线程数等于最大线程数量。

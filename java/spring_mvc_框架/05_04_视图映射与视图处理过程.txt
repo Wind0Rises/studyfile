@@ -1,0 +1,759 @@
+
+一、总结
+	1)、可以自定义HandlerInterceptor，用于后置处理流程的拓展。
+		HandlerInterceptor前置处理：在HandlerAdapter处理HandlerMapping之前。
+		HandlerInterceptor后置处理：在HandlerAdapter处理HandlerMapping之后，在处理DispatcherResult之前。
+		HandlerInterceptor结束处理：在整个doDispatcher()方法的最后。
+
+	2)、RequestDispatcher的作用：
+		
+
+	3)、
+		1、遍历视图解析器，一般情况下DispatherServlet中只有一个，通过ViewResolver去创建一个View。在创建之前，首先判断是否有forward和redirect。
+		2、然后通过RequestDispatcher进行转发
+
+		
+		
+		
+		
+		
+三、重要的类
+	RequestDispatcher：可以好好研究一下。
+		
+		
+		
+		
+		
+		
+		
+		
+四、源码
+
+#################################################
+#   				跳转过程					#
+#################################################
+/**
+ * 对请求进行分发。
+ */ 
+location：DispatcherServlet
+protected void doDispatch(HttpServletRequest request, HttpServletResponse response) throws Exception {
+	
+	HttpServletRequest processedRequest = request;
+	HandlerExecutionChain mappedHandler = null;
+	boolean multipartRequestParsed = false;
+
+	// 主要用来管理异步请求的处理。
+	WebAsyncManager asyncManager = WebAsyncUtils.getAsyncManager(request);
+
+	try {
+		ModelAndView mv = null;
+		Exception dispatchException = null;
+
+		try {
+		
+		
+			/**
+			 * 01、检查是否是文件上传。
+			 */
+			processedRequest = checkMultipart(request);
+			multipartRequestParsed = (processedRequest != request);
+
+			
+			
+			/**
+			 * 02、获取对应的HandlerExecutionChain。【【【根据请求获取对应的HandlerExecutionChain】】】
+			 * 		HandlerExecutionChain只能通过HandlerMapping中的getHandler(..)方法获取到。
+			 */
+			mappedHandler = getHandler(processedRequest);
+			
+			if (mappedHandler == null || mappedHandler.getHandler() == null) {
+				noHandlerFound(processedRequest, response);
+				return;
+			}
+
+			
+			
+			/** 
+			 * mappedHandler.getHandler()：获取的就是HandlerMethod。
+			 * 03、确定当前请求的处理器适配器。【getHandlerAdapter】
+			 */
+			HandlerAdapter ha = getHandlerAdapter(mappedHandler.getHandler());
+
+			
+			// 获取请求的方法。
+			String method = request.getMethod();
+			boolean isGet = "GET".equals(method);
+			
+			/**
+			 * 04、判读是否是GET请求或者是HEAD请求。
+			 */
+			if (isGet || "HEAD".equals(method)) {
+				// 这个与缓存有关，可以研究一下？？？？
+				long lastModified = ha.getLastModified(request, mappedHandler.getHandler());
+				if (logger.isDebugEnabled()) {
+					logger.debug("Last-Modified value for [" + getRequestUri(request) + "] is: " + lastModified);
+				}
+				if (new ServletWebRequest(request, response).checkNotModified(lastModified) && isGet) {
+					return;
+				}
+			}
+
+			/**
+			 * ######################################
+			 * #  拦截器的前置处理的前置处理		#
+			 * ######################################
+			 */
+			if (!mappedHandler.applyPreHandle(processedRequest, response)) {
+				return;
+			}
+
+			/**
+			 * 04、调用HandlerAdapter的handler方法。获取对应ModelAndView
+			 */
+			mv = ha.handle(processedRequest, response, mappedHandler.getHandler());
+
+			
+			
+			if (asyncManager.isConcurrentHandlingStarted()) {
+				return;
+			}
+
+			
+			/**
+			 * 06、添加视图默认的名称
+			 */
+			applyDefaultViewName(processedRequest, mv);
+			
+			
+			
+			/**
+			 * 07、HandlerExecutionChain后置处理
+			 */
+			mappedHandler.applyPostHandle(processedRequest, response, mv);
+			
+		} catch (Exception ex) {
+			dispatchException = ex;
+		} catch (Throwable err) {
+			dispatchException = new NestedServletException("Handler dispatch failed", err);
+		}
+		
+		/**
+		 * 08、结果处理、获取视图解析解
+		 */
+		processDispatchResult(processedRequest, response, mappedHandler, mv, dispatchException);
+		
+		
+	} catch (Exception ex) {
+		triggerAfterCompletion(processedRequest, response, mappedHandler, ex);
+	} catch (Throwable err) {
+		triggerAfterCompletion(processedRequest, response, mappedHandler,  new NestedServletException("Handler processing failed", err));
+	} finally {
+		if (asyncManager.isConcurrentHandlingStarted()) {
+			if (mappedHandler != null) {
+				mappedHandler.applyAfterConcurrentHandlingStarted(processedRequest, response);
+			}
+		} else {
+			if (multipartRequestParsed) {
+				cleanupMultipart(processedRequest);
+			}
+		}
+	}
+}
+
+
+
+
+
+#################################
+#     配置视图解析的名称		#
+#################################
+/**
+ *
+ */
+location：DispatcherServlet
+private void applyDefaultViewName(HttpServletRequest request, ModelAndView mv) throws Exception {
+	if (mv != null && !mv.hasView()) {
+		mv.setViewName(getDefaultViewName(request));
+	}
+}
+
+/**
+ * 
+ */
+location：DispatcherServlet
+protected String getDefaultViewName(HttpServletRequest request) throws Exception {
+	return this.viewNameTranslator.getViewName(request);
+}
+
+/**
+ * 
+ */
+location：DefaultRequestToViewNameTranslator
+public String getViewName(HttpServletRequest request) {
+	String lookupPath = this.urlPathHelper.getLookupPathForRequest(request);
+	return (this.prefix + transformPath(lookupPath) + this.suffix);
+}
+
+
+
+
+#################################
+#     Handler后置处理			#
+#################################
+/**
+ * 获取拦截器，并执行拦截器的postHandle方法。
+ */
+location：HandlerExecutionChain
+void applyPostHandle(HttpServletRequest request, HttpServletResponse response, ModelAndView mv) throws Exception {
+	/**
+	 * 获取拦截器，
+	 */
+	HandlerInterceptor[] interceptors = getInterceptors();
+	
+	if (!ObjectUtils.isEmpty(interceptors)) {
+	
+		for (int i = interceptors.length - 1; i >= 0; i--) {
+			HandlerInterceptor interceptor = interceptors[i];
+			
+			/**
+			 * 并执行拦截器的postHandle方法。
+			 */
+			interceptor.postHandle(request, response, this.handler, mv);
+		}
+	}
+}
+
+/**
+ * 获取拦截器。自定义HandlerInterceptor需要实现HandlerInterceptor接口。
+ */
+location：HandlerExecutionChain
+public HandlerInterceptor[] getInterceptors() {
+	if (this.interceptors == null && this.interceptorList != null) {
+		this.interceptors = this.interceptorList.toArray(new HandlerInterceptor[this.interceptorList.size()]);
+	}
+	return this.interceptors;
+}
+
+
+
+
+
+
+#####################################
+#									#
+#####################################
+/**
+ *
+ */
+location：DispatcherServlet
+private void processDispatchResult(HttpServletRequest request, HttpServletResponse response, HandlerExecutionChain mappedHandler, ModelAndView mv, Exception exception) throws Exception {
+
+	boolean errorView = false;
+
+	/**
+	 * 是否有异常。
+	 */
+	if (exception != null) {
+		if (exception instanceof ModelAndViewDefiningException) {
+			logger.debug("ModelAndViewDefiningException encountered", exception);
+			mv = ((ModelAndViewDefiningException) exception).getModelAndView();
+		} else {
+			Object handler = (mappedHandler != null ? mappedHandler.getHandler() : null);
+			mv = processHandlerException(request, response, handler, exception);
+			errorView = (mv != null);
+		}
+	}
+
+	if (mv != null && !mv.wasCleared()) {
+		render(mv, request, response);
+		if (errorView) {
+			WebUtils.clearErrorRequestAttributes(request);
+		}
+	} else {
+		if (logger.isDebugEnabled()) {
+			logger.debug("Null ModelAndView returned to DispatcherServlet with name '" + getServletName() + "': assuming HandlerAdapter completed request handling");
+		}
+	}
+
+	if (WebAsyncUtils.getAsyncManager(request).isConcurrentHandlingStarted()) {		
+		return;
+	}
+
+	// 拦截器  --   afterCompletion处理。
+	if (mappedHandler != null) {
+		mappedHandler.triggerAfterCompletion(request, response, null);
+	}
+}
+
+/**
+ *
+ */
+location：DispatcherServlet
+protected void render(ModelAndView mv, HttpServletRequest request, HttpServletResponse response) throws Exception { 
+
+	// 默认的LocaleResolver为AcceptHeaderLocaleResolver。
+	// 通过给定的请求解析当前语言环境。
+	Locale locale = this.localeResolver.resolveLocale(request);
+	
+	response.setLocale(locale);
+
+	View view;
+	
+	
+	/**
+	 * 创建View。
+	 */
+	if (mv.isReference()) {
+		
+		// 【【通过视图解析解获取View】】。
+		view = resolveViewName(mv.getViewName(), mv.getModelInternal(), locale, request);
+		if (view == null) {
+			throw new ServletException("Could not resolve view with name '" + mv.getViewName() + "' in servlet with name '" + getServletName() + "'");
+		}
+	} else {
+		view = mv.getView();
+		if (view == null) {
+			throw new ServletException("ModelAndView [" + mv + "] neither contains a view name nor a " + "View object in servlet with name '" + getServletName() + "'");
+		}
+	}
+
+	if (logger.isDebugEnabled()) {
+		logger.debug("Rendering view [" + view + "] in DispatcherServlet with name '" + getServletName() + "'");
+	}
+	
+	try {
+		if (mv.getStatus() != null) {
+			response.setStatus(mv.getStatus().value());
+		}
+		
+		/**
+		 * 视图渲染。
+		 */
+		view.render(mv.getModelInternal(), request, response);
+		
+	} catch (Exception ex) {
+		if (logger.isDebugEnabled()) {
+			logger.debug("Error rendering view [" + view + "] in DispatcherServlet with name '" + getServletName() + "'", ex);
+		}
+		throw ex;
+	}
+}
+
+/**
+ * 通过给定的请求解析当前语言环境。
+ */
+location：AcceptHeaderLocaleResolver
+public Locale resolveLocale(HttpServletRequest request) {
+	Locale defaultLocale = getDefaultLocale();
+	if (defaultLocale != null && request.getHeader("Accept-Language") == null) {
+		return defaultLocale;
+	}
+	
+	Locale requestLocale = request.getLocale();
+	if (isSupportedLocale(requestLocale)) {
+		return requestLocale;
+	}
+	
+	Locale supportedLocale = findSupportedLocale(request);
+	if (supportedLocale != null) {
+		return supportedLocale;
+	}
+	
+	return (defaultLocale != null ? defaultLocale : requestLocale);
+}
+
+/**
+ * 是否是引用。
+ */
+location：ModelAndView
+public boolean isReference() {
+	return (this.view instanceof String);
+}
+
+
+
+
+
+#####################################
+#			创建视图				#
+#####################################
+/**
+ * 遍历所有视图解析器，并进行解析操作。
+ */
+location：DispatcherServlet
+protected View resolveViewName(String viewName, Map<String, Object> model, Locale locale, HttpServletRequest request) throws Exception {
+
+	/**
+	 * 	ViewResolverComposite
+	 *	AbstractCachingViewResolver	
+	 *			ResourceBundleViewResolver
+	 *			XmlViewResolver
+	 *			UrlBasedViewResolver
+	 *					InternalResourceViewResolver（主要的）
+	 *					JasperReportsViewResolver
+	 *					XsltViewResolver
+	 *	ContentNegotiatingViewResolver				
+	 *	JacksonJsonViewResolver		
+	 *	DynamicViewResolver
+	 *	BeanNameViewResolver
+	 */
+	for (ViewResolver viewResolver : this.viewResolvers) {
+		View view = viewResolver.resolveViewName(viewName, locale);
+		if (view != null) {
+			return view;
+		}
+	}
+	return null;
+}
+
+
+/**
+ * 	其是InternalResourceViewResolver实例。
+ */
+location：AbstractCachingViewResolver
+public View resolveViewName(String viewName, Locale locale) throws Exception {
+	if (!isCache()) {
+		return createView(viewName, locale);
+	} else {
+		Object cacheKey = getCacheKey(viewName, locale);
+		View view = this.viewAccessCache.get(cacheKey);
+		
+		if (view == null) {
+		
+			synchronized (this.viewCreationCache) {
+				view = this.viewCreationCache.get(cacheKey);
+				
+				if (view == null) {
+					view = createView(viewName, locale);
+					
+					if (view == null && this.cacheUnresolved) {
+						view = UNRESOLVED_VIEW;
+					}
+					
+					if (view != null) {
+						this.viewAccessCache.put(cacheKey, view);
+						this.viewCreationCache.put(cacheKey, view);
+						if (logger.isTraceEnabled()) {
+							logger.trace("Cached view [" + cacheKey + "]");
+						}
+					}
+				}
+			}
+		}
+		
+		return (view != UNRESOLVED_VIEW ? view : null);
+	}
+}
+
+
+/**
+ * 默认为InternalResourcesViewResolver实例。
+ *
+ * 创建视图
+ */
+location：UrlBasedViewResolver
+protected View createView(String viewName, Locale locale) throws Exception {
+
+	if (!canHandle(viewName, locale)) {
+		return null;
+	}
+	
+	/**
+	 * 判读是否是"redirect:"开头的，进行重定向。
+	 */
+	if (viewName.startsWith(REDIRECT_URL_PREFIX)) {
+		String redirectUrl = viewName.substring(REDIRECT_URL_PREFIX.length());
+		RedirectView view = new RedirectView(redirectUrl, isRedirectContextRelative(), isRedirectHttp10Compatible());
+		view.setHosts(getRedirectHosts());
+		return applyLifecycleMethods(viewName, view);
+	}
+
+	/**
+	 * 判读是否是"forward:"开头的，进行转发。
+	 */
+	if (viewName.startsWith(FORWARD_URL_PREFIX)) {
+		String forwardUrl = viewName.substring(FORWARD_URL_PREFIX.length());
+		return new InternalResourceView(forwardUrl);
+	}
+	
+	return super.createView(viewName, locale);
+}
+
+/**
+ * 创建View实例。
+ */
+location：AbstractCachingViewResolver
+protected View createView(String viewName, Locale locale) throws Exception {
+	return loadView(viewName, locale);
+}
+
+/**
+ * 加载视图
+ */
+location：UrlBasedViewResolver
+protected View loadView(String viewName, Locale locale) throws Exception {
+	AbstractUrlBasedView view = buildView(viewName);
+	
+	View result = applyLifecycleMethods(viewName, view);
+	return (view.checkResource(locale) ? result : null);
+}
+
+/**
+ * InternalResourceViewResolver extends UrlBasedViewResolver
+ */
+location：InternalResourceViewResolver
+protected AbstractUrlBasedView buildView(String viewName) throws Exception {
+	InternalResourceView view = (InternalResourceView) super.buildView(viewName);
+	
+	if (this.alwaysInclude != null) {
+		view.setAlwaysInclude(this.alwaysInclude);
+	}
+	view.setPreventDispatchLoop(true);
+	return view;
+}
+
+/**
+ * 加载视图
+ */
+location：UrlBasedViewResolver
+protected AbstractUrlBasedView buildView(String viewName) throws Exception {
+	// 创建AbstractUrlBasedView实例。getViewClass：JstlView。
+	AbstractUrlBasedView view = (AbstractUrlBasedView) BeanUtils.instantiateClass(getViewClass());
+	
+	/**
+	 * 置url。   prefix + viewName + suffix。
+	 */
+	view.setUrl(getPrefix() + viewName + getSuffix());
+
+	String contentType = getContentType();
+	if (contentType != null) {
+		view.setContentType(contentType);
+	}
+
+	view.setRequestContextAttribute(getRequestContextAttribute());
+	view.setAttributesMap(getAttributesMap());
+
+	Boolean exposePathVariables = getExposePathVariables();
+	
+	if (exposePathVariables != null) {
+		view.setExposePathVariables(exposePathVariables);
+	}
+	
+	
+	Boolean exposeContextBeansAsAttributes = getExposeContextBeansAsAttributes();
+	if (exposeContextBeansAsAttributes != null) {
+		view.setExposeContextBeansAsAttributes(exposeContextBeansAsAttributes);
+	}
+	
+	
+	String[] exposedContextBeanNames = getExposedContextBeanNames();
+	if (exposedContextBeanNames != null) {
+		view.setExposedContextBeanNames(exposedContextBeanNames);
+	}
+
+	/**
+	 * 默认是ISO-8859-1
+	 */
+	return view;
+}
+
+
+
+
+
+
+
+###############################
+#    		View进行渲染      #
+###############################
+/**
+ * 渲染操作。
+ */
+location：AbstractView
+public void render(Map<String, ?> model, HttpServletRequest request, HttpServletResponse response) throws Exception {
+	
+	// model：为modelMap数据。
+	
+	if (logger.isTraceEnabled()) {
+		logger.trace("Rendering view with name '" + this.beanName + "' with model " + model + " and static attributes " + this.staticAttributes);
+	}
+
+	/**
+	 * 把ModelMap的内容放入一个新的Map中，并返回。创建合并输出Model。
+	 */
+	Map<String, Object> mergedModel = createMergedOutputModel(model, request, response);
+	
+	prepareResponse(request, response);
+	
+	/**
+	 * 渲染合并的输出模型。
+	 */
+	renderMergedOutputModel(mergedModel, getRequestToExpose(request), response);
+}
+
+
+/**
+ * 把ModelMap的内容放入一个新的Map中，并返回。
+ */
+location：AbstractView
+protected Map<String, Object> createMergedOutputModel(Map<String, ?> model, HttpServletRequest request, HttpServletResponse response) {
+
+	Map<String, Object> pathVars = (this.exposePathVariables ? (Map<String, Object>) request.getAttribute(View.PATH_VARIABLES) : null);
+ 
+	int size = this.staticAttributes.size();
+	size += (model != null ? model.size() : 0);
+	size += (pathVars != null ? pathVars.size() : 0);
+
+	Map<String, Object> mergedModel = new LinkedHashMap<String, Object>(size);
+	mergedModel.putAll(this.staticAttributes);
+	if (pathVars != null) {
+		mergedModel.putAll(pathVars);
+	}
+	if (model != null) {
+		mergedModel.putAll(model);
+	}
+
+	if (this.requestContextAttribute != null) {
+		mergedModel.put(this.requestContextAttribute, createRequestContext(request, response, mergedModel));
+	}
+
+	return mergedModel;
+}
+
+/**
+ * 设置响应的请求头。
+ */
+location：AbstractView
+protected void prepareResponse(HttpServletRequest request, HttpServletResponse response) {
+	if (generatesDownloadContent()) {
+		response.setHeader("Pragma", "private");
+		response.setHeader("Cache-Control", "private, must-revalidate");
+	}
+}
+
+/**
+ * 其是JstlView实例。
+ */
+location：InternalResourceView
+protected void renderMergedOutputModel(Map<String, Object> model, HttpServletRequest request, HttpServletResponse response) throws Exception {
+
+	exposeModelAsRequestAttributes(model, request);
+
+	exposeHelpers(request);
+
+	/**
+	 * 获取要查找的资源的地址。
+	 */
+	String dispatcherPath = prepareForRendering(request, response);
+
+	RequestDispatcher rd = getRequestDispatcher(request, dispatcherPath);
+	
+	if (rd == null) {
+		throw new ServletException("Could not get RequestDispatcher for [" + getUrl() + "]: Check that the corresponding file exists within your web application archive!");
+	}
+
+	if (useInclude(request, response)) {
+		response.setContentType(getContentType());
+		if (logger.isDebugEnabled()) {
+			logger.debug("Including resource [" + getUrl() + "] in InternalResourceView '" + getBeanName() + "'");
+		}
+		rd.include(request, response);
+	} else {
+		if (logger.isDebugEnabled()) {
+			logger.debug("Forwarding to resource [" + getUrl() + "] in InternalResourceView '" + getBeanName() + "'");
+		}
+		
+		// 返回。
+		rd.forward(request, response);
+	}
+}
+
+
+/**
+ * 把ModelMap对应的信息放入Request中。
+ */
+location：
+protected void exposeModelAsRequestAttributes(Map<String, Object> model, HttpServletRequest request) throws Exception {
+	
+	for (Map.Entry<String, Object> entry : model.entrySet()) {
+		String modelName = entry.getKey();
+		Object modelValue = entry.getValue();
+		if (modelValue != null) {
+			request.setAttribute(modelName, modelValue);
+			if (logger.isDebugEnabled()) {
+				logger.debug("Added model object '" + modelName + "' of type [" + modelValue.getClass().getName() +
+						"] to request in view with name '" + getBeanName() + "'");
+			}
+		} else {
+			request.removeAttribute(modelName);
+			if (logger.isDebugEnabled()) {
+				logger.debug("Removed model object '" + modelName + "' from request in view with name '" + getBeanName() + "'");
+			}
+		}
+	}
+}
+
+/**
+ * 
+ */
+location：InternalResourceView
+protected String prepareForRendering(HttpServletRequest request, HttpServletResponse response) throws Exception {
+
+	String path = getUrl();
+	if (this.preventDispatchLoop) {
+		String uri = request.getRequestURI();
+		if (path.startsWith("/") ? uri.equals(path) : uri.equals(StringUtils.applyRelativePath(uri, path))) {
+			throw new ServletException("Circular view path [" + path + "]: would dispatch back " + "to the current handler URL [" + uri + "] again. Check your ViewResolver setup! " + "(Hint: This may be the result of an unspecified view, due to default view name generation.)");
+		}
+	}
+	return path;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

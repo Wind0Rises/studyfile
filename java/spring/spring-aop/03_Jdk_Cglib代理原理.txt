@@ -1,0 +1,92 @@
+
+
+
+
+
+
+
+#####################################
+#		第一部分：Cgblib			#
+#####################################
+
+一、总结
+	1、Cglib会生成三个文件。
+		*、EnhancerByCGLIB：这个继承了被代理类、实现net.sf.cglib.proxy.Factory接口。
+		*、EnhancerByCGLIB$$FastClassByCGLIB：继承了net.sf.cglib.reflect.FastClass
+		*、FastClassByCGLIB：继承了net.sf.cglib.reflect.FastClass;
+
+二、示例
+
+	1、拦截器
+		public class ConsumeInterceptor implements MethodInterceptor {
+
+			/**
+			 * @param sub obj表示增强的对象，即实现这个接口类的一个对象
+			 * @param method method表示要被拦截的方法
+			 * @param args args表示要被拦截方法的参数
+			 * @param proxy proxy表示要触发父类的方法对象
+			 */
+			@Override
+			public Object intercept(Object sub, Method method, Object[] args, MethodProxy proxy) throws Throwable {
+
+				System.out.println("方法执行前");
+				Object result = proxy.invokeSuper(sub, args);
+				System.out.println("方法执行后");
+				return result;
+			}
+		}
+
+	2、要被代理的类。		
+		public class CustomByProxyClass {
+
+			public CustomByProxyClass() {
+				System.out.println("被代理类的构造函数。");
+			}
+			
+			public void customByProxyMethod() {
+				System.out.println("被代理类中的方法。---- customByProxyMethod");
+			}
+		}
+		
+		
+	3、测试类。
+		public static void main(String[] args) {
+			// 代理类class文件存入本地磁盘方便我们反编译查看源码
+			System.setProperty(DebuggingClassWriter.DEBUG_LOCATION_PROPERTY, "D:\\tmp\\test");
+
+			// Enhancer [ɪnˈhænsər]：增强剂。
+			// 通过CGLIB动态代理获取代理对象的过程
+			Enhancer enhancer = new Enhancer();
+
+			// 设置enhancer对象的父类
+			enhancer.setSuperclass(CustomByProxyClass.class);
+
+			// 设置enhancer的回调对象，要实现MethodInterceptor接口。
+			enhancer.setCallback(new ConsumeInterceptor());
+
+			// 创建代理对象
+			CustomByProxyClass proxy= (CustomByProxyClass) enhancer.create();
+
+			System.out.println(proxy.getClass());
+
+			// 通过代理对象调用目标方法
+			proxy.customByProxyMethod();
+		}
+
+
+#####################################
+#		第二部分：JDK				#
+#####################################
+
+
+public final void customByProxyMethod() {
+	if (this.CGLIB$CALLBACK_0 == null) {
+		this.CGLIB$CALLBACK_0;
+		CGLIB$BIND_CALLBACKS(this);
+	} 
+	
+	if (this.CGLIB$CALLBACK_0 != null) {
+		return; 
+	}
+	super.customByProxyMethod();
+}

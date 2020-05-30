@@ -1,0 +1,71 @@
+一、prepareRefresh();
+	准备刷新Context：【里面包含：Context的状态设置，初始化PropertySources。校验Property】
+	
+二、obtainFreshBeanFactory()
+
+		1、Bean的加载。获取xml文件对应的输入流，并解析对应的Document的对象。
+					【衍生问题？1：xml是如何解析的?Resources接口的理解】
+					
+					
+		2、Bean的解析过程。如何Bean解析成对应BeanDefinition
+		
+		
+		3、Bean的注册过程。解析过程发生在DefaultBeanDefinitionDocumentReader类中，
+				判断对应的Element是否是默认的命名空间。------ 如果是默认的     ---》  三种【import、alias、bean】三种element处理过程，【beans】进行递归。 
+												       ------ 如果不是默认的   ---》  获取响应的element所对应的命名空间，并创建NamespaceHandler，然后进行解析。
+													   
+		3、<bean>的解析过程
+			首先根据className、parent、classLoader创建对应BeanDefinition，并设置attribute、metaElement、propriety等等。
+			接着生成BeanName并构建BeanDefinitionHolder对象，如果需要装饰AbstractBeanDefinition进行装饰操作。
+			然后把BeanDefinition注册到BeanDefinitionRegistry（DefaultListableBeanFactory)中。
+					【衍生问题？如果依赖的Bean不存在会怎么样，Bean是怎么加载的。】
+
+	【这是BeanDefinition已经加载完成，但是还没有实例化Bean】
+					
+三、prepareBeanFactory(beanFactory)
+		
+		1、设置BeanFactory的组件。
+		
+
+四、postProcessBeanFactory(beanFactory)
+		
+		1、设置BeanFactory的组件。
+		
+
+五：invokeBeanFactoryPostProcessors
+		
+		1、调用BeanFactoryPostProcessor的实现类，修改Context中的bean definition或者改写Context下的BeanFactory中的Bean的属性值。
+		
+六：registerBeanPostProcessors
+
+
+七：initMessageSource
+
+
+
+八：initApplicationEventMulticaster
+
+
+九：onRefresh
+
+
+十：registerListeners接听器
+
+
+
+十一：finishBeanFactoryInitialization:
+	完成此上下文的bean工厂的初始化，初始化所有剩余的单例bean。
+	
+
+		
+		
+什么时候进行初始化操作的？？？
+	Spring什么时候实例化bean，首先要分2种情况。
+	第一：如果你使用BeanFactory作为Spring Bean的工厂类，则所有的bean都是在第一次使用该Bean的时候实例化 （不管bean是否实现了FactoryBean）。
+
+	第二：如果你使用ApplicationContext作为Spring Bean的工厂类，则又分为以下几种情况： 
+		（1）：如果bean的scope是singleton的，并且lazy-init为false（默认是false，所以可以不用设置），则ApplicationContext启动的时候就实例化该Bean，
+			   并且将实例化的Bean放在一个map结构的缓存中，下次再使用该Bean的时候，直接从这个缓存中取 （但是如果bean实现了FactoryBean，则ApplicationContext
+			   启动的时候先实例化对应的FactoryBean，当第一次使用bean的时候，在通过FactoryBean的getObject方法实例化bean）。
+		（2）：如果bean的scope是singleton的，并且lazy-init为true，则该Bean的实例化是在第一次使用该Bean的时候进行实例化。
+		（3）：如果bean的scope是prototype的，则该Bean的实例化是在第一次使用该Bean的时候进行实例化。

@@ -1,0 +1,31 @@
+1、BeanFactoryPostProcessor和BeanPostProcessor的区别？
+	BeanFactoryPostProcessor
+		方法：
+			postProcessBeanFactory(ConfigurableListableBeanFactory beanFactory)：
+			
+		介绍：允许自定义的修改Application Context中的bean definitions。Application Context可以在其Bean definitions中自动检查BeanFactoryPostProcessor
+			  的Bean，并在创建任何其他的Bean之前应用他们。
+	
+	BeanPostProcessor
+		方法：
+			Object postProcessBeforeInitialization(Object bean, String beanName)：
+			Object postProcessAfterInitialization(Object bean, String beanName)：
+			
+		介绍：工厂挂钩允许自定义修改新的bean实例
+		
+	
+2、oa项目为什么会调用两次refresh()方法。
+	第一次是：是web.xml中的ContextLoaderListener进行的初始化过程，initWebApplicationContext(ServletContextEvent event)开始操作。
+	第二次是：DispatcherServlet初始化时进行的init操作。
+	
+	原因：ContextLoaderListener加载的applicationContext是web应用全局的上下文，而DispatcherServlet加载的applicationContext是spring MVC的上下文。
+
+	
+3、spring中的钩子程序以及spring的拓展？
+
+
+4、bean标签中property标签的对应的注解
+	1、使用@Value来注入属性值。修饰的属性，需要get、set方法。
+	2、使用@PropertySource注入配置文件，相当于<context:property-placeholder>标签。
+		注意还有一个@PropertySources注解。
+	
