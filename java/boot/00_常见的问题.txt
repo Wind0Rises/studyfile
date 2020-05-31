@@ -1,6 +1,0 @@
-1、Spring boot如何实现自动配置？
-	Spring Boot的原理：约定优于配置，通过实现自动配置的功能来为用户快速构建出标准化的应用。
-
-
-1、Spring boot如何自定实现一个Start？
-	

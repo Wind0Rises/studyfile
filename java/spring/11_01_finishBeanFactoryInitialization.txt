@@ -25,8 +25,11 @@ refresh()：第十一部分
 			6、调用InstantiationAwareBeanPostProcessor的postProcessAfterInstantiation(..)：方法。
 			7、调用InstantiationAwareBeanPostProcessor的postProcessPropertyValues(...)方法。
 			8、设置Bean的属性，通过<propretity>标签或者@Value注解设置的操作。
+			
 			9、如果该Bean是实现了一些Aware接口，调用对应的Aware的方法。BeanNameAware --> BeanClassLoaderAware --> BeanFactoryAware	【只有实现了对应Aware接口才会调用】
+			
 			10、调用SmartInstantiationAwareBeanPostProcessor类的getEarlyBeanReference()方法。
+			
 			11、调用BeanPostProcessor对应的postProcessBeforeInitialization(..)方法。													【BeanPostProcessor是每一个Bean都会调用】
 			12、调用InitializingBean的afterPropertiesSet()方法。																	【只有实现了InitializingBean的Bean才会调用。】
 			13、调用init-method属性设置的初始化方法。

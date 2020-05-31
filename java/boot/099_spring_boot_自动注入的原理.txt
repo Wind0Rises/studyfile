@@ -1,0 +1,536 @@
+				ImportSelector:selectImports(AnnotationMetadata importingClassMetadata):选择并返回应该被导入的Configuration类的类名通过给定AnnotationMetadata。
+
+
+			DeferredImportSelector：   getImportGroup():获取一个特定的导入组，注意【Group内部实体Entry包含AnnotationMetadata和String导入类的名称】
+			Group：process(AnnotationMetadata metadata, DeferredImportSelector selector)：使用指定的DeferredImportSelector处理导入Configuration类的AnnotationMetadata。
+				   selectImports()：返回导入实体。
+
+
+		AutoConfigurationImportSelector
+		
+		StandardAnnotationMetadata。
+		
+############################################  监听器  #######################  
+BootstrapApplicationListener
+		bootstrapServiceContext
+		
+		onApplicationEvent
+		
+SimpleApplicationEventMulticaster		
+		doInvokeListener
+		invokeListener
+		multicastEvent
+		
+EventPublishingRunListener
+		environmentPrepared
+		
+SpringApplicationRunListeners
+		environmentPrepared
+	
+SpringApplication
+		prepareEnvironment
+		
+		
+SpringApplicationRunListeners	
+		
+		
+		
+#############################################################################################################################################################################################
+################################################################################   ConfigurationClassParser  ################################################################################
+#############################################################################################################################################################################################
+location：ConfigurationClassPostProcessor
+public void processConfigBeanDefinitions(BeanDefinitionRegistry registry) {
+	List<BeanDefinitionHolder> configCandidates = new ArrayList();
+	String[] candidateNames = registry.getBeanDefinitionNames();
+	String[] var4 = candidateNames;
+	int var5 = candidateNames.length;
+
+	for(int var6 = 0; var6 < var5; ++var6) {
+		String beanName = var4[var6];
+		BeanDefinition beanDef = registry.getBeanDefinition(beanName);
+		if (!ConfigurationClassUtils.isFullConfigurationClass(beanDef) && !ConfigurationClassUtils.isLiteConfigurationClass(beanDef)) {
+			if (ConfigurationClassUtils.checkConfigurationClassCandidate(beanDef, this.metadataReaderFactory)) {
+				configCandidates.add(new BeanDefinitionHolder(beanDef, beanName));
+			}
+		} else if (this.logger.isDebugEnabled()) {
+			this.logger.debug("Bean definition has already been processed as a configuration class: " + beanDef);
+		}
+	}
+
+	if (!configCandidates.isEmpty()) {
+		configCandidates.sort((bd1, bd2) -> {
+			int i1 = ConfigurationClassUtils.getOrder(bd1.getBeanDefinition());
+			int i2 = ConfigurationClassUtils.getOrder(bd2.getBeanDefinition());
+			return Integer.compare(i1, i2);
+		});
+		SingletonBeanRegistry sbr = null;
+		if (registry instanceof SingletonBeanRegistry) {
+			sbr = (SingletonBeanRegistry)registry;
+			if (!this.localBeanNameGeneratorSet) {
+				BeanNameGenerator generator = (BeanNameGenerator)sbr.getSingleton("org.springframework.context.annotation.internalConfigurationBeanNameGenerator");
+				if (generator != null) {
+					this.componentScanBeanNameGenerator = generator;
+					this.importBeanNameGenerator = generator;
+				}
+			}
+		}
+
+		if (this.environment == null) {
+			this.environment = new StandardEnvironment();
+		}
+
+		ConfigurationClassParser parser = new ConfigurationClassParser(this.metadataReaderFactory, this.problemReporter, this.environment, this.resourceLoader, this.componentScanBeanNameGenerator, registry);
+		Set<BeanDefinitionHolder> candidates = new LinkedHashSet(configCandidates);
+		HashSet alreadyParsed = new HashSet(configCandidates.size());
+
+		do {
+			parser.parse(candidates);
+			parser.validate();
+			Set<ConfigurationClass> configClasses = new LinkedHashSet(parser.getConfigurationClasses());
+			configClasses.removeAll(alreadyParsed);
+			if (this.reader == null) {
+				this.reader = new ConfigurationClassBeanDefinitionReader(registry, this.sourceExtractor, this.resourceLoader, this.environment, this.importBeanNameGenerator, parser.getImportRegistry());
+			}
+
+			this.reader.loadBeanDefinitions(configClasses);
+			alreadyParsed.addAll(configClasses);
+			candidates.clear();
+			if (registry.getBeanDefinitionCount() > candidateNames.length) {
+				String[] newCandidateNames = registry.getBeanDefinitionNames();
+				Set<String> oldCandidateNames = new HashSet(Arrays.asList(candidateNames));
+				Set<String> alreadyParsedClasses = new HashSet();
+				Iterator var12 = alreadyParsed.iterator();
+
+				while(var12.hasNext()) {
+					ConfigurationClass configurationClass = (ConfigurationClass)var12.next();
+					alreadyParsedClasses.add(configurationClass.getMetadata().getClassName());
+				}
+
+				String[] var23 = newCandidateNames;
+				int var24 = newCandidateNames.length;
+
+				for(int var14 = 0; var14 < var24; ++var14) {
+					String candidateName = var23[var14];
+					if (!oldCandidateNames.contains(candidateName)) {
+						BeanDefinition bd = registry.getBeanDefinition(candidateName);
+						if (ConfigurationClassUtils.checkConfigurationClassCandidate(bd, this.metadataReaderFactory) && !alreadyParsedClasses.contains(bd.getBeanClassName())) {
+							candidates.add(new BeanDefinitionHolder(bd, candidateName));
+						}
+					}
+				}
+
+				candidateNames = newCandidateNames;
+			}
+		} while(!candidates.isEmpty());
+
+		if (sbr != null && !sbr.containsSingleton(IMPORT_REGISTRY_BEAN_NAME)) {
+			sbr.registerSingleton(IMPORT_REGISTRY_BEAN_NAME, parser.getImportRegistry());
+		}
+
+		if (this.metadataReaderFactory instanceof CachingMetadataReaderFactory) {
+			((CachingMetadataReaderFactory)this.metadataReaderFactory).clearCache();
+		}
+
+	}
+}
+
+
+public void parse(Set<BeanDefinitionHolder> configCandidates) {
+	Iterator var2 = configCandidates.iterator();
+
+	while(var2.hasNext()) {
+		BeanDefinitionHolder holder = (BeanDefinitionHolder)var2.next();
+		BeanDefinition bd = holder.getBeanDefinition();
+
+		try {
+			if (bd instanceof AnnotatedBeanDefinition) {
+				this.parse(((AnnotatedBeanDefinition)bd).getMetadata(), holder.getBeanName());
+			} else if (bd instanceof AbstractBeanDefinition && ((AbstractBeanDefinition)bd).hasBeanClass()) {
+				this.parse(((AbstractBeanDefinition)bd).getBeanClass(), holder.getBeanName());
+			} else {
+				this.parse(bd.getBeanClassName(), holder.getBeanName());
+			}
+		} catch (BeanDefinitionStoreException var6) {
+			throw var6;
+		} catch (Throwable var7) {
+			throw new BeanDefinitionStoreException("Failed to parse configuration class [" + bd.getBeanClassName() + "]", var7);
+		}
+	}
+
+	this.deferredImportSelectorHandler.process();
+}
+
+public void process() {
+	List<ConfigurationClassParser.DeferredImportSelectorHolder> deferredImports = this.deferredImportSelectors;
+	this.deferredImportSelectors = null;
+
+	try {
+		if (deferredImports != null) {
+			ConfigurationClassParser.DeferredImportSelectorGroupingHandler handler = ConfigurationClassParser.this.new DeferredImportSelectorGroupingHandler();
+			deferredImports.sort(ConfigurationClassParser.DEFERRED_IMPORT_COMPARATOR);
+			deferredImports.forEach(handler::register);
+			handler.processGroupImports();
+		}
+	} finally {
+		this.deferredImportSelectors = new ArrayList();
+	}
+
+}
+
+public void processGroupImports() {
+	Iterator var1 = this.groupings.values().iterator();
+
+	while(var1.hasNext()) {
+		ConfigurationClassParser.DeferredImportSelectorGrouping grouping = (ConfigurationClassParser.DeferredImportSelectorGrouping)var1.next();
+		
+		grouping.getImports().forEach((entry) -> {
+			ConfigurationClass configurationClass = (ConfigurationClass)this.configurationClasses.get(entry.getMetadata());
+
+			try {
+				ConfigurationClassParser.this.processImports(configurationClass, ConfigurationClassParser.this.asSourceClass(configurationClass), ConfigurationClassParser.this.asSourceClasses(entry.getImportClassName()), false);
+			} catch (BeanDefinitionStoreException var4) {
+				throw var4;
+			} catch (Throwable var5) {
+				throw new BeanDefinitionStoreException("Failed to process import candidates for configuration class [" + configurationClass.getMetadata().getClassName() + "]", var5);
+			}
+		});
+	}
+}
+
+############################################################################   解析Enable  #############################################################################################
+location：ConfigurationClassParser
+public Iterable<Entry> getImports() {
+
+	Iterator var1 = this.deferredImports.iterator();
+
+	while(var1.hasNext()) {
+		ConfigurationClassParser.DeferredImportSelectorHolder deferredImport = (ConfigurationClassParser.DeferredImportSelectorHolder)var1.next();
+		//  ###########  05_001  ###########
+		this.group.process(deferredImport.getConfigurationClass().getMetadata(), deferredImport.getImportSelector());
+	}
+
+	//  ###########  05_005  ###########
+	return this.group.selectImports();
+}
+
+location：AutoConfigurationImportSelector.AutoConfigurationGroup
+// 参数：StandardAnnotationMetadata, AutoConfigurationImportSelector
+public void process(AnnotationMetadata annotationMetadata, DeferredImportSelector deferredImportSelector) {
+	Assert.state(deferredImportSelector instanceof AutoConfigurationImportSelector, () -> {
+		return String.format("Only %s implementations are supported, got %s", AutoConfigurationImportSelector.class.getSimpleName(), deferredImportSelector.getClass().getName());
+	});
+	//  ###########  05_002  ###########
+	// 内部类AutoConfigurationEntry维持着configurations和exclusions。
+	AutoConfigurationImportSelector.AutoConfigurationEntry autoConfigurationEntry = ((AutoConfigurationImportSelector)deferredImportSelector).getAutoConfigurationEntry(this.getAutoConfigurationMetadata(), annotationMetadata);
+	
+	// autoConfigurationEntries是一个list的。
+	this.autoConfigurationEntries.add(autoConfigurationEntry);
+	Iterator var4 = autoConfigurationEntry.getConfigurations().iterator();
+
+	while(var4.hasNext()) {
+		String importClassName = (String)var4.next();
+		// putIfAbsent如果key存在保留原来的，put如果key存在，则覆盖。
+		// entries是AutoConfigurationImportSelector.AutoConfigurationGroup中的一个属性。Map类型。
+		this.entries.putIfAbsent(importClassName, annotationMetadata);
+	}
+}
+
+location：AutoConfigurationImportSelector
+protected AutoConfigurationImportSelector.AutoConfigurationEntry getAutoConfigurationEntry(AutoConfigurationMetadata autoConfigurationMetadata, AnnotationMetadata annotationMetadata) {
+	//  ###########  05_003  ###########
+	if (!this.isEnabled(annotationMetadata)) {
+		// 直接new一个AutoConfigurationEntry，所以里面的内容为空。
+		return EMPTY_ENTRY;
+		
+	} else {
+		// 获取EnableAutoConfiguration的属性（exclude、excludeName）。
+		AnnotationAttributes attributes = this.getAttributes(annotationMetadata);
+		// 加载META-INF/spring.factories或者从缓存值获取配置信息。
+		List<String> configurations = this.getCandidateConfigurations(annotationMetadata, attributes);
+		// 去重。
+		configurations = this.removeDuplicates(configurations);
+		// 需要排出的配置。
+		Set<String> exclusions = this.getExclusions(annotationMetadata, attributes);
+		this.checkExcludedClasses(configurations, exclusions);
+		// 去掉需要排出额配置。
+		configurations.removeAll(exclusions);
+		// 过滤处理。
+		configurations = this.filter(configurations, autoConfigurationMetadata);
+		this.fireAutoConfigurationImportEvents(configurations, exclusions);
+		return new AutoConfigurationImportSelector.AutoConfigurationEntry(configurations, exclusions);
+	}
+}
+
+protected AnnotationAttributes getAttributes(AnnotationMetadata metadata) {
+	// name为EnableAutoConfiguration
+	String name = this.getAnnotationClass().getName();
+	
+	// metadata的annotationAttribute属性值--->获取的就是启动类上的注解。
+	// 获取给定注解（EnableAutoConfiguration）的属性。EnableAutoConfiguration包含exclude、excludeName两个值。
+	AnnotationAttributes attributes = AnnotationAttributes.fromMap(metadata.getAnnotationAttributes(name, true));
+	Assert.notNull(attributes, () -> {
+		return "No auto-configuration attributes found. Is " + metadata.getClassName() + " annotated with " + ClassUtils.getShortName(name) + "?";
+	});
+	return attributes;
+}
+
+protected Class<?> getAnnotationClass() {
+	return EnableAutoConfiguration.class;
+}
+
+location：AutoConfigurationImportSelector
+protected List<String> getCandidateConfigurations(AnnotationMetadata metadata, AnnotationAttributes attributes) {
+	//  ###########  05_004  ###########
+	List<String> configurations = SpringFactoriesLoader.loadFactoryNames(this.getSpringFactoriesLoaderFactoryClass(), this.getBeanClassLoader());
+	Assert.notEmpty(configurations, "No auto configuration classes found in META-INF/spring.factories. If you are using a custom packaging, make sure that file is correct.");
+	return configurations;
+}
+
+location：SpringFactoriesLoader
+// 参数：EnableAutoConfiguration/AppClassLoader
+public static List<String> loadFactoryNames(Class<?> factoryClass, @Nullable ClassLoader classLoader) {
+	String factoryClassName = factoryClass.getName();
+	return loadSpringFactories(classLoader).getOrDefault(factoryClassName, Collections.emptyList());
+}
+
+location：SpringFactoriesLoader
+private static Map<String, List<String>> loadSpringFactories(@Nullable ClassLoader classLoader) {
+	MultiValueMap<String, String> result = cache.get(classLoader);
+	
+	if (result != null) {
+		return result;
+	}
+
+	try {
+		// 加载"META-INF/spring.factories"配置文件。
+		Enumeration<URL> urls = (classLoader != null ? classLoader.getResources(FACTORIES_RESOURCE_LOCATION) : ClassLoader.getSystemResources(FACTORIES_RESOURCE_LOCATION));
+		result = new LinkedMultiValueMap<>();
+		while (urls.hasMoreElements()) {
+			URL url = urls.nextElement();
+			UrlResource resource = new UrlResource(url);
+			Properties properties = PropertiesLoaderUtils.loadProperties(resource);
+			for (Map.Entry<?, ?> entry : properties.entrySet()) {
+				String factoryClassName = ((String) entry.getKey()).trim();
+				for (String factoryName : StringUtils.commaDelimitedListToStringArray((String) entry.getValue())) {
+					result.add(factoryClassName, factoryName.trim());
+				}
+			}
+		}
+		cache.put(classLoader, result);
+		return result;
+	} catch (IOException ex) {
+		throw new IllegalArgumentException("Unable to load factories from location [" + FACTORIES_RESOURCE_LOCATION + "]", ex);
+	}
+}
+
+
+protected Set<String> getExclusions(AnnotationMetadata metadata, AnnotationAttributes attributes) {
+	Set<String> excluded = new LinkedHashSet();
+	excluded.addAll(this.asList(attributes, "exclude"));
+	excluded.addAll(Arrays.asList(attributes.getStringArray("excludeName")));
+	excluded.addAll(this.getExcludeAutoConfigurationsProperty());
+	return excluded;
+}
+
+// ##########  很重要  #####################
+private void fireAutoConfigurationImportEvents(List<String> configurations, Set<String> exclusions) {
+	List<AutoConfigurationImportListener> listeners = this.getAutoConfigurationImportListeners();
+	
+	if (!listeners.isEmpty()) {
+		// 构造自动配置事件。
+		AutoConfigurationImportEvent event = new AutoConfigurationImportEvent(this, configurations, exclusions);
+		Iterator var5 = listeners.iterator();
+
+		while(var5.hasNext()) {
+			AutoConfigurationImportListener listener = (AutoConfigurationImportListener)var5.next();
+			this.invokeAwareMethods(listener);
+			
+			// 监听器调用。
+			listener.onAutoConfigurationImportEvent(event);
+		}
+	}
+}
+
+// 获取AutoConfigurationImportListener监听器。
+protected List<AutoConfigurationImportListener> getAutoConfigurationImportListeners() {
+	return SpringFactoriesLoader.loadFactories(AutoConfigurationImportListener.class, this.beanClassLoader);
+}
+
+location：AutoConfigurationImportSelector.AutoConfigurationGroup
+public Iterable<Entry> selectImports() {
+	//  ###########  05_006  ###########
+	//  List<AutoConfigurationImportSelector.AutoConfigurationEntry>    AutoConfigurationImportSelector.AutoConfigurationEntry保存所有配置和需要排出的配置。
+	if (this.autoConfigurationEntries.isEmpty()) {
+		return Collections.emptyList();
+	} else {
+		Set<String> allExclusions = (Set)this.autoConfigurationEntries.stream().map(AutoConfigurationImportSelector.AutoConfigurationEntry::getExclusions).flatMap(Collection::stream).collect(Collectors.toSet());
+		Set<String> processedConfigurations = (Set)this.autoConfigurationEntries.stream().map(AutoConfigurationImportSelector.AutoConfigurationEntry::getConfigurations).flatMap(Collection::stream).collect(Collectors.toCollection(LinkedHashSet::new));
+		processedConfigurations.removeAll(allExclusions);
+		return (Iterable)this.sortAutoConfigurations(processedConfigurations, this.getAutoConfigurationMetadata()).stream().map((importClassName) -> {
+			return new Entry((AnnotationMetadata)this.entries.get(importClassName), importClassName);
+		}).collect(Collectors.toList());
+	}
+}
+
+
+// 你是用@Configuration或者是@SpringBootConfiguration标记的类，currentSourceClass资源类。
+private void processImports(ConfigurationClass configClass, ConfigurationClassParser.SourceClass currentSourceClass, Collection<ConfigurationClassParser.SourceClass> importCandidates, boolean checkForCircularImports) {
+	// 是否为空，不为空进入if
+	if (!importCandidates.isEmpty()) {
+		if (checkForCircularImports && this.isChainedImportOnStack(configClass)) {
+			this.problemReporter.error(new ConfigurationClassParser.CircularImportProblem(configClass, this.importStack));
+		} else {
+		
+			this.importStack.push(configClass);
+
+			try {
+				Iterator var5 = importCandidates.iterator();
+
+				while(var5.hasNext()) {
+				
+					ConfigurationClassParser.SourceClass candidate = (ConfigurationClassParser.SourceClass)var5.next();
+					Class candidateClass;
+					
+					// 三种导入方式？？？
+					// 第一种方式是使用ImportSelector
+					if (candidate.isAssignable(ImportSelector.class)) {
+						candidateClass = candidate.loadClass();
+						ImportSelector selector = (ImportSelector)BeanUtils.instantiateClass(candidateClass, ImportSelector.class);
+						ParserStrategyUtils.invokeAwareMethods(selector, this.environment, this.resourceLoader, this.registry);
+						if (selector instanceof DeferredImportSelector) {
+							this.deferredImportSelectorHandler.handle(configClass, (DeferredImportSelector)selector);
+						} else {
+							String[] importClassNames = selector.selectImports(currentSourceClass.getMetadata());
+							Collection<ConfigurationClassParser.SourceClass> importSourceClasses = this.asSourceClasses(importClassNames);
+							this.processImports(configClass, currentSourceClass, importSourceClasses, false);
+						}
+						
+					// 第二种方式是使用ImportBeanDefinitionRegistrar
+					} else if (candidate.isAssignable(ImportBeanDefinitionRegistrar.class)) {
+						candidateClass = candidate.loadClass();
+						ImportBeanDefinitionRegistrar registrar = (ImportBeanDefinitionRegistrar)BeanUtils.instantiateClass(candidateClass, ImportBeanDefinitionRegistrar.class);
+						ParserStrategyUtils.invokeAwareMethods(registrar, this.environment, this.resourceLoader, this.registry);
+						configClass.addImportBeanDefinitionRegistrar(registrar, currentSourceClass.getMetadata());
+						
+					// 第三种方式是使用
+					} else {
+						this.importStack.registerImport(currentSourceClass.getMetadata(), candidate.getMetadata().getClassName());
+						this.processConfigurationClass(candidate.asConfigClass(configClass));
+					}
+				}
+			} catch (BeanDefinitionStoreException var15) {
+				throw var15;
+			} catch (Throwable var16) {
+				throw new BeanDefinitionStoreException("Failed to process import candidates for configuration class [" + configClass.getMetadata().getClassName() + "]", var16);
+			} finally {
+				this.importStack.pop();
+			}
+		}
+
+	}
+}
+
+
+// 解析配置类
+protected void processConfigurationClass(ConfigurationClass configClass) throws IOException {
+	if (!this.conditionEvaluator.shouldSkip(configClass.getMetadata(), ConfigurationPhase.PARSE_CONFIGURATION)) {
+		ConfigurationClass existingClass = (ConfigurationClass)this.configurationClasses.get(configClass);
+		if (existingClass != null) {
+			if (configClass.isImported()) {
+				if (existingClass.isImported()) {
+					existingClass.mergeImportedBy(configClass);
+				}
+
+				return;
+			}
+			this.configurationClasses.remove(configClass);
+			this.knownSuperclasses.values().removeIf(configClass::equals);
+		}
+
+		ConfigurationClassParser.SourceClass sourceClass = this.asSourceClass(configClass);
+
+		do {
+			sourceClass = this.doProcessConfigurationClass(configClass, sourceClass);
+		} while(sourceClass != null);
+
+		this.configurationClasses.put(configClass, configClass);
+	}
+}
+
+
+protected final ConfigurationClassParser.SourceClass doProcessConfigurationClass(ConfigurationClass configClass, ConfigurationClassParser.SourceClass sourceClass) throws IOException {
+	if (configClass.getMetadata().isAnnotated(Component.class.getName())) {
+		this.processMemberClasses(configClass, sourceClass);
+	}
+
+	Iterator var3 = AnnotationConfigUtils.attributesForRepeatable(sourceClass.getMetadata(), PropertySources.class, PropertySource.class).iterator();
+
+	AnnotationAttributes importResource;
+	while(var3.hasNext()) {
+		importResource = (AnnotationAttributes)var3.next();
+		if (this.environment instanceof ConfigurableEnvironment) {
+			this.processPropertySource(importResource);
+		} else {
+			this.logger.info("Ignoring @PropertySource annotation on [" + sourceClass.getMetadata().getClassName() + "]. Reason: Environment must implement ConfigurableEnvironment");
+		}
+	}
+
+	Set<AnnotationAttributes> componentScans = AnnotationConfigUtils.attributesForRepeatable(sourceClass.getMetadata(), ComponentScans.class, ComponentScan.class);
+	if (!componentScans.isEmpty() && !this.conditionEvaluator.shouldSkip(sourceClass.getMetadata(), ConfigurationPhase.REGISTER_BEAN)) {
+		Iterator var13 = componentScans.iterator();
+
+		while(var13.hasNext()) {
+			AnnotationAttributes componentScan = (AnnotationAttributes)var13.next();
+			Set<BeanDefinitionHolder> scannedBeanDefinitions = this.componentScanParser.parse(componentScan, sourceClass.getMetadata().getClassName());
+			Iterator var7 = scannedBeanDefinitions.iterator();
+
+			while(var7.hasNext()) {
+				BeanDefinitionHolder holder = (BeanDefinitionHolder)var7.next();
+				BeanDefinition bdCand = holder.getBeanDefinition().getOriginatingBeanDefinition();
+				if (bdCand == null) {
+					bdCand = holder.getBeanDefinition();
+				}
+
+				if (ConfigurationClassUtils.checkConfigurationClassCandidate(bdCand, this.metadataReaderFactory)) {
+					this.parse(bdCand.getBeanClassName(), holder.getBeanName());
+				}
+			}
+		}
+	}
+
+	this.processImports(configClass, sourceClass, this.getImports(sourceClass), true);
+	importResource = AnnotationConfigUtils.attributesFor(sourceClass.getMetadata(), ImportResource.class);
+	if (importResource != null) {
+		String[] resources = importResource.getStringArray("locations");
+		Class<? extends BeanDefinitionReader> readerClass = importResource.getClass("reader");
+		String[] var19 = resources;
+		int var21 = resources.length;
+
+		for(int var22 = 0; var22 < var21; ++var22) {
+			String resource = var19[var22];
+			String resolvedResource = this.environment.resolveRequiredPlaceholders(resource);
+			configClass.addImportedResource(resolvedResource, readerClass);
+		}
+	}
+
+	Set<MethodMetadata> beanMethods = this.retrieveBeanMethodMetadata(sourceClass);
+	Iterator var17 = beanMethods.iterator();
+
+	while(var17.hasNext()) {
+		MethodMetadata methodMetadata = (MethodMetadata)var17.next();
+		configClass.addBeanMethod(new BeanMethod(methodMetadata, configClass));
+	}
+
+	this.processInterfaces(configClass, sourceClass);
+	if (sourceClass.getMetadata().hasSuperClass()) {
+		String superclass = sourceClass.getMetadata().getSuperClassName();
+		if (superclass != null && !superclass.startsWith("java") && !this.knownSuperclasses.containsKey(superclass)) {
+			this.knownSuperclasses.put(superclass, configClass);
+			return sourceClass.getSuperClass();
+		}
+	}
+
+	return null;
+}
+
+

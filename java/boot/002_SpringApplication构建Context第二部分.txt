@@ -1,0 +1,1144 @@
+
+一、总结
+
+
+
+二、重要的类。
+
+
+
+三、源码
+/**
+ *
+ */
+location：SpringApplication
+public ConfigurableApplicationContext run(String... args) {
+	/**
+	 * StopWatch：计时器，可以允许为多个任务进行计时。
+	 */
+	StopWatch stopWatch = new StopWatch();
+	stopWatch.start();
+	
+	ConfigurableApplicationContext context = null;
+	Collection<SpringBootExceptionReporter> exceptionReporters = new ArrayList();
+	
+	
+	/**
+	 * 设置系统属性java.awt.headless，一般都是没有设置的，然后启动Headless模式。
+	 */
+	this.configureHeadlessProperty();
+	
+	/**
+	 * 获取SpringApplicationRunListeners实例对象。怎么获取的（通过加载"META-INF/spring.factories"文件里的内容，通过反射获取配置在spring.factories的全限定名的对象，并进行过滤排序。）
+	 * SpringApplicationRunListeners是事件监听器的管理类。注意这次获取的key是：SpringApplicationRunListener。和初始化SpringApplication时的ApplicationListener不一样。
+	 * 这个时候只有一个监听器：EventPublishingRunListener。
+	 */
+	SpringApplicationRunListeners listeners = this.getRunListeners(args);
+
+	/**
+	 * 调用监听器。
+	 */
+	listeners.starting();
+
+	try {
+	
+		// 把启动参数封装成一个ApplicationArguments对象。
+		ApplicationArguments applicationArguments = new DefaultApplicationArguments(args);
+		
+		
+		/**
+		 * 在与SpringCloud一起使用的时候，在spring-cloud-context.jar的MATE-INF中会配置下面的监听器
+		 *		org.springframework.context.ApplicationListener=org.springframework.cloud.bootstrap.BootstrapApplicationListener,org.springframework.cloud.bootstrap.LoggingSystemShutdownListener,
+		 * 														org.springframework.cloud.context.restart.RestartListener
+		 * 其中BootstrapApplicationListener的onApplicationEvent(..)方法中会构建一个SpringApplicationBuilder的实例，在构建一个SpringApplicationBuilder是回去创建一个SpringApplication实例。
+		 * 实例化一个ConfigurableEnvironment对象。
+		 */
+		ConfigurableEnvironment environment = this.prepareEnvironment(listeners, applicationArguments);
+		
+		
+		
+		this.configureIgnoreBeanInfo(environment);
+		
+		// 打印spring字样，与spring boot版本信息。
+		Banner printedBanner = this.printBanner(environment);
+		
+		/** 
+		 * 创建ApplicationContext对象。创建一个Context对象，其内部的BeanFactory的beanDefinitionMap中会有五个参数：
+		 * 		ConfigurationClassPostProcessor
+		 * 		DefaultEventListenerFactory
+		 * 		EventListenerMethodProcessor
+		 * 		AutowiredAnnotationBeanPostProcessor
+		 * 		CommonAnnotationBeanPostProcessor
+		 */
+		context = this.createApplicationContext();
+
+
+
+		/** 
+		 * 实例化spring.factories中配置的SpringBootExceptionReporter对象。
+		 */
+		exceptionReporters = this.getSpringFactoriesInstances(SpringBootExceptionReporter.class, new Class[]{ConfigurableApplicationContext.class}, context);
+
+
+		/**
+		 * 准备Context。
+		 */
+		this.prepareContext(context, environment, listeners, applicationArguments, printedBanner);
+		
+		
+		
+		/**
+		 * springBoot的context是AnnotationConfigReactiveWebApplicationContext。
+		 */
+		this.refreshContext(context);
+
+
+		this.afterRefresh(context, applicationArguments);
+
+		stopWatch.stop();
+
+		if (this.logStartupInfo) {
+			(new StartupInfoLogger(this.mainApplicationClass)).logStarted(this.getApplicationLog(), stopWatch);
+		}
+
+		listeners.started(context);
+
+		this.callRunners(context, applicationArguments);
+	} catch (Throwable var10) {
+		this.handleRunFailure(context, var10, exceptionReporters, listeners);
+		throw new IllegalStateException(var10);
+	}
+
+	try {
+		listeners.running(context);
+		return context;
+	} catch (Throwable var9) {
+		this.handleRunFailure(context, var9, exceptionReporters, (SpringApplicationRunListeners)null);
+		throw new IllegalStateException(var9);
+	}
+}
+
+
+
+#############################################################
+#			01、创建ConfigurableApplicationContext			#
+#############################################################
+/**
+ * 如果SpringApplication中配置了applicationContextClass，那么就使用SpringApplication中的，如果没有就根据WebApplicationType创建一个ApplicationContext对象。
+ */
+protected ConfigurableApplicationContext createApplicationContext() {
+	Class<?> contextClass = this.applicationContextClass;
+	
+	if (contextClass == null) {
+		try {
+			switch (this.webApplicationType) {
+		
+				case SERVLET:
+					// DEFAULT_SERVLET_WEB_CONTEXT_CLASS = "org.springframework.boot.web.servlet.context.AnnotationConfigServletWebServerApplicationContext"
+					contextClass = Class.forName(DEFAULT_SERVLET_WEB_CONTEXT_CLASS);
+					break;
+					
+					
+				case REACTIVE:
+					// DEFAULT_REACTIVE_WEB_CONTEXT_CLASS = "org.springframework.boot.web.reactive.context.AnnotationConfigReactiveWebServerApplicationContext"
+					contextClass = Class.forName(DEFAULT_REACTIVE_WEB_CONTEXT_CLASS);
+					break;
+					
+					
+				default:
+					//  DEFAULT_CONTEXT_CLASS = "org.springframework.context.annotation.AnnotationConfigApplicationContext";
+					contextClass = Class.forName(DEFAULT_CONTEXT_CLASS);
+			}
+			
+		} catch (ClassNotFoundException ex) {
+			throw new IllegalStateException("Unable create a default ApplicationContext, " + "please specify an ApplicationContextClass", ex);
+		}
+	}
+	
+	/**
+	 * 创建对应的实例。
+	 */
+	return (ConfigurableApplicationContext) BeanUtils.instantiateClass(contextClass);
+}
+
+
+☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆
+☆    			这是Web				☆
+☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆
+/**
+ * GenericApplicationContext
+ *			GenericWebApplicationContext
+ *						ServletWebServerApplicationContext		
+ *									AnnotationConfigServletWebServerApplicationContext	
+ *									XmlServletWebServerApplicationContext
+ *			
+ * AnnotationConfigServletWebServerApplicationContext：实例化
+ */
+location：AnnotationConfigServletWebServerApplicationContext
+public AnnotationConfigServletWebServerApplicationContext() {
+	this.reader = new AnnotatedBeanDefinitionReader(this);
+	this.scanner = new ClassPathBeanDefinitionScanner(this);
+}
+
+/**
+ *
+ */
+location：ServletWebServerApplicationContext
+public ServletWebServerApplicationContext() {
+
+}
+
+/**
+ *
+ */
+location：GenericWebApplicationContext
+public GenericWebApplicationContext() {
+	super();
+}
+
+/**
+ *
+ */
+location：GenericApplicationContext
+public GenericApplicationContext() {
+	this.beanFactory = new DefaultListableBeanFactory();
+}
+
+☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆
+☆    			普通模式			☆
+☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆
+/**
+ * ApplicationContext
+ *			ConfigurableApplicationContext
+ *						AbstractApplicationContext
+ *									AbstractRefreshableApplicationContext
+ *												AbstractRefreshableConfigApplicationContext
+ *																AbstractXmlApplicationContext
+ *																				FileSystemXmlApplicationContext
+ *																				ClassPathXmlApplicationContext
+ *									GenericApplicationContext
+ *												GenericXmlApplicationContext
+ *												StaticApplicationContext
+ *												GenericGroovyApplicationContext
+ *												AnnotationConfigApplicationContext【】
+ *																AnnotationConfigReactiveWebApplicationContext
+ *												GenericReactiveWebApplicationContext
+ *																ReactiveWebServerApplicationContext
+ *																				AnnotationConfigReactiveWebServerApplicationContext
+ */
+location：AnnotationConfigApplicationContext
+public AnnotationConfigApplicationContext() {
+	this.reader = new AnnotatedBeanDefinitionReader(this);
+	this.scanner = new ClassPathBeanDefinitionScanner(this);
+}
+
+/**
+ *
+ */
+location：GenericApplicationContext
+public GenericApplicationContext() {
+	this.beanFactory = new DefaultListableBeanFactory();
+}
+
+☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆
+☆    			Reactor模式			☆
+☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆
+/**
+ *
+ */
+location：AnnotationConfigReactiveWebServerApplicationContext
+public AnnotationConfigReactiveWebServerApplicationContext() {
+	this.reader = new AnnotatedBeanDefinitionReader(this);
+	this.scanner = new ClassPathBeanDefinitionScanner(this);
+}
+
+/**
+ *
+ */
+location：ReactiveWebServerApplicationContext
+public ReactiveWebServerApplicationContext() {
+
+}
+
+/**
+ *
+ */
+location：GenericReactiveWebApplicationContext
+public GenericReactiveWebApplicationContext() {
+}
+
+/**
+ *
+ */
+location：GenericApplicationContext
+public GenericApplicationContext() {
+	this.beanFactory = new DefaultListableBeanFactory();
+}
+
+
+
+
+
+
+
+
+
+#################################################
+#				02、准备Context                 #
+#################################################
+/**
+ *
+ */
+location：
+private void prepareContext(ConfigurableApplicationContext context, ConfigurableEnvironment environment, SpringApplicationRunListeners listeners, ApplicationArguments applicationArguments, Banner printedBanner) {
+	// 给ApplicationContext设置环境属性。
+	context.setEnvironment(environment);
+
+	// 在满足条件的情况下向ApplicationContext中的BeanFactory设置BeanNameGenerator和ApplicationConversionService；向ApplicationContext设置ClassLoader。
+	// BeanNameGenerator：一个用于生成Bean的名称的策略接口。
+	// ApplicationConversionService用于格式转换的。
+	postProcessApplicationContext(context);
+
+	// 获取spring.factories中配置的ApplicationContextInitializer对象，并调用initialize()方法。
+	applyInitializers(context);
+
+	// 调用各种不同的监听器处理ApplicationContextInitializedEvent事件。
+	listeners.contextPrepared(context);
+
+	// 打印开始日志。
+	if (this.logStartupInfo) {
+		this.logStartupInfo(context.getParent() == null);
+		this.logStartupProfileInfo(context);
+	}
+	
+	// 获取ApplicationContext中的BeanFactory。
+	ConfigurableListableBeanFactory beanFactory = context.getBeanFactory();
+
+	// 把之前封装的应用参数ApplicationArguments注册到BeanFactory中。
+	beanFactory.registerSingleton("springApplicationArguments", applicationArguments);
+
+	// 把打印信息的printedBanner也注册到BeanFactory。
+	if (printedBanner != null) {
+		beanFactory.registerSingleton("springBootBanner", printedBanner);
+	}
+
+	// allowBeanDefinitionOverriding没有初始化给值，默认为false。把SpringApplication中的allowBeanDefinitionOverriding值赋值给ApplicationContext中。
+	if (beanFactory instanceof DefaultListableBeanFactory) {
+		((DefaultListableBeanFactory)beanFactory).setAllowBeanDefinitionOverriding(this.allowBeanDefinitionOverriding);
+	}
+
+	// 获取所有资源，这个时候只有一个程序入口类。主资源。
+	Set<Object> sources = this.getAllSources();
+
+	Assert.notEmpty(sources, "Sources must not be empty");
+
+	// 加载资源，并注册对应的BeanDefinition到BeanFactory中。这里只有一个程序入口类。
+	this.load(context, sources.toArray(new Object[0]));
+
+	// 把监听器中实现了ApplicationContextAware接口的监听，并ApplicationContext设置到对应监听器中。并把监听器（这个监听器原本是属于SpringApplication的）注册到ApplicationContext中。
+	// 并且让监听器处理ApplicationPreparedEvent时间。   调用监听器的onApplicationEvent()方法。
+	listeners.contextLoaded(context);
+}
+
+	/**
+     * 如果beanNameGenerator不为null，注册单例bean（org.springframework.context.annotation.internalConfigurationBeanNameGenerator）
+	 * 如果resourceLoader不为null，把SpringApplication的ClassLoader赋值给ApplicationContext。
+	 */
+	protected void postProcessApplicationContext(ConfigurableApplicationContext context) {
+		// 实例化ApplicationContext时，在构造函数中会创建一个DefaultListableBeanFactory实例赋给BeanFactory。
+		if (this.beanNameGenerator != null) {
+			context.getBeanFactory().registerSingleton(AnnotationConfigUtils.CONFIGURATION_BEAN_NAME_GENERATOR, this.beanNameGenerator);
+		}
+
+		if (this.resourceLoader != null) {
+			if (context instanceof GenericApplicationContext) {
+				((GenericApplicationContext) context).setResourceLoader(this.resourceLoader);
+			}
+			if (context instanceof DefaultResourceLoader) {
+				((DefaultResourceLoader) context).setClassLoader(this.resourceLoader.getClassLoader());
+			}
+		}
+		
+		// 向ApplicationContext中的BeanFactory设置ApplicationConversionService。ApplicationConversionService是一个单例的。
+		if (this.addConversionService) {
+			context.getBeanFactory().setConversionService(ApplicationConversionService.getSharedInstance());
+		}
+	}
+
+		/**
+		 * 注册一个bean到bean的注册表中，单例模式。
+		 */
+		location：DefaultListableBeanFactory
+		public void registerSingleton(String beanName, Object singletonObject) throws IllegalStateException {
+			super.registerSingleton(beanName, singletonObject);
+			updateManualSingletonNames(set -> set.add(beanName), set -> !this.beanDefinitionMap.containsKey(beanName));
+			clearByTypeCache();
+		}
+
+		/**
+		 * 注册过程使用synchronized进行加锁。
+		 * 判断给定BeanName在注册表中是否存在，如果存在，抛出异常，如果不存在，把给定实例，放入注册表中。
+		 */
+		public void registerSingleton(String beanName, Object singletonObject) throws IllegalStateException {
+			// 参数判断。
+			Assert.notNull(beanName, "Bean name must not be null");
+			Assert.notNull(singletonObject, "Singleton object must not be null");
+
+			// Map<String, Object> singletonObjects = new ConcurrentHashMap<>(256);
+			synchronized (this.singletonObjects) {
+				Object oldObject = this.singletonObjects.get(beanName);
+				if (oldObject != null) {
+					throw new IllegalStateException("Could not register object [" + singletonObject + "] under bean name '" + beanName + "': there is already object [" + oldObject + "] bound");
+				}
+				addSingleton(beanName, singletonObject);
+			}
+		}
+
+		/**
+		 * 注册过程。
+		 */
+		protected void addSingleton(String beanName, Object singletonObject) {
+			synchronized (this.singletonObjects) {
+				this.singletonObjects.put(beanName, singletonObject);
+				this.singletonFactories.remove(beanName);
+				this.earlySingletonObjects.remove(beanName);
+				this.registeredSingletons.add(beanName);
+			}
+		}
+
+/**
+ * 从SpringApplication中获取ApplicationContextInitializer，并进行排序。
+ * 
+ */
+protected void applyInitializers(ConfigurableApplicationContext context) {
+	// getInitializers()：获取spring.factories中配置的ApplicationContextInitializer，并进行排序。
+	for (ApplicationContextInitializer initializer : getInitializers()) {
+		
+		// GenericTypeResolver：对泛型的处理。
+		// 返回被要求的类型。
+		Class<?> requiredType = GenericTypeResolver.resolveTypeArgument(initializer.getClass(), ApplicationContextInitializer.class);
+		Assert.isInstanceOf(requiredType, context, "Unable to call initializer.");
+		initializer.initialize(context);
+	}
+}
+
+/**
+ * 告诉EventPublishingRunListener可以处理ApplicationContextInitializedEvent事件了。
+ * 这个就是多路广播事件处理。获取各种事件监听器去处理ApplicationContextInitializedEvent事件。
+ */
+public void contextPrepared(ConfigurableApplicationContext context) {
+	this.initialMulticaster.multicastEvent(new ApplicationContextInitializedEvent(this.application, this.args, context));
+}
+
+public void multicastEvent(ApplicationEvent event) {
+	multicastEvent(event, resolveDefaultEventType(event));
+}
+
+public void multicastEvent(final ApplicationEvent event, @Nullable ResolvableType eventType) {
+	ResolvableType type = (eventType != null ? eventType : resolveDefaultEventType(event));
+	Executor executor = getTaskExecutor();
+	for (ApplicationListener<?> listener : getApplicationListeners(event, type)) {
+		if (executor != null) {
+			executor.execute(() -> invokeListener(listener, event));
+		}
+		else {
+			invokeListener(listener, event);
+		}
+	}
+}
+
+/**
+ * 获取所有的资源。
+ */
+public Set<Object> getAllSources() {
+	Set<Object> allSources = new LinkedHashSet<>();
+	// primarySources：这个就是程序入口，main函数，主资源。
+	if (!CollectionUtils.isEmpty(this.primarySources)) {
+		allSources.addAll(this.primarySources);
+	}
+	if (!CollectionUtils.isEmpty(this.sources)) {
+		allSources.addAll(this.sources);
+	}
+	return Collections.unmodifiableSet(allSources);
+}
+
+/**
+ * context是AnnotationConfigServletWebServerApplicationContext类的实例对象。
+ * 这个时候sources只有程序入口类。
+ */
+protected void load(ApplicationContext context, Object[] sources) {
+	if (logger.isDebugEnabled()) {
+		logger.debug("Loading source " + StringUtils.arrayToCommaDelimitedString(sources));
+	}
+	
+	/**
+     * 创建一个BeanDefinitionLoader。【【【BeanDefinitionLoader用于加载Bean的】】】
+	 */
+	BeanDefinitionLoader loader = createBeanDefinitionLoader(getBeanDefinitionRegistry(context), sources);
+
+	// 为beanDefinitionLoader设置beanNameGenerator、resourceLoader
+	if (this.beanNameGenerator != null) {
+		loader.setBeanNameGenerator(this.beanNameGenerator);
+	}
+	if (this.resourceLoader != null) {
+		loader.setResourceLoader(this.resourceLoader);
+	}
+	if (this.environment != null) {
+		loader.setEnvironment(this.environment);
+	}
+
+	// 加载资源的过程。【【【 --加载资源过程-- 】】】
+	loader.load();
+}
+
+	/**
+	 * context是AnnotationConfigServletWebServerApplicationContext类的实例对象。其是BeanDefinitionRegistry子类。
+	 */
+	private BeanDefinitionRegistry getBeanDefinitionRegistry(ApplicationContext context) {
+		if (context instanceof BeanDefinitionRegistry) {
+			return (BeanDefinitionRegistry) context;
+		}
+		if (context instanceof AbstractApplicationContext) {
+			return (BeanDefinitionRegistry) ((AbstractApplicationContext) context).getBeanFactory();
+		}
+		throw new IllegalStateException("Could not locate BeanDefinitionRegistry");
+	}
+
+	/**
+	 * 实例化一个BeanDefinitionLoader对象，registry = context；sources = 主类。
+     * BeanDefinitionLoader用于加载主类下的资源，包含XML和JavaConfig配置的。
+	 * AnnotatedBeanDefinitionReader、XmlBeanDefinitionReader、ClassPathBeanDefinitionScanner
+	 *        加载注解配置的			     加载xml配置的 			  加载ClassPath下的
+	 */
+	protected BeanDefinitionLoader createBeanDefinitionLoader(BeanDefinitionRegistry registry, Object[] sources) {
+		return new BeanDefinitionLoader(registry, sources);
+	}
+
+#####################################################################################################################################
+########################################         【【【 --加载资源过程-- 】】】        ##############################################
+#####################################################################################################################################
+location：BeanDefinitionLoader
+public int load() {
+	int count = 0;
+	for (Object source : this.sources) {
+		count += load(source);
+	}
+	return count;
+}
+
+/**
+ * source：为程序入口类。
+ */
+private int load(Object source) {
+	Assert.notNull(source, "Source must not be null");
+	if (source instanceof Class<?>) {
+		return load((Class<?>) source);
+	}
+	if (source instanceof Resource) {
+		return load((Resource) source);
+	}
+	if (source instanceof Package) {
+		return load((Package) source);
+	}
+	if (source instanceof CharSequence) {
+		return load((CharSequence) source);
+	}
+	throw new IllegalArgumentException("Invalid source type " + source.getClass());
+}
+
+private int load(Class<?> source) {
+	// 判断是否是groovy。java直接跳过。
+	if (isGroovyPresent() && GroovyBeanDefinitionSource.class.isAssignableFrom(source)) {
+		GroovyBeanDefinitionSource loader = BeanUtils.instantiateClass(source, GroovyBeanDefinitionSource.class);
+		load(loader);
+	}
+
+	// 判断给定类是否被Component注解修饰。
+	if (isComponent(source)) {
+		// 如果source被Component修饰，这注册这个类。
+		this.annotatedReader.register(source);
+		return 1;
+	}
+	return 0;
+}
+
+	/**
+	 * groovy也是基于JVM的，判断是否是groovy。
+	 */
+	private boolean isGroovyPresent() {
+		return ClassUtils.isPresent("groovy.lang.MetaClass", null);
+	}
+
+
+	private boolean isComponent(Class<?> type) {
+		
+		// 判断给定的Class是否被给定的注解修饰，如果给定的Class被给定的注解修饰以后，返回注解。
+		if (AnnotationUtils.findAnnotation(type, Component.class) != null) {
+			return true;
+		}
+		
+		if (type.getName().matches(".*\\$_.*closure.*") || type.isAnonymousClass() || type.getConstructors() == null || type.getConstructors().length == 0) {
+			return false;
+		}
+
+		return true;
+	}
+
+	/**
+	 * clazz：程序入口类；annotationType：Component.class。
+	 * 【【【  ---@Configuration注解被@Component修饰了---  】】】
+	 */
+	location：AnnotationUtils
+	public static <A extends Annotation> A findAnnotation(Class<?> clazz, @Nullable Class<A> annotationType) {
+		return findAnnotation(clazz, annotationType, true);
+	}
+
+
+	/**
+	 * 判断给定的Class是否被给定的注解修饰，如果给定的Class被给定的注解修饰以后，返回注解。
+	 */
+	private static <A extends Annotation> A findAnnotation(Class<?> clazz, @Nullable Class<A> annotationType, boolean synthesize) {
+
+		Assert.notNull(clazz, "Class must not be null");
+		if (annotationType == null) {
+			return null;
+		}
+
+		// 创建缓存key。通过缓存key去缓存中查询。
+		AnnotationCacheKey cacheKey = new AnnotationCacheKey(clazz, annotationType);
+		A result = (A) findAnnotationCache.get(cacheKey);
+
+		// 如果缓存没有，解析类上的注解。
+		if (result == null) {
+			
+			// 解析程序入口类是否被@Component注解修饰，【【【---@Configuration注解被@Component修饰了--- 】】】
+			result = findAnnotation(clazz, annotationType, new HashSet<>());
+
+			// 合成注解和类，并缓存起来。
+			if (result != null && synthesize) {
+				result = synthesizeAnnotation(result, clazz);
+				findAnnotationCache.put(cacheKey, result);
+			}
+		}
+		return result;
+	}
+
+	/**
+	 *	递归解析类上的注解，如果该类被给定的注解annotationType修饰以后，返回这个给定的注解。
+	 */
+	private static <A extends Annotation> A findAnnotation(Class<?> clazz, Class<A> annotationType, Set<Annotation> visited) {
+		try {
+			// 查看clazz是否存在给定annotationType的注解。
+			A annotation = clazz.getDeclaredAnnotation(annotationType);
+			if (annotation != null) {
+				return annotation;
+			}
+
+			// getDeclaredAnnotations(clazz):如果declaredAnnotationsCache中没有，添加到这个集合中。
+			for (Annotation declaredAnn : getDeclaredAnnotations(clazz)) {
+				Class<? extends Annotation> declaredType = declaredAnn.annotationType();
+				
+				// 判断这个注解是否是"java.lang.annotation"包下的注解 如果不是，把这个注解添加到visited的集合中。
+				if (!isInJavaLangAnnotationPackage(declaredType) && visited.add(declaredAnn)) {
+					
+					// 然后递归了。
+					annotation = findAnnotation(declaredType, annotationType, visited);
+					if (annotation != null) {
+						return annotation;
+					}
+				}
+			}
+		} catch (Throwable ex) {
+			handleIntrospectionFailure(clazz, ex);
+			return null;
+		}
+
+		for (Class<?> ifc : clazz.getInterfaces()) {
+			A annotation = findAnnotation(ifc, annotationType, visited);
+			if (annotation != null) {
+				return annotation;
+			}
+		}
+
+		Class<?> superclass = clazz.getSuperclass();
+		if (superclass == null || superclass == Object.class) {
+			return null;
+		}
+		return findAnnotation(superclass, annotationType, visited);
+	}
+
+	/**
+	 * declaredAnnotationsCache：集合中没有就向其中添加一个。
+	 */
+	static Annotation[] getDeclaredAnnotations(AnnotatedElement element) {
+		if (element instanceof Class || element instanceof Member) {
+			return declaredAnnotationsCache.computeIfAbsent(element, AnnotatedElement::getDeclaredAnnotations);
+		}
+		return element.getDeclaredAnnotations();
+	}
+
+##########################################################################################################################		
+public static <A extends Annotation> A synthesizeAnnotation(A annotation, @Nullable AnnotatedElement annotatedElement) { #
+	return synthesizeAnnotation(annotation, (Object) annotatedElement);                                                  #
+}                                                                                                                        #
+																														 #
+static <A extends Annotation> A synthesizeAnnotation(A annotation, @Nullable Object annotatedElement) {                  #
+	if (annotation instanceof SynthesizedAnnotation || hasPlainJavaAnnotationsOnly(annotatedElement)) {                  #
+		return annotation;                                                                                               #
+	}                                                                                                                    #
+                                                                                                                         #
+	Class<? extends Annotation> annotationType = annotation.annotationType();                                            #
+	if (!isSynthesizable(annotationType)) {                                                                              #
+		return annotation;                                                                                               #
+	}                                                                                                                    #
+                                                                                                                         #
+	DefaultAnnotationAttributeExtractor attributeExtractor =                                                             #
+			new DefaultAnnotationAttributeExtractor(annotation, annotatedElement);                                       #
+	InvocationHandler handler = new SynthesizedAnnotationInvocationHandler(attributeExtractor);                          #
+                                                                                                                         #
+                                                                                                                         #
+	Class<?>[] exposedInterfaces = new Class<?>[] {annotationType, SynthesizedAnnotation.class};                         #
+	return (A) Proxy.newProxyInstance(annotation.getClass().getClassLoader(), exposedInterfaces, handler);               #
+}                                                                                                                        #
+##########################################################################################################################
+
+
+####################################################################################################################################		
+####################################      AnnotatedBeanDefinitionReader注册过程    #################################################		
+####################################################################################################################################		
+/**
+ * 如果是Component注解，这个componentClasses是程序入口类。
+ */
+location：AnnotatedBeanDefinitionReader
+public void register(Class<?>... componentClasses) {
+	for (Class<?> componentClass : componentClasses) {
+		registerBean(componentClass);
+	}
+}
+
+location：AnnotatedBeanDefinitionReader
+public void registerBean(Class<?> beanClass) {
+	doRegisterBean(beanClass, null, null, null);
+}
+
+/**
+ * public AnnotatedGenericBeanDefinition(Class<?> beanClass) {
+ *	   setBeanClass(beanClass);
+ *     this.metadata = new StandardAnnotationMetadata(beanClass, true);
+ * }
+ */
+location：AnnotatedBeanDefinitionReader
+<T> void doRegisterBean(Class<T> beanClass, @Nullable Supplier<T> instanceSupplier, @Nullable String name, @Nullable Class<? extends Annotation>[] qualifiers, BeanDefinitionCustomizer... definitionCustomizers) {
+	// 创建一个AnnotatedGenericBeanDefinition。这个还是一个BeanDefinition。
+	// 把要注入到spring容器的类的全限定名保存到BeanDefinition中，同时在AnnotatedGenericBeanDefinition构造函数中new一个StandardAnnotationMetadata。
+	AnnotatedGenericBeanDefinition abd = new AnnotatedGenericBeanDefinition(beanClass);
+
+	// conditionEvaluator这个属性是在AnnotatedBeanDefinitionReader初始化在构造函数中创建的。
+	// 判断是否要跳过这个Bean。
+	if (this.conditionEvaluator.shouldSkip(abd.getMetadata())) {
+		return;
+	}
+	
+	// 设置BeanDefinition的InstanceSupplier属性。
+	abd.setInstanceSupplier(instanceSupplier);
+
+	// scopeMetadataResolver = new AnnotationScopeMetadataResolver();
+	ScopeMetadata scopeMetadata = this.scopeMetadataResolver.resolveScopeMetadata(abd);
+
+	// 设置BeanDefinition的作用域。
+	abd.setScope(scopeMetadata.getScopeName());
+
+	// 获取Bean的名称。如果未null生成一个beanName。
+	String beanName = (name != null ? name : this.beanNameGenerator.generateBeanName(abd, this.registry));
+
+	// 操作的注解：@Lazy、@Primary、@DependsOn、@Role、@Description。这个这些属性值都设置到BeanDefinition中。
+	AnnotationConfigUtils.processCommonDefinitionAnnotations(abd);
+
+	if (qualifiers != null) {
+		for (Class<? extends Annotation> qualifier : qualifiers) {
+			if (Primary.class == qualifier) {
+				abd.setPrimary(true);
+			} else if (Lazy.class == qualifier) {
+				abd.setLazyInit(true);
+			} else {
+				abd.addQualifier(new AutowireCandidateQualifier(qualifier));
+			}
+		}
+	}
+
+	for (BeanDefinitionCustomizer customizer : definitionCustomizers) {
+		customizer.customize(abd);
+	}
+
+	// 创建一个BeanDefinitionHolder。内部有beanDefinition、beanName、aliases属性。
+	BeanDefinitionHolder definitionHolder = new BeanDefinitionHolder(abd, beanName);
+	
+	// 判断元数据的ScopedProxyMode模式是否需要生成代理类，如果需要生成代理类。
+	definitionHolder = AnnotationConfigUtils.applyScopedProxyMode(scopeMetadata, definitionHolder, this.registry);
+
+	// 
+	BeanDefinitionReaderUtils.registerBeanDefinition(definitionHolder, this.registry);
+}
+
+/**
+ * 如果把一个作用域为Session的Bean注入一个作用域为Singleton的Bean往往会出错，因为作用域为Singleton的Bean在spring启动时就会创建，
+ * 而作用域为Session的Bean则会在请求过来的时候才会创建。
+ */
+location：AnnotationScopeMetadataResolver
+public ScopeMetadata resolveScopeMetadata(BeanDefinition definition) {
+	// 初始化一个ScopeMetadata。ScopeMetadata用于描述范围特征的，包括范围名称和scoped-proxy行为。
+	// 默认scopeName = singleton； scopedProxyMode = NO
+	ScopeMetadata metadata = new ScopeMetadata();
+
+	// 判断给定的definition是否是AnnotatedBeanDefinition子类。
+	if (definition instanceof AnnotatedBeanDefinition) {
+		// 强转。
+		AnnotatedBeanDefinition annDef = (AnnotatedBeanDefinition) definition;
+
+		// annDef.getMetadata() ---> 是之前new AnnotatedBeanDefinition()是在构造函数中创建的StandardAnnotationMetadata
+		// 获取给定元数据中给定注解的属性值。
+		AnnotationAttributes attributes = AnnotationConfigUtils.attributesFor(annDef.getMetadata(), this.scopeAnnotationType);
+
+		// 判断属性值是否为null。
+		if (attributes != null) {
+			// 把给定注解（@scope）的value赋值给元数据的scopename
+			metadata.setScopeName(attributes.getString("value"));
+			
+			// 获取proxyMode属性，枚举类型。
+			ScopedProxyMode proxyMode = attributes.getEnum("proxyMode");
+
+			// 默认不创建代理。
+			if (proxyMode == ScopedProxyMode.DEFAULT) {
+				proxyMode = this.defaultProxyMode;
+			}
+
+			// 设置元数据的代理模式。
+			metadata.setScopedProxyMode(proxyMode);
+		}
+	}
+	return metadata;
+}
+
+/**
+ * 获取给定AnnotatedTypeMetadata的给定annotationClass注解的属性。
+ */
+location：AnnotationConfigUtils
+static AnnotationAttributes attributesFor(AnnotatedTypeMetadata metadata, Class<?> annotationClass) {
+	return attributesFor(metadata, annotationClass.getName());
+}
+
+
+/**
+ * 下面是StandardAnnotationMetadata的构造韩式。
+ * public StandardAnnotationMetadata(Class<?> introspectedClass, boolean nestedAnnotationsAsMap) {
+ * 		super(introspectedClass);
+ * 		this.annotations = introspectedClass.getAnnotations();
+ * 		this.nestedAnnotationsAsMap = nestedAnnotationsAsMap;
+ * }
+ *
+ */
+location：AnnotationConfigUtils
+static AnnotationAttributes attributesFor(AnnotatedTypeMetadata metadata, String annotationClassName) {
+	return AnnotationAttributes.fromMap(metadata.getAnnotationAttributes(annotationClassName, false));
+}
+
+
+/**
+ * 获取这个StandardAnnotationMetadata（BeanDefinition  Bean）给定注解的属性值。
+ */
+location：StandardAnnotationMetadata
+public Map<String, Object> getAnnotationAttributes(String annotationName, boolean classValuesAsString) {
+	return (this.annotations.length > 0 ? AnnotatedElementUtils.getMergedAnnotationAttributes(getIntrospectedClass(), annotationName, classValuesAsString, this.nestedAnnotationsAsMap) : null);
+}
+
+/**
+ * 处理一些公共注解。
+ */
+location：AnnotationConfigUtils
+public static void processCommonDefinitionAnnotations(AnnotatedBeanDefinition abd) {
+	processCommonDefinitionAnnotations(abd, abd.getMetadata());
+}
+
+/**
+ * 处理一些公共注解。具体的处理流程。
+ * 操作的注解：@Lazy、@Primary、@DependsOn、@Role、@Description。这个这些属性值都设置到BeanDefinition中。
+ */
+location：AnnotationConfigUtils
+static void processCommonDefinitionAnnotations(AnnotatedBeanDefinition abd, AnnotatedTypeMetadata metadata) {
+	AnnotationAttributes lazy = attributesFor(metadata, Lazy.class);
+	if (lazy != null) {
+		abd.setLazyInit(lazy.getBoolean("value"));
+	} else if (abd.getMetadata() != metadata) {
+		lazy = attributesFor(abd.getMetadata(), Lazy.class);
+		if (lazy != null) {
+			abd.setLazyInit(lazy.getBoolean("value"));
+		}
+	}
+
+	if (metadata.isAnnotated(Primary.class.getName())) {
+		abd.setPrimary(true);
+	}
+
+	AnnotationAttributes dependsOn = attributesFor(metadata, DependsOn.class);
+	if (dependsOn != null) {
+		abd.setDependsOn(dependsOn.getStringArray("value"));
+	}
+
+	AnnotationAttributes role = attributesFor(metadata, Role.class);
+	if (role != null) {
+		abd.setRole(role.getNumber("value").intValue());
+	}
+
+	AnnotationAttributes description = attributesFor(metadata, Description.class);
+	if (description != null) {
+		abd.setDescription(description.getString("value"));
+	}
+}
+
+static BeanDefinitionHolder applyScopedProxyMode(ScopeMetadata metadata, BeanDefinitionHolder definition, BeanDefinitionRegistry registry) {
+	// 获取元数据中的ScopedProxyMode
+	ScopedProxyMode scopedProxyMode = metadata.getScopedProxyMode();
+
+	// 判断ScopedProxyMode的模式是否为NO。
+	if (scopedProxyMode.equals(ScopedProxyMode.NO)) {
+		return definition;
+	}
+
+	// 判断ScopedProxyMode的模式是否为TARGET_CLASS。
+	boolean proxyTargetClass = scopedProxyMode.equals(ScopedProxyMode.TARGET_CLASS);
+
+	// 创建代理类。
+	return ScopedProxyCreator.createScopedProxy(definition, registry, proxyTargetClass);
+}
+
+
+/**
+ * 注册给定的BeanDefinition到BeanFactory中。
+ */
+location：BeanDefinitionReaderUtils
+public static void registerBeanDefinition(BeanDefinitionHolder definitionHolder, BeanDefinitionRegistry registry) throws BeanDefinitionStoreException {
+
+	// 获取BeanDefinition的名字。
+	String beanName = definitionHolder.getBeanName();
+
+	registry.registerBeanDefinition(beanName, definitionHolder.getBeanDefinition());
+
+	// 是否有别名，如果有别名，注册别名。
+	String[] aliases = definitionHolder.getAliases();
+	if (aliases != null) {
+		for (String alias : aliases) {
+			registry.registerAlias(beanName, alias);
+		}
+	}
+}
+
+/**
+ * 是注册BeanDefinition，并不是初始化bean的过程。
+ */
+location：DefaultListableBeanFactory
+public void registerBeanDefinition(String beanName, BeanDefinition beanDefinition)throws BeanDefinitionStoreException {
+	// 参数判断。
+	Assert.hasText(beanName, "Bean name must not be empty");
+	Assert.notNull(beanDefinition, "BeanDefinition must not be null");
+
+	if (beanDefinition instanceof AbstractBeanDefinition) {
+		try {
+			((AbstractBeanDefinition) beanDefinition).validate();
+		} catch (BeanDefinitionValidationException ex) {
+			throw new BeanDefinitionStoreException(beanDefinition.getResourceDescription(), beanName, "Validation of bean definition failed", ex);
+		}
+	}
+
+	// 查看beanDefinitionMap是否存在给定beanName的beanDefinition
+	BeanDefinition existingDefinition = this.beanDefinitionMap.get(beanName);
+	if (existingDefinition != null) {
+		if (!isAllowBeanDefinitionOverriding()) {
+			throw new BeanDefinitionOverrideException(beanName, beanDefinition, existingDefinition);
+		} else if (existingDefinition.getRole() < beanDefinition.getRole()) {
+			if (logger.isInfoEnabled()) {
+				logger.info("Overriding user-defined bean definition for bean '" + beanName + "' with a framework-generated bean definition: replacing [" + existingDefinition + "] with [" + beanDefinition + "]");
+			}
+		} else if (!beanDefinition.equals(existingDefinition)) {
+			if (logger.isDebugEnabled()) {
+				logger.debug("Overriding bean definition for bean '" + beanName + "' with a different definition: replacing [" + existingDefinition + "] with [" + beanDefinition + "]");
+			}
+		} else {
+			if (logger.isTraceEnabled()) {
+				logger.trace("Overriding bean definition for bean '" + beanName + "' with an equivalent definition: replacing [" + existingDefinition + "] with [" + beanDefinition + "]");
+			}
+		}
+		this.beanDefinitionMap.put(beanName, beanDefinition);
+	} else {
+		// 是否已经开始创建了。
+		if (hasBeanCreationStarted()) {
+			synchronized (this.beanDefinitionMap) {
+				this.beanDefinitionMap.put(beanName, beanDefinition);
+				List<String> updatedDefinitions = new ArrayList<>(this.beanDefinitionNames.size() + 1);
+				updatedDefinitions.addAll(this.beanDefinitionNames);
+				updatedDefinitions.add(beanName);
+				this.beanDefinitionNames = updatedDefinitions;
+				removeManualSingletonName(beanName);
+			}
+		} else {
+			// 向beanDefinitionMap、beanDefinitionNames添加元素。
+			this.beanDefinitionMap.put(beanName, beanDefinition);
+			this.beanDefinitionNames.add(beanName);
+			removeManualSingletonName(beanName);
+		}
+		this.frozenBeanDefinitionNames = null;
+	}
+
+	if (existingDefinition != null || containsSingleton(beanName)) {
+		resetBeanDefinition(beanName);
+	}
+}
+
+
+/**
+ * 检查该工厂的Bean创建阶段是否已经开始，即在此期间是否已将任何Bean标记为已创建。
+ */
+protected boolean hasBeanCreationStarted() {
+	return !this.alreadyCreated.isEmpty();
+}
+
+
+
+
+
+事件：ApplicationStartingEvent(SpringApplication application, String[] args)   --->  标记事件的。
+监听器：EventPublishingRunListener  ---->  处理事件的。
+事件源：触发监听器的地方。  告诉监听器，可以处理事件了。
+
+// 传入事件。
+localtion：SimpleApplicationEventMulticaster
+public void multicastEvent(ApplicationEvent event) {
+	this.multicastEvent(event, this.resolveDefaultEventType(event));
+}
+
+// 实例化一个ResolvableType对象。ResolvableType的resolved属性为事件对象。
+private ResolvableType resolveDefaultEventType(ApplicationEvent event) {
+	return ResolvableType.forInstance(event);
+}
+
+
+
+public void multicastEvent(ApplicationEvent event, @Nullable ResolvableType eventType) {
+	// 获取ResolvableType实例。
+	ResolvableType type = eventType != null ? eventType : this.resolveDefaultEventType(event);
+	
+	// 获取线程池。
+	Executor executor = this.getTaskExecutor();
+	
+	// 
+	Iterator var5 = this.getApplicationListeners(event, type).iterator();
+
+	while(var5.hasNext()) {
+		ApplicationListener<?> listener = (ApplicationListener)var5.next();
+		if (executor != null) {
+			executor.execute(() -> {
+				this.invokeListener(listener, event);
+			});
+		} else {
+			this.invokeListener(listener, event);
+		}
+	}
+}
+
+
+protected Collection<ApplicationListener<?>> getApplicationListeners(ApplicationEvent event, ResolvableType eventType) {
+	// 获取事件的源对象（SpringApplication）
+	Object source = event.getSource();
+	Class<?> sourceType = source != null ? source.getClass() : null;
+	
+	// 判断缓存中是否存在。
+	AbstractApplicationEventMulticaster.ListenerCacheKey cacheKey = new AbstractApplicationEventMulticaster.ListenerCacheKey(eventType, sourceType);
+	AbstractApplicationEventMulticaster.ListenerRetriever retriever = (AbstractApplicationEventMulticaster.ListenerRetriever)this.retrieverCache.get(cacheKey);
+	
+	// 缓存存在
+	if (retriever != null) {
+		return retriever.getApplicationListeners();
+	
+	// 
+	} else if (this.beanClassLoader == null || ClassUtils.isCacheSafe(event.getClass(), this.beanClassLoader) && (sourceType == null || ClassUtils.isCacheSafe(sourceType, this.beanClassLoader))) {
+		Object var7 = this.retrievalMutex;
+		synchronized(this.retrievalMutex) {
+			// 再次判断
+			retriever = (AbstractApplicationEventMulticaster.ListenerRetriever)this.retrieverCache.get(cacheKey);
+			if (retriever != null) {
+				return retriever.getApplicationListeners();
+			} else {
+				// new一个ListenerRetriever实例
+				retriever = new AbstractApplicationEventMulticaster.ListenerRetriever(true);
+				// 获取对应的监听器，并放入缓存。
+				Collection<ApplicationListener<?>> listeners = this.retrieveApplicationListeners(eventType, sourceType, retriever);
+				this.retrieverCache.put(cacheKey, retriever);
+				return listeners;
+			}
+		}
+	
+	// 其他情况
+	} else {
+		return this.retrieveApplicationListeners(eventType, sourceType, (AbstractApplicationEventMulticaster.ListenerRetriever)null);
+	}
+}
+
+private Collection<ApplicationListener<?>> retrieveApplicationListeners(ResolvableType eventType, @Nullable Class<?> sourceType, @Nullable AbstractApplicationEventMulticaster.ListenerRetriever retriever) {
+	List<ApplicationListener<?>> allListeners = new ArrayList();
+	Object var7 = this.retrievalMutex;
+	LinkedHashSet listeners;
+	LinkedHashSet listenerBeans;
+	synchronized(this.retrievalMutex) {
+		listeners = new LinkedHashSet(this.defaultRetriever.applicationListeners);
+		listenerBeans = new LinkedHashSet(this.defaultRetriever.applicationListenerBeans);
+	}
+
+	Iterator var14 = listeners.iterator();
+
+	while(var14.hasNext()) {
+		ApplicationListener<?> listener = (ApplicationListener)var14.next();
+		if (this.supportsEvent(listener, eventType, sourceType)) {
+			if (retriever != null) {
+				retriever.applicationListeners.add(listener);
+			}
+
+			allListeners.add(listener);
+		}
+	}
+
+	if (!listenerBeans.isEmpty()) {
+		BeanFactory beanFactory = this.getBeanFactory();
+		Iterator var16 = listenerBeans.iterator();
+
+		while(var16.hasNext()) {
+			String listenerBeanName = (String)var16.next();
+
+			try {
+				Class<?> listenerType = beanFactory.getType(listenerBeanName);
+				if (listenerType == null || this.supportsEvent(listenerType, eventType)) {
+					ApplicationListener<?> listener = (ApplicationListener)beanFactory.getBean(listenerBeanName, ApplicationListener.class);
+					if (!allListeners.contains(listener) && this.supportsEvent(listener, eventType, sourceType)) {
+						if (retriever != null) {
+							if (beanFactory.isSingleton(listenerBeanName)) {
+								retriever.applicationListeners.add(listener);
+							} else {
+								retriever.applicationListenerBeans.add(listenerBeanName);
+							}
+						}
+
+						allListeners.add(listener);
+					}
+				}
+			} catch (NoSuchBeanDefinitionException var13) {
+				;
+			}
+		}
+	}
+
+	AnnotationAwareOrderComparator.sort(allListeners);
+	if (retriever != null && retriever.applicationListenerBeans.isEmpty()) {
+		retriever.applicationListeners.clear();
+		retriever.applicationListeners.addAll(allListeners);
+	}
+
+	return allListeners;
+}

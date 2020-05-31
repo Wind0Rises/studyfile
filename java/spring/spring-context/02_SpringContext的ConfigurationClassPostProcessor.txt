@@ -1,0 +1,136 @@
+
+
+一、总结
+	1)、ConfigurationClassPostProcessor是如何注入到Spring中的？？
+		1、可以通过<context:annotation-config>标签和<context:component-scan>标签把ConfigurationClassPostProcessor注入的spring中。
+		2、以<context:annotation-config>为例，在使用AnnotationConfigBeanDefinitionParser解析<context:annotation-config>时，会有AnnotationConfigUtils.registerAnnotationConfigProcessors(parserContext.getRegistry(), source);
+		   操作，这会把ConfigurationClassPostProcessor构建成BeanDefinition，注册到Spring中。
+		3、以<context:component-scan>为例，在使用ComponentScanBeanDefinitionParser解析<context:component-scan>时，会在registerComponents(parserContext.getReaderContext(), beanDefinitions, element)中把ConfigurationClassPostProcessor
+		   构建成BeanDefinition，注册到Spring中。
+		
+		
+	2)、ConfigurationClassPostProcessor干了哪些事情？？
+		
+		
+		
+
+二、重要的类
+
+
+三、源码
+/**
+ *
+ */
+location：ConfigurationClassPostProcessor
+public void postProcessBeanDefinitionRegistry(BeanDefinitionRegistry registry) {
+	/**
+	 * 获取registerId
+	 */
+	int registryId = System.identityHashCode(registry);
+	
+	if (this.registriesPostProcessed.contains(registryId)) {
+		throw new IllegalStateException("postProcessBeanDefinitionRegistry already called on this post-processor against " + registry);
+	}
+	if (this.factoriesPostProcessed.contains(registryId)) {
+		throw new IllegalStateException("postProcessBeanFactory already called on this post-processor against " + registry);
+	}
+	
+	this.registriesPostProcessed.add(registryId);
+
+	processConfigBeanDefinitions(registry);
+}
+
+
+/**
+ *
+ */
+location：ConfigurationClassPostProcessor
+public void processConfigBeanDefinitions(BeanDefinitionRegistry registry) {
+	List<BeanDefinitionHolder> configCandidates = new ArrayList<>();
+	String[] candidateNames = registry.getBeanDefinitionNames();
+
+	for (String beanName : candidateNames) {
+		BeanDefinition beanDef = registry.getBeanDefinition(beanName);
+		if (beanDef.getAttribute(ConfigurationClassUtils.CONFIGURATION_CLASS_ATTRIBUTE) != null) {
+			if (logger.isDebugEnabled()) {
+				logger.debug("Bean definition has already been processed as a configuration class: " + beanDef);
+			}
+		} else if (ConfigurationClassUtils.checkConfigurationClassCandidate(beanDef, this.metadataReaderFactory)) {
+			configCandidates.add(new BeanDefinitionHolder(beanDef, beanName));
+		}
+	}
+
+	if (configCandidates.isEmpty()) {
+		return;
+	}
+
+	configCandidates.sort((bd1, bd2) -> {
+		int i1 = ConfigurationClassUtils.getOrder(bd1.getBeanDefinition());
+		int i2 = ConfigurationClassUtils.getOrder(bd2.getBeanDefinition());
+		return Integer.compare(i1, i2);
+	});
+
+	SingletonBeanRegistry sbr = null;
+	if (registry instanceof SingletonBeanRegistry) {
+		sbr = (SingletonBeanRegistry) registry;
+		if (!this.localBeanNameGeneratorSet) {
+			BeanNameGenerator generator = (BeanNameGenerator) sbr.getSingleton(AnnotationConfigUtils.CONFIGURATION_BEAN_NAME_GENERATOR);
+			if (generator != null) {
+				this.componentScanBeanNameGenerator = generator;
+				this.importBeanNameGenerator = generator;
+			}
+		}
+	}
+
+	if (this.environment == null) {
+		this.environment = new StandardEnvironment();
+	}
+
+
+	ConfigurationClassParser parser = new ConfigurationClassParser(this.metadataReaderFactory, this.problemReporter, this.environment, this.resourceLoader, this.componentScanBeanNameGenerator, registry);
+
+	Set<BeanDefinitionHolder> candidates = new LinkedHashSet<>(configCandidates);
+	Set<ConfigurationClass> alreadyParsed = new HashSet<>(configCandidates.size());
+	
+	do {
+		parser.parse(candidates);
+		parser.validate();
+
+		Set<ConfigurationClass> configClasses = new LinkedHashSet<>(parser.getConfigurationClasses());
+		configClasses.removeAll(alreadyParsed);
+
+		if (this.reader == null) {
+			this.reader = new ConfigurationClassBeanDefinitionReader(registry, this.sourceExtractor, this.resourceLoader, this.environment, this.importBeanNameGenerator, parser.getImportRegistry());
+		}
+		this.reader.loadBeanDefinitions(configClasses);
+		alreadyParsed.addAll(configClasses);
+
+		candidates.clear();
+		if (registry.getBeanDefinitionCount() > candidateNames.length) {
+			String[] newCandidateNames = registry.getBeanDefinitionNames();
+			Set<String> oldCandidateNames = new HashSet<>(Arrays.asList(candidateNames));
+			Set<String> alreadyParsedClasses = new HashSet<>();
+			for (ConfigurationClass configurationClass : alreadyParsed) {
+				alreadyParsedClasses.add(configurationClass.getMetadata().getClassName());
+			}
+			for (String candidateName : newCandidateNames) {
+				if (!oldCandidateNames.contains(candidateName)) {
+					BeanDefinition bd = registry.getBeanDefinition(candidateName);
+					if (ConfigurationClassUtils.checkConfigurationClassCandidate(bd, this.metadataReaderFactory) && !alreadyParsedClasses.contains(bd.getBeanClassName())) {
+						candidates.add(new BeanDefinitionHolder(bd, candidateName));
+					}
+				}
+			}
+			candidateNames = newCandidateNames;
+		}
+	}
+	while (!candidates.isEmpty());
+
+	if (sbr != null && !sbr.containsSingleton(IMPORT_REGISTRY_BEAN_NAME)) {
+		sbr.registerSingleton(IMPORT_REGISTRY_BEAN_NAME, parser.getImportRegistry());
+	}
+
+	if (this.metadataReaderFactory instanceof CachingMetadataReaderFactory) {
+		((CachingMetadataReaderFactory) this.metadataReaderFactory).clearCache();
+	}
+}

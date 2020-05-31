@@ -1,0 +1,734 @@
+#################################################
+#				boot版本：2.2.0					#
+#################################################
+
+
+
+一、总结
+	1)、SpringApplication的作用。
+
+
+
+二、例子
+	@ComponentScan
+	public class BootFirstApplication {
+
+		public static void main(String[] args) {
+			ConfigurableApplicationContext applicationContext = SpringApplication.run(BootFirstApplication.class, args);
+			IUserService userService = applicationContext.getBean(IUserService.class);
+			userService.getUsername();
+		}
+
+	}
+
+
+三、重要的类
+	1、SpringFactoriesLoader：【Spring的SPI】
+
+
+四、源码阅读
+
+/**
+ * SpringApplication运行。
+ */
+location：SpringApplication
+public static ConfigurableApplicationContext run(Class<?> primarySource, String... args) {
+	return run(new Class<?>[] { primarySource }, args);
+}
+
+
+/**
+ *  这个方法可以指定多个primarySources？可以尝试一下
+ * 
+ */
+location：SpringApplication
+public static ConfigurableApplicationContext run(Class<?>[] primarySources, String[] args) {	
+	return new SpringApplication(primarySources).run(args);
+}
+
+
+
+
+#####################################################
+#			01、初始化SpringApplication				#
+#####################################################
+/**
+ *
+ * 初始化一个SpringApplication实例。
+ */
+location：SpringApplication
+public SpringApplication(Class<?>... primarySources) {
+	this(null, primarySources);
+}
+
+
+/*
+ *
+ */
+location：SpringApplication
+public SpringApplication(ResourceLoader resourceLoader, Class<?>... primarySources) {
+	/**
+	 * 把传入的资源加载器复制给ApplicationContext的资源加载器。并判断主资源是否为空。
+	 */
+	this.resourceLoader = resourceLoader;
+	Assert.notNull(primarySources, "PrimarySources must not be null");
+
+
+	/**
+	 * 把主资源【primarySources】转为set集合。一般情况只有一个主资源【primarySources】
+	 */
+	this.primarySources = new LinkedHashSet<>(Arrays.asList(primarySources));
+
+	
+	/**
+	 * 推断出WebApplication的类型。
+	 */
+	this.webApplicationType = WebApplicationType.deduceFromClasspath();
+
+
+	/**
+	 * org.springframework.context.ApplicationContextInitializer=org.springframework.boot.context.ConfigurationWarningsApplicationContextInitializer,org.springframework.boot.context.ContextIdApplicationContextInitializer,
+	 * 															 org.springframework.boot.context.config.DelegatingApplicationContextInitializer,org.springframework.boot.web.context.ServerPortInfoApplicationContextInitializer
+	 *
+	 * 通过反射实例化spring.factories文件中配置的ApplicationContextInitializer对象，并把实例对象保存在对应的集合中，并把集合保存到SpringApplication实例中。
+	 */
+	setInitializers((Collection) getSpringFactoriesInstances(ApplicationContextInitializer.class));
+
+	// 
+	
+	/** 
+	 * org.springframework.context.ApplicationListener=org.springframework.boot.ClearCachesApplicationListener,org.springframework.boot.builder.ParentContextCloserApplicationListener,org.springframework.boot.context.FileEncodingApplicationListener,\
+	 * 												   org.springframework.boot.context.config.AnsiOutputApplicationListener,org.springframework.boot.context.config.ConfigFileApplicationListener,org.springframework.boot.context.config.DelegatingApplicationListener,\
+	 * 												   org.springframework.boot.context.logging.ClasspathLoggingApplicationListener,org.springframework.boot.context.logging.LoggingApplicationListener,org.springframework.boot.liquibase.LiquibaseServiceLocatorApplicationListener
+	 *
+	 * 通过反射实例化spring.factories文件中配置的ApplicationListener对象，并把实例对象保存在对应的集合中，并把集合保存到SpringApplication实例中。
+	 */
+	setListeners((Collection) getSpringFactoriesInstances(ApplicationListener.class));
+
+
+
+	/**
+	 * 获取程序入口【main函数的类】。并复制给Application的mainApplicationClass。
+	 */
+	this.mainApplicationClass = deduceMainApplicationClass();
+}
+
+
+
+/** 
+ * 推断出WebApplication的类型。
+ * 		NONE：该应用程序不应作为Web应用程序运行，也不应启动嵌入式Web服务器。
+ * 		SERVLET：该应用程序应作为基于Servlet的Web应用程序运行，并应启动嵌入式Servlet Web服务器。
+ * 		REACTIVE：该应用程序应作为反应式Web应用程序运行，并应启动嵌入式反应式Web服务器。
+ * 一般的web程序都是使用：SERVLET类型。
+ */
+location：WebApplicationType
+static WebApplicationType deduceFromClasspath() {
+
+	/**
+	 * 如果WEBFLUX_INDICATOR_CLASS = "org.springframework.web.reactive.DispatcherHandler"能够被加载【并且】WEBMVC_INDICATOR_CLASS = "org.springframework.web.servlet.DispatcherServlet"不能被加载
+	 * 【并且】JERSEY_INDICATOR_CLASS = "org.glassfish.jersey.servlet.ServletContainer"不能被加载的。
+	 */
+	if (ClassUtils.isPresent(WEBFLUX_INDICATOR_CLASS, null) && !ClassUtils.isPresent(WEBMVC_INDICATOR_CLASS, null) && !ClassUtils.isPresent(JERSEY_INDICATOR_CLASS, null)) {
+		return WebApplicationType.REACTIVE;
+	}
+
+	/**
+	 * SERVLET_INDICATOR_CLASSES = { "javax.servlet.Servlet", "org.springframework.web.context.ConfigurableWebApplicationContext" }
+	 * 如果没有这两个类，就说明不是WebApplication。
+	 */
+	for (String className : SERVLET_INDICATOR_CLASSES) {
+		if (!ClassUtils.isPresent(className, null)) {
+			return WebApplicationType.NONE;
+		}
+	}
+	
+	return WebApplicationType.SERVLET;
+}
+
+
+
+
+
+#################################################################
+#		获取MATE-INFO下的spring.factories文件中配置实例			#
+#################################################################
+/**
+ * 
+ */
+location：SpringApplication
+private <T> Collection<T> getSpringFactoriesInstances(Class<T> type) {
+	return getSpringFactoriesInstances(type, new Class<?>[] {});
+}
+
+
+
+/**
+ *
+ * 通过SpringFactoriesLoader去加载MATE-INFO/spring.factories配置信息，并创建对应的实例。
+ */
+location：SpringApplication
+private <T> Collection<T> getSpringFactoriesInstances(Class<T> type, Class<?>[] parameterTypes, Object... args) {
+	// 获取ClassLoad。
+	ClassLoader classLoader = getClassLoader();
+
+	// 从spring.factories中获取给定类型的对应的value。
+	Set<String> names = new LinkedHashSet<>(SpringFactoriesLoader.loadFactoryNames(type, classLoader));
+
+	// 创建对应的实例。
+	List<T> instances = createSpringFactoriesInstances(type, parameterTypes, classLoader, args, names);
+
+	// 排序。
+	AnnotationAwareOrderComparator.sort(instances);
+	return instances;
+}
+
+
+
+/**
+ * 在加载过程中，这里获取spring.factories文件中key为ApplicationContextInitializer的配置对象。
+ */
+location：SpringFactoriesLoader【这个类是使用final修饰的】
+public static List<String> loadFactoryNames(Class<?> factoryClass, @Nullable ClassLoader classLoader) {
+	// 获取工厂类的名称。这里这个是ApplicationContextInitializer
+	String factoryClassName = factoryClass.getName();
+	
+	// 从map中获取对应key的值。
+	return loadSpringFactories(classLoader).getOrDefault(factoryClassName, Collections.emptyList());
+}
+
+
+/** 
+ * 加载spring.factories文件中【全部】配置的类的具体过程。把文件解析出来放入一个MultiValueMap中，这个map的特点，是一个key可以对应多个value。
+ * 并把解析出来的map返回。并把解析出来的放入缓存中。
+ */
+location：SpringFactoriesLoader【这个类是使用final修饰的】
+private static Map<String, List<String>> loadSpringFactories(@Nullable ClassLoader classLoader) {
+	// 从缓存中获取，如果有，则说明已经加载过了，直接返回。
+	MultiValueMap<String, String> result = cache.get(classLoader);
+	if (result != null) {
+		return result;
+	}
+
+	try {
+		// FACTORIES_RESOURCE_LOCATION = "META-INF/spring.factories";
+		Enumeration<URL> urls = (classLoader != null ? classLoader.getResources(FACTORIES_RESOURCE_LOCATION) : ClassLoader.getSystemResources(FACTORIES_RESOURCE_LOCATION));
+		
+		result = new LinkedMultiValueMap<>();
+		
+		while (urls.hasMoreElements()) {
+			URL url = urls.nextElement();
+			UrlResource resource = new UrlResource(url);
+			
+			// 加载资源；（即加载META-INF/spring.factories下的文件。）
+			Properties properties = PropertiesLoaderUtils.loadProperties(resource);
+
+			// 遍历每一个配置。
+			for (Map.Entry<?, ?> entry : properties.entrySet()) {
+				// 去除两边的空格。
+				String factoryClassName = ((String) entry.getKey()).trim();
+				
+				// 使用逗号作为分隔符。分割字符串。
+				for (String factoryName : StringUtils.commaDelimitedListToStringArray((String) entry.getValue())) {
+					result.add(factoryClassName, factoryName.trim());
+				}
+			}
+		}
+		cache.put(classLoader, result);
+
+		return result;
+	} catch (IOException ex) {
+		throw new IllegalArgumentException("Unable to load factories from location [" + FACTORIES_RESOURCE_LOCATION + "]", ex);
+	}
+}
+
+/**
+ * 通过反射创建对应的实例对象。
+ */
+private <T> List<T> createSpringFactoriesInstances(Class<T> type, Class<?>[] parameterTypes, ClassLoader classLoader, Object[] args, Set<String> names) {
+	List<T> instances = new ArrayList<>(names.size());
+
+	for (String name : names) {
+		try {
+			// 获取对应的Class对象。
+			Class<?> instanceClass = ClassUtils.forName(name, classLoader);
+			Assert.isAssignable(type, instanceClass);
+
+			// 获取对应的Constructor对象。
+			Constructor<?> constructor = instanceClass.getDeclaredConstructor(parameterTypes);
+
+			// 实例化一个对象。
+			T instance = (T) BeanUtils.instantiateClass(constructor, args);
+			instances.add(instance);
+		} catch (Throwable ex) {
+			throw new IllegalArgumentException("Cannot instantiate " + type + " : " + name, ex);
+		}
+	}
+	return instances;
+}
+
+/**
+ * 把实例化ApplicationContextInitializer的对象放入initializers集合中。
+ */
+location：SpringApplication
+public void setInitializers(Collection<? extends ApplicationContextInitializer<?>> initializers) {
+	this.initializers = new ArrayList<>();
+	this.initializers.addAll(initializers);
+}
+
+
+/**
+ * 把给定的监听器集合保存到SpringApplication中
+ */
+location：SpringApplication
+public void setListeners(Collection<? extends ApplicationListener<?>> listeners) {
+	this.listeners = new ArrayList<>(listeners);
+}
+
+
+
+/**
+ * 获取程序入口【main函数的类】。
+ */
+location：SpringApplication
+private Class<?> deduceMainApplicationClass() {
+	try {
+		// 获取调用栈。
+		StackTraceElement[] stackTrace = new RuntimeException().getStackTrace();
+
+		for (StackTraceElement stackTraceElement : stackTrace) {
+			// 找到程序入口。
+			if ("main".equals(stackTraceElement.getMethodName())) {
+				return Class.forName(stackTraceElement.getClassName());
+			}
+		}
+	} catch (ClassNotFoundException ex) {
+		
+	}
+	return null;
+}
+
+
+
+
+
+############################################################
+#               		02、调用run()方法                  #
+############################################################
+/**
+ *
+ */
+location：SpringApplication
+public ConfigurableApplicationContext run(String... args) {
+	/**
+	 * StopWatch：计时器，可以允许为多个任务进行计时。
+	 */
+	StopWatch stopWatch = new StopWatch();
+	stopWatch.start();
+	
+	ConfigurableApplicationContext context = null;
+	Collection<SpringBootExceptionReporter> exceptionReporters = new ArrayList();
+	
+	
+	/**
+	 * 设置系统属性java.awt.headless，一般都是没有设置的，然后启动Headless模式。
+	 */
+	this.configureHeadlessProperty();
+	
+	/**
+	 * 获取SpringApplicationRunListeners实例对象。怎么获取的（通过加载"META-INF/spring.factories"文件里的内容，通过反射获取配置在spring.factories的全限定名的对象，并进行过滤排序。）
+	 * SpringApplicationRunListeners是事件监听器的管理类。注意这次获取的key是：SpringApplicationRunListener。和初始化SpringApplication时的ApplicationListener不一样。
+	 * 这个时候只有一个监听器：EventPublishingRunListener。
+	 */
+	SpringApplicationRunListeners listeners = this.getRunListeners(args);
+
+	/**
+	 * 调用监听器。
+	 */
+	listeners.starting();
+
+	try {
+	
+		// 把启动参数封装成一个ApplicationArguments对象。
+		ApplicationArguments applicationArguments = new DefaultApplicationArguments(args);
+		
+		
+		/**
+		 * 在与SpringCloud一起使用的时候，在spring-cloud-context.jar的MATE-INF中会配置下面的监听器
+		 *		org.springframework.context.ApplicationListener=org.springframework.cloud.bootstrap.BootstrapApplicationListener,org.springframework.cloud.bootstrap.LoggingSystemShutdownListener,
+		 * 														org.springframework.cloud.context.restart.RestartListener
+		 * 其中BootstrapApplicationListener的onApplicationEvent(..)方法中会构建一个SpringApplicationBuilder的实例，在构建一个SpringApplicationBuilder是回去创建一个SpringApplication实例。
+		 * 实例化一个ConfigurableEnvironment对象。
+		 */
+		ConfigurableEnvironment environment = this.prepareEnvironment(listeners, applicationArguments);
+		
+		
+		
+		this.configureIgnoreBeanInfo(environment);
+		
+		// 打印spring字样，与spring boot版本信息。
+		Banner printedBanner = this.printBanner(environment);
+		
+		// 创建ApplicationContext对象。
+		// 创建一个Context对象，其内部的BeanFactory的beanDefinitionMap中会有五个参数：
+		//  		ConfigurationClassPostProcessor
+		//			DefaultEventListenerFactory
+		//			EventListenerMethodProcessor
+		//			AutowiredAnnotationBeanPostProcessor
+		//			CommonAnnotationBeanPostProcessor
+		context = this.createApplicationContext();
+
+		// 检索：YYYY   实例化spring.factories中配置的SpringBootExceptionReporter对象。
+		exceptionReporters = this.getSpringFactoriesInstances(SpringBootExceptionReporter.class, new Class[]{ConfigurableApplicationContext.class}, context);
+
+		// 
+		this.prepareContext(context, environment, listeners, applicationArguments, printedBanner);
+		
+		// springBoot的context是AnnotationConfigReactiveWebApplicationContext。
+		this.refreshContext(context);
+
+		this.afterRefresh(context, applicationArguments);
+
+		stopWatch.stop();
+
+		if (this.logStartupInfo) {
+			(new StartupInfoLogger(this.mainApplicationClass)).logStarted(this.getApplicationLog(), stopWatch);
+		}
+
+		listeners.started(context);
+
+		this.callRunners(context, applicationArguments);
+	} catch (Throwable var10) {
+		this.handleRunFailure(context, var10, exceptionReporters, listeners);
+		throw new IllegalStateException(var10);
+	}
+
+	try {
+		listeners.running(context);
+		return context;
+	} catch (Throwable var9) {
+		this.handleRunFailure(context, var9, exceptionReporters, (SpringApplicationRunListeners)null);
+		throw new IllegalStateException(var9);
+	}
+}
+
+/**
+ * 设置Headless模式。
+ */
+private void configureHeadlessProperty() {
+	// SYSTEM_PROPERTY_JAVA_AWT_HEADLESS = "java.awt.headless"
+	System.setProperty(SYSTEM_PROPERTY_JAVA_AWT_HEADLESS, System.getProperty(SYSTEM_PROPERTY_JAVA_AWT_HEADLESS, Boolean.toString(this.headless)));
+}
+
+
+
+/**
+ * 获取spring.factories中的SpringApplicationRunListener并初始化一个实例，然后把初始化的实例放入SpringApplicationRunListeners实例中。
+ * org.springframework.boot.SpringApplicationRunListener=org.springframework.boot.context.event.EventPublishingRunListener
+ */
+private SpringApplicationRunListeners getRunListeners(String[] args) {
+	Class<?>[] types = new Class<?>[] { SpringApplication.class, String[].class };
+	
+	/**
+	 * 构建一个SpringApplicationRunListeners实例对象，其构造函数是SpringApplicationRunListener集合，SpringApplicationRunListener集合是通过SpringFactoriesLoader从
+	 * MATE-INF/spring.factories文件中获取的。
+	 */
+	return new SpringApplicationRunListeners(logger, getSpringFactoriesInstances(SpringApplicationRunListener.class, types, this, args));
+}
+
+             
+			 
+
+#########################################################
+# 				03、listeners.starting()过程			#
+#########################################################
+/**
+ * 初始过程.
+ * 在初始化过程中，会获遍历SpringApplication中的所有的监听器。
+ *
+ */
+location：EventPublishingRunListener
+public EventPublishingRunListener(SpringApplication application, String[] args) {
+	this.application = application;
+	this.args = args;
+	this.initialMulticaster = new SimpleApplicationEventMulticaster();
+
+	// application.getListeners()这个就是获取spring.factories文件中配置ApplicationListener。不过多了个BackgroundPreinitializer。
+	// BackgroundPreinitializer这个是怎么来的？？？
+	// 遍历所有的监听器。
+	for (ApplicationListener<?> listener : application.getListeners()) {
+		this.initialMulticaster.addApplicationListener(listener);
+	}
+}
+
+location：AbstractApplicationEventMulticaster
+public void addApplicationListener(ApplicationListener<?> listener) {
+	// 保证线程安全。
+	synchronized (this.retrievalMutex) {
+		//一般情况下都是null。
+		Object singletonTarget = AopProxyUtils.getSingletonTarget(listener);
+
+		if (singletonTarget instanceof ApplicationListener) {
+			// private final ListenerRetriever defaultRetriever = new ListenerRetriever(false);
+			// ListenerRetriever:封装了一组特定的目标侦听器的Helper类，从而可以有效地检索预先过滤的侦听器。 每个事件类型和源类型都会缓存此帮助器的实例。
+			// this.defaultRetriever.applicationListeners是一个set集合。
+			this.defaultRetriever.applicationListeners.remove(singletonTarget);
+		}
+
+		this.defaultRetriever.applicationListeners.add(listener);
+
+		this.retrieverCache.clear();
+	}
+}
+
+location：EventPublishingRunListener
+public void starting() {
+	this.initialMulticaster.multicastEvent(new ApplicationStartingEvent(this.application, this.args));
+}
+
+
+/** 
+ * event --> ApplicationStartingEvent
+ */
+location：SimpleApplicationEventMulticaster
+public void multicastEvent(ApplicationEvent event) {
+	multicastEvent(event, resolveDefaultEventType(event));
+}
+
+/**
+ * 获取给定对象的ResolvableType
+ */ 
+location：SimpleApplicationEventMulticaster
+private ResolvableType resolveDefaultEventType(ApplicationEvent event) {
+	return ResolvableType.forInstance(event);
+}
+
+/**
+ * 获取给定对象的ResolvableType
+ */ 
+public static ResolvableType forInstance(Object instance) {
+	// 参数校验。
+	Assert.notNull(instance, "Instance must not be null");
+
+	// 判断这个实例是否是ResolvableTypeProvider子类。ResolvableTypeProvider的子类有：PayloadApplicationEvent、MultipartBodyBuilder.PublisherEntity
+	if (instance instanceof ResolvableTypeProvider) {
+		ResolvableType type = ((ResolvableTypeProvider) instance).getResolvableType();
+		if (type != null) {
+			return type;
+		}
+	}
+	return ResolvableType.forClass(instance.getClass());
+}
+
+// 创建一个ResolvableType对象。
+public static ResolvableType forClass(@Nullable Class<?> clazz) {
+	return new ResolvableType(clazz);
+}
+
+/** 
+ */
+location：SimpleApplicationEventMulticaster
+public void multicastEvent(final ApplicationEvent event, @Nullable ResolvableType eventType) {
+	ResolvableType type = (eventType != null ? eventType : resolveDefaultEventType(event));
+
+	// 获取线程池。如果没有设置线程池的话，默认为null。
+	Executor executor = getTaskExecutor();
+
+	// 获取监听器并执行事件。符合条件的监听器：LoggingApplicationListener、BackgroundPreinitializer、DelegatingApplicationListener、LiquibaseServiceLocatorApplicationListener
+	for (ApplicationListener<?> listener : getApplicationListeners(event, type)) {
+		if (executor != null) {
+			executor.execute(() -> invokeListener(listener, event));
+		} else {
+			invokeListener(listener, event);
+		}
+	}
+}
+
+/**
+ *
+ */
+protected Collection<ApplicationListener<?>> getApplicationListeners(ApplicationEvent event, ResolvableType eventType) {
+	// 获取事件源。这个时间源就是SpringApplication对象，创建时间时传入的。
+	Object source = event.getSource();
+
+	// 获取事件源的Class对象。
+	Class<?> sourceType = (source != null ? source.getClass() : null);
+
+	// 创建一个缓存key的对象
+	ListenerCacheKey cacheKey = new ListenerCacheKey(eventType, sourceType);
+
+	// 
+	ListenerRetriever retriever = this.retrieverCache.get(cacheKey);
+	if (retriever != null) {
+		return retriever.getApplicationListeners();
+	}
+
+	if (this.beanClassLoader == null || (ClassUtils.isCacheSafe(event.getClass(), this.beanClassLoader) && (sourceType == null || ClassUtils.isCacheSafe(sourceType, this.beanClassLoader)))) {
+		synchronized (this.retrievalMutex) {
+			retriever = this.retrieverCache.get(cacheKey);
+			if (retriever != null) {
+				return retriever.getApplicationListeners();
+			}
+			retriever = new ListenerRetriever(true);
+
+			// 获取符合条件的监听器。
+			Collection<ApplicationListener<?>> listeners = retrieveApplicationListeners(eventType, sourceType, retriever);
+			this.retrieverCache.put(cacheKey, retriever);
+			return listeners;
+		}
+	} else {
+		return retrieveApplicationListeners(eventType, sourceType, null);
+	}
+}
+
+// 调用监听器。
+protected void invokeListener(ApplicationListener<?> listener, ApplicationEvent event) {
+	ErrorHandler errorHandler = getErrorHandler();
+	if (errorHandler != null) {
+		try {
+			doInvokeListener(listener, event);
+		} catch (Throwable err) {
+			errorHandler.handleError(err);
+		}
+	} else {
+		doInvokeListener(listener, event);
+	}
+}
+
+/*
+ * 执行监听器的onApplicationEvent方法。
+ * 这个监听器为ApplicationStartingEvent。
+ */
+@SuppressWarnings({"rawtypes", "unchecked"})
+private void doInvokeListener(ApplicationListener listener, ApplicationEvent event) {
+	try {
+		listener.onApplicationEvent(event);
+	} catch (ClassCastException ex) {
+		String msg = ex.getMessage();
+		if (msg == null || matchesClassCastMessage(msg, event.getClass())) { 
+			Log logger = LogFactory.getLog(getClass());
+			if (logger.isTraceEnabled()) {
+				logger.trace("Non-matching event type for listener: " + listener, ex);
+			}
+		} else {
+			throw ex;
+		}
+	}
+}
+
+
+
+#########################################################
+# 				04、准备环境							#
+#########################################################
+/**
+ *
+ */
+location：SpringApplication
+private ConfigurableEnvironment prepareEnvironment(SpringApplicationRunListeners listeners, ApplicationArguments applicationArguments) {
+	
+	ConfigurableEnvironment environment = getOrCreateEnvironment();
+	configureEnvironment(environment, applicationArguments.getSourceArgs());
+	ConfigurationPropertySources.attach(environment);
+	listeners.environmentPrepared(environment);
+	bindToSpringApplication(environment);
+	
+	if (!this.isCustomEnvironment) {
+		environment = new EnvironmentConverter(getClassLoader()).convertEnvironmentIfNecessary(environment, deduceEnvironmentClass());
+	}
+	
+	ConfigurationPropertySources.attach(environment);
+	return environment;
+}
+
+
+/**
+ * 如果有环境，就是用SpringApplication中的环境，如果没有，就根据webApplicationType的类型创建不同的Environment。
+ */ 
+location：SpringApplication
+private ConfigurableEnvironment getOrCreateEnvironment() {
+	if (this.environment != null) {
+		return this.environment;
+	}
+	
+	switch (this.webApplicationType) {
+		case SERVLET:
+			return new StandardServletEnvironment();
+	
+		case REACTIVE:
+			return new StandardReactiveWebEnvironment();
+			
+		default:
+			return new StandardEnvironment();
+	}
+}
+
+
+/**
+ *
+ */
+location：SpringApplication
+protected void configureEnvironment(ConfigurableEnvironment environment, String[] args) {
+	if (this.addConversionService) {
+		ConversionService conversionService = ApplicationConversionService.getSharedInstance();
+		environment.setConversionService((ConfigurableConversionService) conversionService);
+	}
+	
+	configurePropertySources(environment, args);
+	
+	configureProfiles(environment, args);
+}
+
+
+/**
+ *
+ */
+location：ApplicationConversionService
+public static ConversionService getSharedInstance() {
+	ApplicationConversionService sharedInstance = ApplicationConversionService.sharedInstance;
+	if (sharedInstance == null) {
+		synchronized (ApplicationConversionService.class) {
+			sharedInstance = ApplicationConversionService.sharedInstance;
+			if (sharedInstance == null) {
+				sharedInstance = new ApplicationConversionService();
+				ApplicationConversionService.sharedInstance = sharedInstance;
+			}
+		}
+	}
+	return sharedInstance;
+}
+
+
+
+/**
+ *
+ */
+location：SpringApplication
+protected void configurePropertySources(ConfigurableEnvironment environment, String[] args) {
+	MutablePropertySources sources = environment.getPropertySources();
+	if (this.defaultProperties != null && !this.defaultProperties.isEmpty()) {
+		sources.addLast(new MapPropertySource("defaultProperties", this.defaultProperties));
+	}
+	if (this.addCommandLineProperties && args.length > 0) {
+		String name = CommandLinePropertySource.COMMAND_LINE_PROPERTY_SOURCE_NAME;
+		if (sources.contains(name)) {
+			PropertySource<?> source = sources.get(name);
+			CompositePropertySource composite = new CompositePropertySource(name);
+			composite.addPropertySource(new SimpleCommandLinePropertySource("springApplicationCommandLineArgs", args));
+			composite.addPropertySource(source);
+			sources.replace(name, composite);
+		} else {
+			sources.addFirst(new SimpleCommandLinePropertySource(args));
+		}
+	}
+}
+
+/**
+ *
+ */
+location：SpringApplication
+protected void configureProfiles(ConfigurableEnvironment environment, String[] args) {
+	Set<String> profiles = new LinkedHashSet<>(this.additionalProfiles);
+	profiles.addAll(Arrays.asList(environment.getActiveProfiles()));
+	environment.setActiveProfiles(StringUtils.toStringArray(profiles));
+}

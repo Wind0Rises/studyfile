@@ -1,0 +1,46 @@
+一、常用注解
+	@Configuration
+		@Configuration注解中@Component注解。
+		@Configuration用于定义配置类，可替换xml配置文件，被注解的类内部包含有一个或多个被@Bean注解的方放。在spring.factories文件中配置的EnableAutoConfiguration对应的类都是被@Configuration修饰的。
+		@Configuration不可以是final类型；@Configuration不可以是匿名类；嵌套的configuration必须是静态类。
+
+
+	@SpringBootConfiguration
+		@SpringBootConfiguration中有@Configuration注解，
+		
+		
+
+	@ConditionalOn*
+		@ConditionalOnClass：判断当前classpath下是否存在指定类，若存在才会实例化一个Bean。
+		@ConditionalOnBean：在当前上下文中存在某个对象时，才会实例化一个Bean。
+		@ConditionalOnExpression：当表达式为true的时候，才会实例化一个Bean。
+		@ConditionalOnMissingBean：在当前上下文中不存在某个对象时，才会实例化一个Bean。
+		@ConditionalOnMissingClass：判断当前classpath下是否存在指定类，若不存在才会实例化一个Bean。
+		@ConditionalOnNotWebApplication：不是web应用，才会实例化一个Bean。
+		...
+		整合第三方的组件一般都会在对应的类上加一个@ConditionalOnClass注解用于判断是否需要加载配置类。
+
+
+
+	@import
+		导入一个给定Class对应的Bean到spring容器中。@Import的参数可以是一个类，也可以是一个ImportSelector接口，也可以是ImportBeanDefinitionRegistrar接口
+		
+
+
+
+	@EnableConfigurationProperties
+		@EnableConfigurationProperties注解的作用是让@ConfigurationProperties注解生效。如果只配置@ConfigurationProperties注解，在IOC容器中是获取不到properties配置文件转化的Bean的。
+			注意@EnableConfigurationProperties的使用。【【注意这个要写在Application这个类上，】】
+		@EnableConfigurationProperties({CustomConfiguration.class})
+
+
+
+
+	@ConfigurationProperties
+		@ConfigurationProperties所注的类可以被springboot扫描并添加进容器中作为bean,把配置文件中信息映射到标有@ConfigurationProperties类的实体上，同时这个实体也会被注入到spring容器中。
+			如果被@ConfigurationProperties修饰的类不在spring扫描的包下，是无法把对应的Bean注入到spring容器中的；可以使用@Component注意，进行处理；或者配合@EnableConfigurationProperties一起
+			使用，否则是会报错的。【是不是启动类，或者更具体的某一个注解或者类？？？】
+		
+		
+	@EnableAutoConfiguration
+		

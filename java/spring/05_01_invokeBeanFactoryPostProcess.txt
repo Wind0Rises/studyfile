@@ -3,6 +3,9 @@
 refresh():
 	invokeBeanFactoryPostProcessors(ConfigurableListableBeanFactory beanFactory)：调用注册到Context中的BeanFactoryRegistryPostProcessor、BeanFactoryPostProcessor。
 		注意：BeanDefinitionRegistryPostFactory调用在前；BeanFactoryPostProcessor调用在后。
+		
+	【先调用】BeanDefinitionRegistryPostProcessor.postProcessBeanDefinitionRegistry()方法。
+	【在调用】调用BeanFactoryPostProcessor.postProcessBeanFactory(..)方法、
 
 
 

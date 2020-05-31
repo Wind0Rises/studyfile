@@ -1,0 +1,434 @@
+零、@Enable..
+	@Import注解可以配置三种不同的class，根据不同的场景来选择不同的注入方式
+		* 普通的bean或者带有@Configuration的bean直接注入。
+		* 实现ImportSelector接口注入。
+		* 实现ImportBeanDefinitionRegistrar接口注入。
+		
+	ImportSelector接口：该接口通常被子类实现，用以判断被@Configuration注解修饰的类是否应该被导入；而判断的条件通常是基于注解的一些属性。
+	ImportBeanDefinitionRegistrar接口：（在refresh()方法的第五步invokeBeanFactoryPostProcessors(beanFactory)执行的。）
+	DeferredImportSelector接口：继承ImportSelector接口；这是一个变种的ImportSelector接口，它在所有被@Configuration注解修饰的类处理完成后才运行。
+
+
+一、spring boot自动配置的原理
+	1、在启动类使用@SpringBootApplication注解，@SpringBootApplication注解是一个符合注解，其包含@SpringBootConfiguration和@EnableAutoConfiguration等。
+	2、@EnableAutoConfiguration注解也是一个派生注解，其中的关键功能由@Import提供，通过@Import导入AutoConfigurationImportSelector类，AutoConfigurationImportSelector的
+	selectImports()中可以通过SpringFactoriesLoader.loadFactoryNames()扫描所有具有META-INF/spring.factories的jar包。spring-boot-autoconfigure-x.x.x.x.jar里就有一个这样
+	的spring.factories文件。
+	3、在spring-boot-autoconfigure-x.x.x.x.jar里面的有一个spring.factories文件中配置各种的EnableAutoConfiguration对应的类。
+	4、spring会把spring.factories文件中的配置的类加载到spring容器中，但是这些EnableAutoConfigurac本上都是会使用@ConditionalOn*注解，当没有引入对应的包的
+	时候是无法把对应的类加载到spring容器。EnableAutoConfiguration对应的类都是各个组件的配置类。【可以用redis、rabbit进行观察。】
+	5、这些不同组件的配置类会把其对应的配置导入到spring容器中。这些配置类通常会接口@ConditionalOn*，如果没有导入对应组件的jar包，就不会导入对应的配置。
+
+
+	
+	注意springboot的真正的处理过程。
+		* 在启动SpringBoot时，在refresh()方法中会调用invokeBeanFactoryPostProcessors(.)方法，在这个方法里面会对ConfigurationClassPostProcessor类进行处理（调用其postProcessBeanDefinitionRegistry(.)方法），
+		这个方法最终会创建一个ConfigurationClassParser类，并调用parser(.)方法，ConfigurationClassParser这个类专门用于解析@Configuration注解的。
+		* 最终还是调用AutoConfigurationImportSelector类process的方法，在process方法中会加载META-INF/spring.factories文件，并解析。
+
+
+
+	
+
+
+三、常用的接口
+	ImportBeanDefinitionRegistrar：
+		方法：registerBeanDefinitions(AnnotationMetadata importingClassMetadata, BeanDefinitionRegistry registry)
+		接收：
+		用法：
+
+
+四、源码解析。
+	
+	从refresh()方法中会调用invokeBeanFactoryPostProcessors(.)方法开始。
+	
+
+/**
+ * 调用BeanFactory的后置处理方法。
+ */
+location：AbstractApplicationContext
+invokeBeanFactoryPostProcessors(beanFactory);
+
+
+location：AbstractApplicationContext
+protected void invokeBeanFactoryPostProcessors(ConfigurableListableBeanFactory beanFactory) {
+	PostProcessorRegistrationDelegate.invokeBeanFactoryPostProcessors(beanFactory, getBeanFactoryPostProcessors());
+
+	// String LOAD_TIME_WEAVER_BEAN_NAME = "loadTimeWeaver"
+	if (beanFactory.getTempClassLoader() == null && beanFactory.containsBean(LOAD_TIME_WEAVER_BEAN_NAME)) {
+		beanFactory.addBeanPostProcessor(new LoadTimeWeaverAwareProcessor(beanFactory));
+		beanFactory.setTempClassLoader(new ContextTypeMatchClassLoader(beanFactory.getBeanClassLoader()));
+	}
+}
+
+/**
+ *
+ *
+ */
+location：ConfigurationClassPostProcessor
+public void postProcessBeanDefinitionRegistry(BeanDefinitionRegistry registry) {
+	int registryId = System.identityHashCode(registry);
+
+	if (this.registriesPostProcessed.contains(registryId)) {
+		throw new IllegalStateException("postProcessBeanDefinitionRegistry already called on this post-processor against " + registry);
+	}
+
+	if (this.factoriesPostProcessed.contains(registryId)) {
+		throw new IllegalStateException("postProcessBeanFactory already called on this post-processor against " + registry);
+	}
+
+	this.registriesPostProcessed.add(registryId);
+
+	processConfigBeanDefinitions(registry);
+}
+
+/*
+ * registry就是一个BeanFactory。
+ */
+location：ConfigurationClassPostProcessor
+public void processConfigBeanDefinitions(BeanDefinitionRegistry registry) {
+	List<BeanDefinitionHolder> configCandidates = new ArrayList<>();
+
+	String[] candidateNames = registry.getBeanDefinitionNames();
+
+	for (String beanName : candidateNames) {
+		BeanDefinition beanDef = registry.getBeanDefinition(beanName);
+
+		if (ConfigurationClassUtils.isFullConfigurationClass(beanDef) || ConfigurationClassUtils.isLiteConfigurationClass(beanDef)) {
+			if (logger.isDebugEnabled()) {
+				logger.debug("Bean definition has already been processed as a configuration class: " + beanDef);
+			}
+		} else if (ConfigurationClassUtils.checkConfigurationClassCandidate(beanDef, this.metadataReaderFactory)) {
+			configCandidates.add(new BeanDefinitionHolder(beanDef, beanName));
+		}
+	}
+
+	if (configCandidates.isEmpty()) {
+		return;
+	}
+
+	configCandidates.sort((bd1, bd2) -> {
+		int i1 = ConfigurationClassUtils.getOrder(bd1.getBeanDefinition());
+		int i2 = ConfigurationClassUtils.getOrder(bd2.getBeanDefinition());
+		return Integer.compare(i1, i2);
+	});
+
+	SingletonBeanRegistry sbr = null;
+	if (registry instanceof SingletonBeanRegistry) {
+		sbr = (SingletonBeanRegistry) registry;
+		if (!this.localBeanNameGeneratorSet) {
+			BeanNameGenerator generator = (BeanNameGenerator) sbr.getSingleton(CONFIGURATION_BEAN_NAME_GENERATOR);
+			if (generator != null) {
+				this.componentScanBeanNameGenerator = generator;
+				this.importBeanNameGenerator = generator;
+			}
+		}
+	}
+
+	if (this.environment == null) {
+		this.environment = new StandardEnvironment();
+	}
+
+	/**
+	 * ConfigurationClassParser用于分析@Configuration注解的配置类，产生一组ConfigurationClass对象。
+	 */
+	ConfigurationClassParser parser = new ConfigurationClassParser(this.metadataReaderFactory, this.problemReporter, this.environment, this.resourceLoader, this.componentScanBeanNameGenerator, registry);
+
+	Set<BeanDefinitionHolder> candidates = new LinkedHashSet<>(configCandidates);
+	Set<ConfigurationClass> alreadyParsed = new HashSet<>(configCandidates.size());
+	do {
+		// 解析
+		parser.parse(candidates);
+		parser.validate();
+
+		Set<ConfigurationClass> configClasses = new LinkedHashSet<>(parser.getConfigurationClasses());
+		configClasses.removeAll(alreadyParsed);
+
+		if (this.reader == null) {
+			this.reader = new ConfigurationClassBeanDefinitionReader(registry, this.sourceExtractor, this.resourceLoader, this.environment, this.importBeanNameGenerator, parser.getImportRegistry());
+		}
+
+		this.reader.loadBeanDefinitions(configClasses);
+
+		alreadyParsed.addAll(configClasses);
+
+		candidates.clear();
+
+		if (registry.getBeanDefinitionCount() > candidateNames.length) {
+			String[] newCandidateNames = registry.getBeanDefinitionNames();
+			Set<String> oldCandidateNames = new HashSet<>(Arrays.asList(candidateNames));
+			Set<String> alreadyParsedClasses = new HashSet<>();
+			for (ConfigurationClass configurationClass : alreadyParsed) {
+				alreadyParsedClasses.add(configurationClass.getMetadata().getClassName());
+			}
+
+			for (String candidateName : newCandidateNames) {
+				if (!oldCandidateNames.contains(candidateName)) {
+					BeanDefinition bd = registry.getBeanDefinition(candidateName);
+					if (ConfigurationClassUtils.checkConfigurationClassCandidate(bd, this.metadataReaderFactory) && !alreadyParsedClasses.contains(bd.getBeanClassName())) {
+						candidates.add(new BeanDefinitionHolder(bd, candidateName));
+					}
+				}
+			}
+			candidateNames = newCandidateNames;
+		}
+	} while (!candidates.isEmpty());
+
+	if (sbr != null && !sbr.containsSingleton(IMPORT_REGISTRY_BEAN_NAME)) {
+		sbr.registerSingleton(IMPORT_REGISTRY_BEAN_NAME, parser.getImportRegistry());
+	}
+
+	if (this.metadataReaderFactory instanceof CachingMetadataReaderFactory) {
+		((CachingMetadataReaderFactory) this.metadataReaderFactory).clearCache();
+	}
+}
+
+
+/** 
+ *
+ */
+location：ConfigurationClassParser
+public void parse(Set<BeanDefinitionHolder> configCandidates) {
+	for (BeanDefinitionHolder holder : configCandidates) {
+		BeanDefinition bd = holder.getBeanDefinition();
+		try {
+			if (bd instanceof AnnotatedBeanDefinition) {
+				parse(((AnnotatedBeanDefinition) bd).getMetadata(), holder.getBeanName());
+			} else if (bd instanceof AbstractBeanDefinition && ((AbstractBeanDefinition) bd).hasBeanClass()) {
+				parse(((AbstractBeanDefinition) bd).getBeanClass(), holder.getBeanName());
+			} else {
+				parse(bd.getBeanClassName(), holder.getBeanName());
+			}
+		} catch (BeanDefinitionStoreException ex) {
+			throw ex;
+		} catch (Throwable ex) {
+			throw new BeanDefinitionStoreException("Failed to parse configuration class [" + bd.getBeanClassName() + "]", ex);
+		}
+	}
+
+	this.deferredImportSelectorHandler.process();
+}
+
+/**
+ *
+ */
+location：ConfigurationClassParser.DeferredImportSelectorHandler
+public void process() {
+	List<DeferredImportSelectorHolder> deferredImports = this.deferredImportSelectors;
+	this.deferredImportSelectors = null;
+	try {
+		if (deferredImports != null) {
+			DeferredImportSelectorGroupingHandler handler = new DeferredImportSelectorGroupingHandler();
+			deferredImports.sort(DEFERRED_IMPORT_COMPARATOR);
+			deferredImports.forEach(handler::register);
+			handler.processGroupImports();
+		}
+	} finally {
+		this.deferredImportSelectors = new ArrayList<>();
+	}
+}
+
+/**
+ *
+ */
+location：ConfigurationClassParser.DeferredImportSelectorHandler
+public void processGroupImports() {
+	for (DeferredImportSelectorGrouping grouping : this.groupings.values()) {
+		grouping.getImports().forEach(entry -> {
+			ConfigurationClass configurationClass = this.configurationClasses.get(entry.getMetadata());
+			try {
+				processImports(configurationClass, asSourceClass(configurationClass), asSourceClasses(entry.getImportClassName()), false);
+			} catch (BeanDefinitionStoreException ex) {
+				throw ex;
+			} catch (Throwable ex) {
+				throw new BeanDefinitionStoreException("Failed to process import candidates for configuration class [" + configurationClass.getMetadata().getClassName() + "]", ex);
+			}
+		});
+	}
+}
+
+/**
+ *
+ */
+location：ConfigurationClassParser.DeferredImportSelectorGrouping
+public Iterable<Group.Entry> getImports() {
+	for (DeferredImportSelectorHolder deferredImport : this.deferredImports) {
+		this.group.process(deferredImport.getConfigurationClass().getMetadata(), deferredImport.getImportSelector());
+	}
+	return this.group.selectImports();
+}
+
+/**
+ *
+ */
+location：AutoConfigurationImportSelector.AutoConfigurationGroup
+public void process(AnnotationMetadata annotationMetadata, DeferredImportSelector deferredImportSelector) {
+	Assert.state(deferredImportSelector instanceof AutoConfigurationImportSelector,
+			() -> String.format("Only %s implementations are supported, got %s", AutoConfigurationImportSelector.class.getSimpleName(), deferredImportSelector.getClass().getName()));
+	
+	AutoConfigurationEntry autoConfigurationEntry = ((AutoConfigurationImportSelector) deferredImportSelector).getAutoConfigurationEntry(getAutoConfigurationMetadata(), annotationMetadata);
+	
+	// List<AutoConfigurationEntry> autoConfigurationEntries = new ArrayList<>();向保存AutoConfigurationEntry实体的类中添加元素。
+	this.autoConfigurationEntries.add(autoConfigurationEntry);
+	
+	// 
+	for (String importClassName : autoConfigurationEntry.getConfigurations()) {
+		// 如果不存在的时候添加。
+		this.entries.putIfAbsent(importClassName, annotationMetadata);
+	}
+}
+
+/**
+ * 加载MATE-INF/spring.factories文件中的EnableAutoConfiguration配置项。
+ */
+location：AutoConfigurationImportSelector
+protected AutoConfigurationEntry getAutoConfigurationEntry(AutoConfigurationMetadata autoConfigurationMetadata, AnnotationMetadata annotationMetadata) {
+	if (!isEnabled(annotationMetadata)) {
+		return EMPTY_ENTRY;
+	}
+
+	AnnotationAttributes attributes = getAttributes(annotationMetadata);
+	
+	// 加载spring.factories文件中配置的EnableAutoConfiguration类。
+	List<String> configurations = getCandidateConfigurations(annotationMetadata, attributes);
+
+	// 去除重复项。
+	configurations = removeDuplicates(configurations);
+
+	// 获取注解中的排除属性。
+	Set<String> exclusions = getExclusions(annotationMetadata, attributes);
+
+	// 检查要排除的类。
+	checkExcludedClasses(configurations, exclusions);
+
+	// 把配置项中的要排除的类，排除。
+	configurations.removeAll(exclusions);
+
+	// 拦截器调用。
+	configurations = filter(configurations, autoConfigurationMetadata);
+
+	//执行自动导入事件监听器。
+	fireAutoConfigurationImportEvents(configurations, exclusions);
+
+	return new AutoConfigurationEntry(configurations, exclusions);
+}
+
+/**
+ *
+ *
+ */
+private List<String> filter(List<String> configurations, AutoConfigurationMetadata autoConfigurationMetadata) {
+	long startTime = System.nanoTime();
+
+	String[] candidates = StringUtils.toStringArray(configurations);
+	boolean[] skip = new boolean[candidates.length];
+	boolean skipped = false;
+
+	for (AutoConfigurationImportFilter filter : getAutoConfigurationImportFilters()) {
+		invokeAwareMethods(filter);
+		boolean[] match = filter.match(candidates, autoConfigurationMetadata);
+		for (int i = 0; i < match.length; i++) {
+			if (!match[i]) {
+				skip[i] = true;
+				candidates[i] = null;
+				skipped = true;
+			}
+		}
+	}
+
+	if (!skipped) {
+		return configurations;
+	}
+
+	List<String> result = new ArrayList<>(candidates.length);
+	for (int i = 0; i < candidates.length; i++) {
+		if (!skip[i]) {
+			result.add(candidates[i]);
+		}
+	}
+
+	if (logger.isTraceEnabled()) {
+		int numberFiltered = configurations.size() - result.size();
+		logger.trace("Filtered " + numberFiltered + " auto configuration class in " + TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startTime) + " ms");
+	}
+
+	return new ArrayList<>(result);
+}
+
+/**
+ * 加载MATE-INF/spring.factories文件中的AutoConfigurationImportFilter配置项。
+ */
+protected List<AutoConfigurationImportFilter> getAutoConfigurationImportFilters() {
+	return SpringFactoriesLoader.loadFactories(AutoConfigurationImportFilter.class, this.beanClassLoader);
+}
+
+private void fireAutoConfigurationImportEvents(List<String> configurations, Set<String> exclusions) {
+	// 加载MATE-INF/spring.factories文件中的AutoConfigurationImportListener配置项。
+	List<AutoConfigurationImportListener> listeners = getAutoConfigurationImportListeners();
+
+	if (!listeners.isEmpty()) {	
+		// 创建AutoConfigurationImportEvent事件。
+		AutoConfigurationImportEvent event = new AutoConfigurationImportEvent(this, configurations, exclusions);
+		
+		// 循环触发监听器。
+		for (AutoConfigurationImportListener listener : listeners) {
+			// 调用Aware方法。
+			invokeAwareMethods(listener);
+			listener.onAutoConfigurationImportEvent(event);
+		}
+	}
+}
+
+/**
+ * 加载MATE-INF/spring.factories文件中的AutoConfigurationImportListener配置项。
+ */
+protected List<AutoConfigurationImportListener> getAutoConfigurationImportListeners() {
+	return SpringFactoriesLoader.loadFactories(AutoConfigurationImportListener.class, this.beanClassLoader);
+}
+
+
+location：ConditionEvaluationReportAutoConfigurationImportListener
+public void onAutoConfigurationImportEvent(AutoConfigurationImportEvent event) {
+	if (this.beanFactory != null) {
+		// ConditionEvaluationReport：记录条件评估详细信息以进行报告和记录。
+		ConditionEvaluationReport report = ConditionEvaluationReport.get(this.beanFactory);
+		report.recordEvaluationCandidates(event.getCandidateConfigurations());
+		report.recordExclusions(event.getExclusions());
+	}
+}
+
+
+
+################################################################################################################################
+location：PostProcessorRegistrationDelegate
+private static void invokeBeanFactoryPostProcessors(Collection<? extends BeanFactoryPostProcessor> postProcessors, ConfigurableListableBeanFactory beanFactory) {
+
+	for (BeanFactoryPostProcessor postProcessor : postProcessors) {
+		postProcessor.postProcessBeanFactory(beanFactory);
+	}
+}
+
+
+location：ConfigurationClassPostProcessor
+public void postProcessBeanFactory(ConfigurableListableBeanFactory beanFactory) {
+	int factoryId = System.identityHashCode(beanFactory);
+
+	if (this.factoriesPostProcessed.contains(factoryId)) {
+		throw new IllegalStateException("postProcessBeanFactory already called on this post-processor against " + beanFactory);
+	}
+	this.factoriesPostProcessed.add(factoryId);
+
+	if (!this.registriesPostProcessed.contains(factoryId)) {
+		processConfigBeanDefinitions((BeanDefinitionRegistry) beanFactory);
+	}
+
+	enhanceConfigurationClasses(beanFactory);
+
+	beanFactory.addBeanPostProcessor(new ImportAwareBeanPostProcessor(beanFactory));
+}
+
+
+spring应用启动时所有的被@Configuration注解的类都会被spring cglib库生成cglib动态代理，然后其他地方通过@Autowired注解引入Student类对象就会被生成的
+configuration配置类生成的动态代理拦截，处理完后再调用原configuration注解类的student方法获取到Student实例。
+
+

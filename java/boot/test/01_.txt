@@ -1,0 +1,18 @@
+
+
+
+一、类
+	1、MockMvcBuilder：构建一个MockMvc实例。
+		方法：
+			MockMvc build()：构建MockMvc实例。
+			
+	
+	2、MockMvcBuilders：主要的类，为了导入所有可以访问的MockMvcBuilder。
+		方法：
+			DefaultMockMvcBuilder webAppContextSetup(WebApplicationContext context)：通过给定的完全初始化的WebApplicationContext初始化一个MockMvc。
+				DispatcherServlet将使用context在其中发现Spring MVC基础结构和应用程序控制器。
+			
+			StandaloneMockMvcBuilder standaloneSetup(Object... controllers)：通过注册一个或多个Controller实例并以编程方式配置Spring MVC基础结构来
+				构建MockMvc实例。
+	
+	3、MockMvc：被final修饰。

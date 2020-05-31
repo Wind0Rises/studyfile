@@ -1,0 +1,276 @@
+private void refreshContext(ConfigurableApplicationContext context) {
+	refresh(context);
+	if (this.registerShutdownHook) {
+		try {
+			context.registerShutdownHook();
+		} catch (AccessControlException ex) {
+
+		}
+	}
+}
+
+protected void refresh(ApplicationContext applicationContext) {
+	Assert.isInstanceOf(AbstractApplicationContext.class, applicationContext);
+	// 这很重要，如果没有使用spring boot的话，就是直接调用refresh()。
+	((AbstractApplicationContext) applicationContext).refresh();
+}
+
+public void registerShutdownHook() {
+	if (this.shutdownHook == null) {
+
+		this.shutdownHook = new Thread() {
+			@Override
+			public void run() {
+				synchronized (startupShutdownMonitor) {
+					doClose();
+				}
+			}
+		};
+		Runtime.getRuntime().addShutdownHook(this.shutdownHook);
+	}
+}
+
+protected void doClose() {
+	if (this.active.get() && this.closed.compareAndSet(false, true)) {
+		if (logger.isDebugEnabled()) {
+			logger.debug("Closing " + this);
+		}
+
+		LiveBeansView.unregisterApplicationContext(this);
+
+		try {
+			publishEvent(new ContextClosedEvent(this));
+		} catch (Throwable ex) {
+			logger.warn("Exception thrown from ApplicationListener handling ContextClosedEvent", ex);
+		}
+ 
+		if (this.lifecycleProcessor != null) {
+			try {
+				this.lifecycleProcessor.onClose();
+			} catch (Throwable ex) {
+				logger.warn("Exception thrown from LifecycleProcessor on context close", ex);
+			}
+		}
+ 
+		destroyBeans();
+ 
+		closeBeanFactory();
+ 
+		onClose();
+ 
+		if (this.earlyApplicationListeners != null) {
+			this.applicationListeners.clear();
+			this.applicationListeners.addAll(this.earlyApplicationListeners);
+		}
+
+
+		this.active.set(false);
+	}
+}
+
+
+/**
+ *
+ */
+location：AbstractApplicationContext
+public void refresh() throws BeansException, IllegalStateException {
+	synchronized (this.startupShutdownMonitor) {
+		
+		prepareRefresh();
+		
+		/**
+		 *
+		 */
+		ConfigurableListableBeanFactory beanFactory = obtainFreshBeanFactory();
+
+		/**
+		 *
+		 */
+		prepareBeanFactory(beanFactory);
+
+		try {
+			/**
+			 * BeanFactory的后置处理，主要是注册一个Bean
+			 */
+			postProcessBeanFactory(beanFactory);
+
+			/**
+			 *
+			 */
+			invokeBeanFactoryPostProcessors(beanFactory);
+
+			/**
+			 *
+			 */
+			registerBeanPostProcessors(beanFactory);
+
+			// Initialize message source for this context.
+			initMessageSource();
+
+			// Initialize event multicaster for this context.
+			initApplicationEventMulticaster();
+
+			// Initialize other special beans in specific context subclasses.
+			onRefresh();
+
+			// Check for listener beans and register them.
+			registerListeners();
+
+			// Instantiate all remaining (non-lazy-init) singletons.
+			finishBeanFactoryInitialization(beanFactory);
+
+			// Last step: publish corresponding event.
+			finishRefresh();
+		} catch (BeansException ex) {
+			if (logger.isWarnEnabled()) {
+				logger.warn("Exception encountered during context initialization - " +
+						"cancelling refresh attempt: " + ex);
+			}
+
+			// Destroy already created singletons to avoid dangling resources.
+			destroyBeans();
+
+			// Reset 'active' flag.
+			cancelRefresh(ex);
+
+			// Propagate exception to caller.
+			throw ex;
+		} finally {
+			// Reset common introspection caches in Spring's core, since we
+			// might not ever need metadata for singleton beans anymore...
+			resetCommonCaches();
+		}
+	}
+}
+
+/**
+ * 
+ */
+location：AnnotationConfigServletWebServerApplicationContext
+protected void postProcessBeanFactory(ConfigurableListableBeanFactory beanFactory) {
+	super.postProcessBeanFactory(beanFactory);
+	if (this.basePackages != null && this.basePackages.length > 0) {
+		this.scanner.scan(this.basePackages);
+	}
+	if (!this.annotatedClasses.isEmpty()) {
+		this.reader.register(ClassUtils.toClassArray(this.annotatedClasses));
+	}
+}
+
+
+/**
+ * 
+ */
+location：ServletWebServerApplicationContext
+protected void postProcessBeanFactory(ConfigurableListableBeanFactory beanFactory) {
+	beanFactory.addBeanPostProcessor(new WebApplicationContextServletContextAwareProcessor(this));
+	beanFactory.ignoreDependencyInterface(ServletContextAware.class);
+	registerWebApplicationScopes();
+}
+
+private void registerWebApplicationScopes() {
+	ExistingWebApplicationScopes existingScopes = new ExistingWebApplicationScopes(getBeanFactory());
+	WebApplicationContextUtils.registerWebApplicationScopes(getBeanFactory());
+	existingScopes.restore();
+}
+
+/**
+ * ExistingWebApplicationScopes的构造函数。
+ * ExistingWebApplicationScopes的静态代码块。
+ * static {
+ * 		Set<String> scopes = new LinkedHashSet<>();
+ * 		scopes.add(WebApplicationContext.SCOPE_REQUEST);
+ * 		scopes.add(WebApplicationContext.SCOPE_SESSION);
+ * 		SCOPES = Collections.unmodifiableSet(scopes);
+ * }
+ */
+public ExistingWebApplicationScopes(ConfigurableListableBeanFactory beanFactory) {
+	this.beanFactory = beanFactory;
+	for (String scopeName : SCOPES) {
+		// 从BeanFactory中获取已经注册的范围是给定范围的Scope。
+		Scope scope = beanFactory.getRegisteredScope(scopeName);
+		if (scope != null) {
+			this.scopes.put(scopeName, scope);
+		}
+	}
+}
+
+
+location：WebApplicationContextUtils
+public static void registerWebApplicationScopes(ConfigurableListableBeanFactory beanFactory) {
+	registerWebApplicationScopes(beanFactory, null);
+}
+
+public static void registerWebApplicationScopes(ConfigurableListableBeanFactory beanFactory, @Nullable ServletContext sc) {
+
+	beanFactory.registerScope(WebApplicationContext.SCOPE_REQUEST, new RequestScope());
+	beanFactory.registerScope(WebApplicationContext.SCOPE_SESSION, new SessionScope());
+
+	if (sc != null) {
+		ServletContextScope appScope = new ServletContextScope(sc);
+		beanFactory.registerScope(WebApplicationContext.SCOPE_APPLICATION, appScope);
+		// Register as ServletContext attribute, for ContextCleanupListener to detect it.
+		sc.setAttribute(ServletContextScope.class.getName(), appScope);
+	}
+
+	beanFactory.registerResolvableDependency(ServletRequest.class, new RequestObjectFactory());
+	beanFactory.registerResolvableDependency(ServletResponse.class, new ResponseObjectFactory());
+	beanFactory.registerResolvableDependency(HttpSession.class, new SessionObjectFactory());
+	beanFactory.registerResolvableDependency(WebRequest.class, new WebRequestObjectFactory());
+	if (jsfPresent) {
+		FacesDependencyRegistrar.registerFacesDependencies(beanFactory);
+	}
+}
+
+###########################################################################################################################################
+############################################    invokeBeanFactoryPostProcessors(beanFactory)     ##########################################
+###########################################################################################################################################
+
+/**
+ * 处理实现了BeanFactoryPostProcessor。并调用postProcessBeanFactory(ConfigurableListableBeanFactory beanFactory)的方法。
+ */
+protected void invokeBeanFactoryPostProcessors(ConfigurableListableBeanFactory beanFactory) {
+	PostProcessorRegistrationDelegate.invokeBeanFactoryPostProcessors(beanFactory, getBeanFactoryPostProcessors());
+
+	if (beanFactory.getTempClassLoader() == null && beanFactory.containsBean(LOAD_TIME_WEAVER_BEAN_NAME)) {
+		beanFactory.addBeanPostProcessor(new LoadTimeWeaverAwareProcessor(beanFactory));
+		beanFactory.setTempClassLoader(new ContextTypeMatchClassLoader(beanFactory.getBeanClassLoader()));
+	}
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
