@@ -22,16 +22,19 @@
 	2)、以xml配置为例，如何加载和解析标签，
 		1、在AopNamespaceHandler的初始化的时候会注册对应的BeanDefinitionParser。然后从AopNamespaceHandler的parser(Element element, ParserContext parserContext)
 		   方法进入解析处理流程。在这个方法中会根据传入的标签获取对应的BeanDefinitionParaser，然后进入具体的解析流程。
-		2、每一个Advice标签都会创建一个AspectJPointcutAdvisor【这是Advisor的子类】对应的BeanDefinition，AspectJPointcutAdvisor的构造函数需要传入一个AbstractAspectJAdvice
+		2、向Spring中注入一个AspectJAwareAdvisorAutoProxyCreator类的BeanDefinition，AspectJAwareAdvisorAutoProxyCreator是生成代理类的入口。
+		3、每一个Advice标签都会创建一个AspectJPointcutAdvisor【这是Advisor的子类】对应的BeanDefinition，AspectJPointcutAdvisor的构造函数需要传入一个AbstractAspectJAdvice
 		   实例对象，AbstractAspectJAdvice是Advice的子类。所以一个AspectJPointcutAdvisor有会对应一个真实的Advice。并注入到BeanFactory中。
+		   AspectJPointcutAdvisor中有一个AbstractAspectJAdvice类型的属性。AspectJMethodBeforeAdvice、AspectJAfterAdvice、AspectJAfterReturningAdvice、AspectJAroundAdvice
+		   AspectJAfterThrowingAdvice都会包装成AspectJPointcutAdvisor类对应的BeanDefinition注入到spring中。
 			########################################################################
-			#		before 				AspectJMethodBeforeAdvice	               #
+			#		before 				AspectJMethodBeforeAdvice	               # 
 			#       after				AspectJAfterAdvice			               #
 			#       after-returning 	AspectJAfterReturningAdvice	               #
 			#       after-throwing 		AspectJAfterThrowingAdvice	               #
 			#       around 				AspectJAroundAdvice			               #
 		    ########################################################################
-		3、创建pointCut标签，创建AspectJExpressionPointcut对应的BeanDefinition，并把这个BeanDefinition注册到BeanFactory中。	
+		4、创建pointCut标签，创建AspectJExpressionPointcut对应的BeanDefinition，并把这个BeanDefinition注册到BeanFactory中。	
 				
 		#############################   
 		#	源码请看01_生成...		#  
@@ -41,6 +44,7 @@
 	
 	
 	3)、如何生成代理类的。
+		0、AspectJAwareAdvisorAutoProxyCreator是生成代理类的入口。
 		1、这个时候BeanFactory已经有了对应的BeanDefinition了。在Aop这个jar中AbstractAutoProxyCreator这类，这个类实现了BeanPostProcessor，实际是
 		   SmartInstantiationAwareBeanPostProcessor（extends InstantiationAwareBeanPostProcessor extends BeanPostProcessor）。创建的代理类的入口是
 		   BeanPostProcessor的postProcessAfterInitialization(Object bean, String beanName)方法。
@@ -67,4 +71,6 @@
 		#	源码请看04_代理...		#  
 		#############################  
 		
-		
+	
+二、通知处理的流程。
+	

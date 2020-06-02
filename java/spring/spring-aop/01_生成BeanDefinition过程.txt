@@ -394,8 +394,11 @@ public BeanDefinition parse(Element element, ParserContext parserContext) {
 	parserContext.pushContainingComponent(compositeDef);
 
 	/**
-	 * 配置支持<aopconfig/>标签进行创建BeanDefinition所需的自动代理创建器。
-	 * 如果'proxy-target-class属性设置为true，将强制进行类代理。
+	 * ######################################################################################################
+	 * #  回向spring注册一个AspectJAwareAdvisorAutoProxyCreator对应的BeanDefinition，其是生成代理类的入口	#	
+	 * #  配置支持<aopconfig/>标签进行创建BeanDefinition所需的自动代理创建器。								#
+	 * #  如果'proxy-target-class属性设置为true，将强制进行类代理。											#
+	 * ######################################################################################################
 	 */
 	configureAutoProxyCreator(parserContext, element);
 
@@ -589,9 +592,10 @@ private void parseAspect(Element aspectElement, ParserContext parserContext) {
 		
 
 		/**
-		 * 这里处理了pointcut标签。
-		 *
-		 * 获取给定元素给定子元素名称（pointcut）的子元素信息。
+		 * ##############################################################################
+		 * #		这里处理了pointcut标签。创建AspectJExpressionPointcut对应的			#
+		 * #		BeanDefinition，并注入Spring										#
+		 * ##############################################################################
 		 */
 		List<Element> pointcuts = DomUtils.getChildElementsByTagName(aspectElement, POINTCUT);
 		for (Element pointcutElement : pointcuts) {

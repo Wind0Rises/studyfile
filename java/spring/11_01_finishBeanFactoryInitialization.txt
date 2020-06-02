@@ -13,24 +13,36 @@ refresh()：第十一部分
 	
 零、流程
 
+	主线：实例化之前的操作   构造函数的选择    实例化    实例化之后的操作      设置属性     各种aware类    BeanPostProcessor的before方法
+		  InitializingBean的afterPropertiesSet()方法  init-method的操作  BeanPostProcessor的after方法
+	/***
+	 * BeanPostProcessor
+	 *			 InstantiationAwareBeanPostProcessor
+	 *							SmartInstantiationAwareBeanPostProcessor
+	 *
+	 */
+
 	需要整理。
 		createBean(..)方法中。
 			1、获取对应的Bean Definition对应的Class对象。
-			2、调用InstantiationAwareBeanPostProcessor的postProcessBeforeInstantiation(..)、postProcessAfterInstantiation(..)方法。
+			2、调用InstantiationAwareBeanPostProcessor的postProcessBeforeInstantiation(..)方法。
 			
 		doCreateBean(..)方法中。
-			3、调用SmartInstantiationAwareBeanPostProcessor的determineCandidateConstructors(..)方法。
-			4、初始化Bean。
+			3、调用SmartInstantiationAwareBeanPostProcessor的determineCandidateConstructors(..)方法，选择合适的构造函数。
+			4、构建BeanWrapper实例，在BeanWrapper中有对应的Bean实例，在这里初始化Bean，一般通过Cglib获取实例。
 			5、调用MergedBeanDefinitionPostProcessor的postProcessMergedBeanDefinition(..)方法。
-			6、调用InstantiationAwareBeanPostProcessor的postProcessAfterInstantiation(..)：方法。
+			
+	2-6		6、调用InstantiationAwareBeanPostProcessor的postProcessAfterInstantiation(..)：方法。
 			7、调用InstantiationAwareBeanPostProcessor的postProcessPropertyValues(...)方法。
-			8、设置Bean的属性，通过<propretity>标签或者@Value注解设置的操作。
+			
+			
+			8、设置Bean的属性值，通过<propretity>标签或者@Value注解设置的操作。
 			
 			9、如果该Bean是实现了一些Aware接口，调用对应的Aware的方法。BeanNameAware --> BeanClassLoaderAware --> BeanFactoryAware	【只有实现了对应Aware接口才会调用】
 			
 			10、调用SmartInstantiationAwareBeanPostProcessor类的getEarlyBeanReference()方法。
 			
-			11、调用BeanPostProcessor对应的postProcessBeforeInitialization(..)方法。													【BeanPostProcessor是每一个Bean都会调用】
+			11、调用BeanPostProcessor对应的postProcessBeforeInitialization(..)方法。												【BeanPostProcessor是每一个Bean都会调用】
 			12、调用InitializingBean的afterPropertiesSet()方法。																	【只有实现了InitializingBean的Bean才会调用。】
 			13、调用init-method属性设置的初始化方法。
 			14、调用BeanPostProcessor对应的postProcessAfterInitializing(..)方法。													【BeanPostProcessor是每一个Bean都会调用】
@@ -40,12 +52,7 @@ refresh()：第十一部分
 一、重要的类
 	InstantiationAwareBeanPostProcessor：
 	
-	
-	
 	MergedBeanDefinitionPostProcessor：
-	
-	
-	
 	
 	
 	
@@ -661,8 +668,9 @@ protected Object createBean(String beanName, RootBeanDefinition mbd, Object[] ar
 	
 	RootBeanDefinition mbdToUse = mbd;
 
-	// 确保此时实际解析了bean类，并在动态解析的Class的情况下克隆bean定义，该类无法存储在共享的合并bean定义中。
+
 	/**
+	 * 确保此时实际解析了bean类，并在动态解析的Class的情况下克隆bean定义，该类无法存储在共享的合并bean定义中。
 	 * 获取BeanDefinition对应的class。
 	 */
 	Class<?> resolvedClass = resolveBeanClass(mbd, beanName);

@@ -76,6 +76,7 @@ public Object postProcessBeforeInstantiation(Class<?> beanClass, String beanName
 }
 
 /**
+ *
  * 给定的Class是Advice、Pointcut、Advisor、AopInfrastructureBean的子类返回true。
  */ 
 location：AbstractAutoProxyCreator
@@ -670,6 +671,9 @@ public Advisor wrap(Object adviceObject) throws UnknownAdviceTypeException {
 
 
 
+
+
+
 #######################################
 #    	第三部：代理的具体实现		  #
 #######################################
@@ -901,7 +905,8 @@ private void doValidateClass(Class<?> proxySuperClass, ClassLoader proxyClassLoa
 
 
 /**
- *
+ * 
+ * 获取回调函数。
  */
 location：
 private Callback[] getCallbacks(Class<?> rootClass) throws Exception {

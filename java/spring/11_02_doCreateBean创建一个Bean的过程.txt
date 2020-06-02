@@ -12,9 +12,11 @@ protected Object doCreateBean(final String beanName, final RootBeanDefinition mb
 	}
 	
 	/**
-	 *
-	 *   创建Bean对象，并构建BeanWrapper对象保证Bean对象。
-	 *
+	 * ##########################################################################
+	 * #       创建Bean对象，并构建BeanWrapper对象保证Bean对象。				#
+	 * #       在创建Bean对象之前会调用SmartInstantiationAwareBeanPostProcessor	#
+	 * #       的determineCandidateConstructors()方法							#
+	 * ##########################################################################
 	 */
 	if (instanceWrapper == null) {
 		instanceWrapper = createBeanInstance(beanName, mbd, args);
@@ -195,8 +197,34 @@ protected BeanWrapper createBeanInstance(String beanName, RootBeanDefinition mbd
 		return autowireConstructor(beanName, mbd, ctors, args);
 	}
 
-	// 初始化没有特殊处理的Bean，
+	/**
+	 * ######################################################################
+	 * #                    初始化没有特殊处理的Bean，						#
+	 * ######################################################################
+	 */
 	return instantiateBean(beanName, mbd);
+}
+
+
+
+/**
+ * 调用SmartInstantiationAwareBeanPostProcessor的determineCandidateConstructors方法。
+ */
+location：AbstractAutowireCapableBeanFactory
+protected Constructor<?>[] determineConstructorsFromBeanPostProcessors(@Nullable Class<?> beanClass, String beanName) throws BeansException {
+
+	if (beanClass != null && hasInstantiationAwareBeanPostProcessors()) {
+		for (BeanPostProcessor bp : getBeanPostProcessors()) {
+			if (bp instanceof SmartInstantiationAwareBeanPostProcessor) {
+				SmartInstantiationAwareBeanPostProcessor ibp = (SmartInstantiationAwareBeanPostProcessor) bp;
+				Constructor<?>[] ctors = ibp.determineCandidateConstructors(beanClass, beanName);
+				if (ctors != null) {
+					return ctors;
+				}
+			}
+		}
+	}
+	return null;
 }
 
 
