@@ -1,0 +1,435 @@
+
+一、：
+	第一部分为：CountDownLatch。
+	第二部分为：CyclicBarrier
+	第三部分为：Semaphore
+
+		
+二、总结：
+	CountDownLatch和CyclicBarrier的区别？
+		Countdownlatch：会堵塞调用了Countdownlatch.await()的线程，一般情况都是主线程，直到Countdownlatch内部的state为0时。
+		CyclicBarrier：允许一组线程互相等待，直到到达某个公共屏障点。是线程之间的相互等待，不影响主线程向下执行。
+		CyclicBarrier是可以复位的，Countdownlatch只能使用一次，完成以后不能复位。
+		
+		
+	Semaphore的理解？
+		Semaphore（信号量）：是用来控制同时访问特定资源的线程数量，它通过协调各个线程，以保证合理的使用公共资源。原理还是使用AQS的共享模式，
+		构建Semaphore时，会传入一个控制量，即为初始化AQS的state，尝试获取锁都是和semaphore
+		
+		
+三、例子
+	1、CyclicBarrier测试代码。
+		public static void cyclicBarrierTest() throws Exception {
+			CyclicBarrier cyclicBarrier = new CyclicBarrier(5, ()-> {
+				System.out.println("###########   【结束】百米跑步比赛  ##############");
+			});
+
+			System.out.println("###########   【开始】百米跑步比赛  ##############");
+			for (int i = 1; i <= 5; i++) {
+				new Thread(()-> {
+					try {
+						TimeUnit.SECONDS.sleep(new Random().nextInt(10));
+					} catch (InterruptedException e) {
+						e.printStackTrace();
+					}
+
+					System.out.println(Thread.currentThread().getName() + "  到达终点！！");
+
+					try {
+						cyclicBarrier.await();
+					} catch (InterruptedException e) {
+						e.printStackTrace();
+					} catch (BrokenBarrierException e) {
+						e.printStackTrace();
+					}
+				}, "运动员：" + i).start();
+			}
+
+			System.out.println("============ 不影响主进程往下执行  ===================");
+		}
+		
+		
+	2、Semaphore测试例子
+		public static void semaphoreTest() throws Exception {
+			Semaphore semaphore = new Semaphore(10);
+
+			for (int i = 1; i <= 20; i++) {
+				new Thread(()-> {
+					try {
+						semaphore.acquire();
+						
+						// 下面同一时刻只有10个现场能够进入。只有线程通过semaphore.release()释放许可证，其他线程才能继续进入
+						System.out.println(Thread.currentThread().getName());
+						TimeUnit.SECONDS.sleep(new Random().nextInt(10));
+						
+						
+						semaphore.release();
+					} catch (InterruptedException e) {
+						e.printStackTrace();
+					}
+				}, "运动员：" + i).start();
+			}
+
+    }
+		
+		
+		
+		
+三、源码：
+#####################################################################
+#						第一部分：CountDownLatch					#
+#####################################################################
+
+/**
+ * 构造CountDownLatch时候，直接给AQS一个同步状态，
+ * CountDownLatch是一个基于共享模式的AQS实现的。没有一个countDown()都会去减1.
+ */
+location：CountDownLatch
+public class CountDownLatch {
+
+    private static final class Sync extends AbstractQueuedSynchronizer {
+	
+        private static final long serialVersionUID = 4982264981922014374L;
+
+        Sync(int count) {
+            setState(count);
+        }
+
+        int getCount() {
+            return getState();
+        }
+
+        protected int tryAcquireShared(int acquires) {
+            return (getState() == 0) ? 1 : -1;
+        }
+
+		/**
+		 * 每次释放锁把state减1。
+		 */
+        protected boolean tryReleaseShared(int releases) {
+            for (;;) {
+                int c = getState();
+                if (c == 0) {
+                    return false;
+				}
+                int nextc = c-1;
+                
+				/**
+				 * CAS修改state状态。
+				 */
+				if (compareAndSetState(c, nextc)) {
+                    return nextc == 0;
+				}
+            }
+        }
+    }
+
+    private final Sync sync;
+
+    public CountDownLatch(int count) {
+        if (count < 0) throw new IllegalArgumentException("count < 0");
+        this.sync = new Sync(count);
+    }
+
+    public void await() throws InterruptedException {
+        sync.acquireSharedInterruptibly(1);
+    }
+
+    public boolean await(long timeout, TimeUnit unit) throws InterruptedException {
+        return sync.tryAcquireSharedNanos(1, unit.toNanos(timeout));
+    }
+	
+	
+    public void countDown() {
+        sync.releaseShared(1);
+    }
+
+    public long getCount() {
+        return sync.getCount();
+    }
+
+    public String toString() {
+        return super.toString() + "[Count = " + sync.getCount() + "]";
+    }
+}
+
+
+/**
+ *
+ */
+location：AbstractQueuedSynchronizer
+public final void acquireSharedInterruptibly(int arg) throws InterruptedException {
+	if (Thread.interrupted()) {
+		throw new InterruptedException();
+	}
+	
+	if (tryAcquireShared(arg) < 0) {
+		doAcquireSharedInterruptibly(arg);
+	}
+}
+
+/**
+ * 添加一个共享节点到等待队里中，如果节点的前驱节点是头节点尝试获取锁，获取锁失败以后会挂起该节点。
+ */
+location：AbstractQueuedSynchronizer
+private void doAcquireSharedInterruptibly(int arg) throws InterruptedException {
+	/**
+	 * 添加一个共享队列。
+	 */
+	final Node node = addWaiter(Node.SHARED);
+	boolean failed = true;
+	try {
+		for (;;) {
+			/**
+			 * 获取节点的前驱节点。
+			 */
+			final Node p = node.predecessor();
+			
+			if (p == head) {
+				/** 
+				 * 尝试获取锁，如果State不等于0，CountDownLatch返回都是-1；
+				 */
+				int r = tryAcquireShared(arg);
+				
+				if (r >= 0) {
+					setHeadAndPropagate(node, r);
+					p.next = null;
+					failed = false;
+					return;
+				}
+			}
+			
+			/**
+			 * 这里将挂起该线程。
+			 */
+			if (shouldParkAfterFailedAcquire(p, node) && parkAndCheckInterrupt()) {
+				throw new InterruptedException();
+			}
+		}
+	} finally {
+		if (failed) {
+			cancelAcquire(node);
+		}
+	}
+}
+
+
+
+
+
+
+
+
+
+
+
+#####################################################################
+#						第二部分：CyclicBarrier						#
+#####################################################################
+
+
+
+
+
+#####################################################################
+#						第三部分：CyclicBarrier						#
+#####################################################################
+/*
+ * 
+ */
+public class Semaphore implements java.io.Serializable {
+
+    private final Sync sync;
+
+    abstract static class Sync extends AbstractQueuedSynchronizer {
+        
+		private static final long serialVersionUID = 1192457210091910933L;
+
+        Sync(int permits) {
+            setState(permits);
+        }
+
+        final int getPermits() {
+            return getState();
+        }
+
+        final int nonfairTryAcquireShared(int acquires) {
+            for (;;) {
+                int available = getState();
+                int remaining = available - acquires;
+                if (remaining < 0 || compareAndSetState(available, remaining)) {  
+                    return remaining;
+				}
+            }
+        }
+
+        protected final boolean tryReleaseShared(int releases) {
+            for (;;) {
+                int current = getState();
+                int next = current + releases;
+                if (next < current) {
+                    throw new Error("Maximum permit count exceeded");
+				}
+				
+                if (compareAndSetState(current, next)) {
+                    return true;
+				}
+            }
+        }
+
+        final void reducePermits(int reductions) {
+            for (;;) {
+                int current = getState();
+                int next = current - reductions;
+                if (next > current) {
+                    throw new Error("Permit count underflow");
+				}
+                if (compareAndSetState(current, next)) {
+                    return;
+				}
+            }
+        }
+
+        final int drainPermits() {
+            for (;;) {
+                int current = getState();
+                if (current == 0 || compareAndSetState(current, 0))
+                    return current;
+            }
+        }
+    }
+
+	/**
+	 * 非公平锁。
+	 */
+    static final class NonfairSync extends Sync {
+        private static final long serialVersionUID = -2694183684443567898L;
+
+        NonfairSync(int permits) {
+            super(permits);
+        }
+
+        protected int tryAcquireShared(int acquires) {
+            return nonfairTryAcquireShared(acquires);
+        }
+    }
+	
+	/**
+	 * 公平锁
+	 */
+    static final class FairSync extends Sync {
+        private static final long serialVersionUID = 2014338818796000944L;
+
+        FairSync(int permits) {
+            super(permits);
+        }
+
+        protected int tryAcquireShared(int acquires) {
+            for (;;) {
+                if (hasQueuedPredecessors()) {
+                    return -1;
+				}
+				
+                int available = getState();
+                int remaining = available - acquires;
+                if (remaining < 0 || compareAndSetState(available, remaining)) {
+                    return remaining;
+				}
+            }
+        }
+    }
+
+
+    public Semaphore(int permits) {
+        sync = new NonfairSync(permits);
+    }
+
+ 
+    public Semaphore(int permits, boolean fair) {
+        sync = fair ? new FairSync(permits) : new NonfairSync(permits);
+    }
+	
+    public void acquire() throws InterruptedException {
+        sync.acquireSharedInterruptibly(1);
+    }
+
+    public void acquireUninterruptibly() {
+        sync.acquireShared(1);
+    }
+
+	
+    public boolean tryAcquire() {
+        return sync.nonfairTryAcquireShared(1) >= 0;
+    }
+	
+
+    public boolean tryAcquire(long timeout, TimeUnit unit) throws InterruptedException {
+        return sync.tryAcquireSharedNanos(1, unit.toNanos(timeout));
+    }
+
+
+    public void release() {
+        sync.releaseShared(1);
+    }
+
+    public void acquire(int permits) throws InterruptedException {
+        if (permits < 0) throw new IllegalArgumentException();
+        sync.acquireSharedInterruptibly(permits);
+    }
+
+    public void acquireUninterruptibly(int permits) {
+        if (permits < 0) throw new IllegalArgumentException();
+        sync.acquireShared(permits);
+    }
+
+
+    public boolean tryAcquire(int permits) {
+        if (permits < 0) throw new IllegalArgumentException();
+        return sync.nonfairTryAcquireShared(permits) >= 0;
+    }
+
+    public boolean tryAcquire(int permits, long timeout, TimeUnit unit)
+        throws InterruptedException {
+        if (permits < 0) throw new IllegalArgumentException();
+        return sync.tryAcquireSharedNanos(permits, unit.toNanos(timeout));
+    }
+
+    public void release(int permits) {
+        if (permits < 0) throw new IllegalArgumentException();
+        sync.releaseShared(permits);
+    }
+
+    /**
+    public int availablePermits() {
+        return sync.getPermits();
+    }
+
+    public int drainPermits() {
+        return sync.drainPermits();
+    }
+
+    protected void reducePermits(int reduction) {
+        if (reduction < 0) throw new IllegalArgumentException();
+        sync.reducePermits(reduction);
+    }
+
+    public boolean isFair() {
+        return sync instanceof FairSync;
+    }
+
+    public final boolean hasQueuedThreads() {
+        return sync.hasQueuedThreads();
+    }
+
+    public final int getQueueLength() {
+        return sync.getQueueLength();
+    }
+
+    protected Collection<Thread> getQueuedThreads() {
+        return sync.getQueuedThreads();
+    }
+
+    public String toString() {
+        return super.toString() + "[Permits = " + sync.getPermits() + "]";
+    }
+}

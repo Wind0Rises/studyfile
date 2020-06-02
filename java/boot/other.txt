@@ -1,0 +1,1 @@
+一个回调接口，用于在ConfigurableApplicationContext.refresh(..)之前初始化Spring ConfigurableApplicationContext。

@@ -1,23 +1,51 @@
+
 在JDK8里面，去掉了分段锁，将锁的级别控制在了更细粒度的table元素级别，也就是说只需要锁住这个链表的head节点，并不会影响其他的table元素的读写，
 好处在于并发的粒度更细，影响更小，从而并发效率更好，但不足之处在于并发扩容的时候，由于操作的table都是同一个，不像JDK7中分段控制，所以这里需
 要等扩容完之后，所有的读写操作才能进行。
 
 
-1、ConcurrentHashMap是如何保证线程安全的？分别说一下JDK7和JDK8。
-	JDK8：
-		put操作：获取头节点操作：使用getObjectVolatile方法，支持Volatile内存语义。
-			1、如果头节点为空，直接通过compareAndSwapObject进行添加【如果成功直接返回，不成功一直尝试】。
-			2、如果头节点不为空，给头节点上锁。这个时候put操作就是串行执行了。进入锁以后，还是要判断头节点，如果头节点没有变化才进行操作（双重加锁）。
-			3、是否需要从链表到红黑树。在需要转换的时候也是会上锁的。转换之后通过cas更换头节点。
-			###注意步骤2和步骤3锁的是同一个对象，所以在同一时刻2、3只有一个能执行。【分析场景：联系put两个，第一个先执行else;第二个先执行完第三步。这个时候第一步要怎么执行】###
-			
+
+
+二、总结：
+
+	1、ConcurrentHashMap是如何保证线程安全的？分别说一下JDK7和JDK8。
+		JDK8：
+			put操作：获取头节点操作：使用getObjectVolatile方法，支持Volatile内存语义。
+				1、如果头节点为空，直接通过CAS进行添加【如果成功直接返回，不成功一直尝试】。
+				2、如果头节点不为空，给头节点上锁，使用synchronized进行加锁。这个时候put操作就是串行执行了。进入锁以后，还是要判断头节点，如果头节点没有变化
+				   才进行操作（双重加锁）。
+				3、是否需要从链表到红黑树。在需要转换的时候也是会上锁的。转换之后通过cas更换头节点。
+				###注意步骤2和步骤3锁的是同一个对象，所以在同一时刻2、3只有一个能执行。【分析场景：联系put两个，第一个先执行else;第二个先执行完第三步。这个时候第一步要怎么执行】###
+				
 	
-	总结：头结点为空，直接CAS进行添加。如果不为空，使用的尾插法，把第一个元素上锁。
+		总结：头结点为空，直接CAS进行添加。如果不为空，使用的尾插法，把第一个元素上锁。
+
+		
+	
+	2、头插法和尾插发
+		JDK8之前使用的头插发，可以提高效率；JDK8及其以后使用的尾插发，安全考虑。
+			
+			
+			
+	3、添加元素以后才进行扩容为什么？	
+			
+
+			
+			
+			
+			
+			
+			
 			
 			
 			
 
-##########   初始化  ########
+#########################################
+# 					初始化 				#
+#########################################
+/**
+ * 初始化 
+ */
 public ConcurrentHashMap(int initialCapacity) {
 	if (initialCapacity < 0) {
 		throw new IllegalArgumentException();
@@ -55,12 +83,18 @@ final V putVal(K key, V value, boolean onlyIfAbsent) {
 		// n：table数组的长度。 i:数据在数组上的位置。
 		int n, i, fh;
 		
-		// 第一次put元素时，初始化tabel。
+		
+		/**
+		 * 第一次put元素时，初始化tabel。
+		 */
 		if (tab == null || (n = tab.length) == 0) {
 			tab = initTable();
 		
-		// 获取tab数组，第i位置的值，支持volatile语义。
-		// 如果头结点为null，直接添加。
+		
+		/**
+		 * 获取tab数组，第i位置的值，支持volatile语义。
+		 * 如果头结点为null，直接添加。
+		 */
 		} else if ((f = tabAt(tab, i = (n - 1) & hash)) == null) {
 			
 			// 直接进行添加。
@@ -68,15 +102,22 @@ final V putVal(K key, V value, boolean onlyIfAbsent) {
 				break;                   
 			}
 			
-		// static final int MOVED     = -1; 			表示该节点有线程处理过了
-		// static final int TREEBIN   = -2; 			表示判断到这个节点是一个树节点
-		// static final int RESERVED  = -3; 		
-		// static final int HASH_BITS = 0x7fffffff; 	普通节点哈希的可用位
-		// 如果该节点正在扩容，去协助扩容。
+		/**
+		 * static final int MOVED     = -1; 			表示该节点有线程处理过了
+		 * static final int TREEBIN   = -2; 			表示判断到这个节点是一个树节点
+		 * static final int RESERVED  = -3; 		
+		 * static final int HASH_BITS = 0x7fffffff; 	普通节点哈希的可用位
+		 * 如果该节点正在扩容，去协助扩容。
+		 *
+		 */
 		} else if ((fh = f.hash) == MOVED) {
 			tab = helpTransfer(tab, f);
 			
-		// 
+		
+		
+		/**
+		 * 使用synchronized进行上锁。
+		 */
 		} else {
 			V oldVal = null;
 			
@@ -225,7 +266,13 @@ static final <K,V> boolean casTabAt(Node<K,V>[] tab, int i, Node<K,V> c, Node<K,
 }
 
 
-// 协助扩容。
+
+#########################################
+#					协助扩容			#
+#########################################
+/**
+ * 协助扩容。
+ */
 final Node<K,V>[] helpTransfer(Node<K,V>[] tab, Node<K,V> f) {
 	Node<K,V>[] nextTab; 
 	int sc;
@@ -334,11 +381,13 @@ private final void tryPresize(int size) {
 	}
 }
 
+
+
+
 /** 
+ * check：-1是删除，1是链表，2是红黑树
  * 检查是否需要扩容，或者是否正在扩容。如果需要扩容，就调用扩容方法，如果正在扩容，就帮助其扩容。
  */
- 
- // check：-1是删除，1是链表，2是红黑树
 private final void addCount(long x, int check) {
 	CounterCell[] as; 
 	long b, s;
@@ -368,9 +417,11 @@ private final void addCount(long x, int check) {
 		Node<K,V>[] tab, nt; 
 		int n, sc;
 		
-		// 检查当前集合元素个数 s 是否达到扩容阈值 sizeCtl ，扩容时 sizeCtl 为负数，依旧成立，同时还得满足数组非空且
-		// 数组长度不能大于允许的数组最大长度这两个条件才能继续。。这个 while 循环除了判断是否达到阈值从而进行扩容操作
-		// 之外还有一个作用就是当一条线程完成自己的迁移任务后，如果集合还在扩容，则会继续循环，继续加入扩容大军，申请后面的迁移任务
+		/**
+		 * 检查当前集合元素个数s是否达到扩容阈值 sizeCtl，扩容时sizeCtl为负数，依旧成立，同时还得满足数组非空且数组长度不能大于允许的数组最大长度.
+		 * 这个while循环除了判断是否达到阈值从而进行扩容操作之外还有一个作用就是当一条线程完成自己的迁移任务后，如果集合还在扩容，则会继续循环，继
+		 * 续加入扩容大军，申请后面的迁移任务。
+		 */
 		while (s >= (long)(sc = sizeCtl) && (tab = table) != null && (n = tab.length) < MAXIMUM_CAPACITY) {
 			
 			int rs = resizeStamp(n);
@@ -383,13 +434,15 @@ private final void addCount(long x, int check) {
 					break;
 				}
 				
-				// 扩容还未结束，并且允许扩容线程加入，此时加入扩容大军中
+				// 扩容还未结束，并且允许扩容线程加入，此时加入扩容大军中.
 				if (U.compareAndSwapInt(this, SIZECTL, sc, sc + 1)) {
 					transfer(tab, nt);
 				}
 				
-			// 如果集合还未处于扩容状态中，则进入扩容方法，并首先初始化 nextTab 数组，也就是新数组。(rs << RESIZE_STAMP_SHIFT) + 2 为首个扩容线程所设置的特定值，
-			// 后面扩容时会根据线程是否为这个值来确定是否为最后一个线程。
+			/**
+			 * 如果集合还未处于扩容状态中，则进入扩容方法，并首先初始化nextTab数组，也就是新数组。(rs << RESIZE_STAMP_SHIFT) + 2为首个扩容线程所设置的特定值，
+			 * 后面扩容时会根据线程是否为这个值来确定是否为最后一个线程。
+			 */
 			} else if (U.compareAndSwapInt(this, SIZECTL, sc, (rs << RESIZE_STAMP_SHIFT) + 2)) {
 				transfer(tab, null);
 			}
@@ -498,57 +551,111 @@ private final void fullAddCount(long x, boolean wasUncontended) {
 	}
 }
 
+
+
 /**
- *
+ * https://blog.csdn.net/ZOKEKAI/article/details/90051567
  */
 private final void transfer(Node<K,V>[] tab, Node<K,V>[] nextTab) {
 	int n = tab.length, stride;
 	
+	
+	/**
+	 * NCPU：获取计算机的CPU核数。
+	 * 
+	 * 计算每条线程处理的桶个数，每条线程处理的桶数量一样，如果CPU为单核，则使用一条线程处理所有桶。每条线程至少处理16个桶，
+	 * 如果计算出来的结果少于16，则一条线程处理16个桶。
+	 */
 	if ((stride = (NCPU > 1) ? (n >>> 3) / NCPU : n) < MIN_TRANSFER_STRIDE) {
 		stride = MIN_TRANSFER_STRIDE;
 	}
+	
+	/**
+	 * 初始化新数组(原数组长度的2倍)。nextTab为新数组。
+	 */
 	if (nextTab == null) {           
 		try {
 			Node<K,V>[] nt = (Node<K,V>[])new Node<?,?>[n << 1];
 			nextTab = nt;
-		} catch (Throwable ex) {      // try to cope with OOME
+		} catch (Throwable ex) { 
 			sizeCtl = Integer.MAX_VALUE;
 			return;
 		}
 		nextTable = nextTab;
+		
+		//将transferIndex指向最右边的桶，也就是数组索引下标最大的位置。
 		transferIndex = n;
 	}
+	
+	/**
+	 * 新建一个占位对象，该占位对象的hash值为-1该占位对象存在时表示集合正在扩容状态，key、value、next 属性均为null，nextTable属性指向扩容后
+	 * 的数组该占位对象主要有两个用途：
+	 *		1、占位作用，用于标识数组该位置的桶已经迁移完毕，处于扩容中的状态。
+	 *		2、作为一个转发的作用，扩容期间如果遇到查询操作，遇到转发节点，会把该查询操作转发到新的数组上去，不会阻塞查询操作。
+	 */
 	int nextn = nextTab.length;
 	ForwardingNode<K,V> fwd = new ForwardingNode<K,V>(nextTab);
+	
+	// 该标识用于控制是否继续处理下一个桶，为true则表示已经处理完当前桶，可以继续迁移下一个桶的数据。
 	boolean advance = true;
+	
+	// 该标识用于控制扩容何时结束，该标识还有一个用途是最后一个扩容线程会负责重新检查一遍数组查看是否有遗漏的桶
 	boolean finishing = false; 
+	
+	
+	/**
+	 * 这个循环用于处理一个stride长度的任务，i后面会被赋值为该stride内最大的下标，而bound后面会被赋值为该stride内最小的下标。通过循环不断减小i的值，
+	 * 从右往左依次迁移桶上面的数据，直到i小于bound时结束该次长度为stride的迁移任务。结束这次的任务后会通过外层addCount、helpTransfer、tryPresize
+	 * 方法的 while 循环达到继续领取其他任务的效果。
+	 */
 	for (int i = 0, bound = 0;;) {
 		Node<K,V> f; int fh;
+		
 		while (advance) {
 			int nextIndex, nextBound;
+			
+			// 每处理完一个hash桶就将bound进行减1操作。
 			if (--i >= bound || finishing) {
 				advance = false;
+			
+			
+			// transferIndex<= 0说明数组的hash桶已被线程分配完毕，没有了待分配的hash桶，将i设置为-1，后面的代码根据这个数值退出当前线的扩容操作。
 			} else if ((nextIndex = transferIndex) <= 0) {
 				i = -1;
 				advance = false;
+			
+			
+			//只有首次进入for循环才会进入这个判断里面去，设置bound和i的值，也就是领取到的迁移任务的数组区间。
 			} else if (U.compareAndSwapInt(this, TRANSFERINDEX, nextIndex, nextBound = (nextIndex > stride ? nextIndex - stride : 0))) {
 				bound = nextBound;
 				i = nextIndex - 1;
 				advance = false;
 			}
 		}
+		
 		if (i < 0 || i >= n || i + n >= nextn) {
 			int sc;
+			
+			// 扩容结束后做后续工作，将nextTable设置为null，表示扩容已结束，将table指向新数组，sizeCtl设置为扩容阈值。
 			if (finishing) {
 				nextTable = null;
 				table = nextTab;
 				sizeCtl = (n << 1) - (n >>> 1);
 				return;
 			}
+			
+			// 每当一条线程扩容结束就会更新一次sizeCtl的值，进行减1操作。
 			if (U.compareAndSwapInt(this, SIZECTL, sc = sizeCtl, sc - 1)) {
+			
+				// (sc - 2) != resizeStamp(n) << RESIZE_STAMP_SHIFT 成立，说明该线程不是扩容大军里面的最后一条线程，直接return回到上层while循环
 				if ((sc - 2) != resizeStamp(n) << RESIZE_STAMP_SHIFT) {
 					return;
 				}
+				
+				//(sc - 2) == resizeStamp(n) << RESIZE_STAMP_SHIFT 说明这条线程是最后一条扩容线程
+                //之所以能用这个来判断是否是最后一条线程，因为第一条扩容线程进行了如下操作：
+                //    U.compareAndSwapInt(this, SIZECTL, sc, (rs << RESIZE_STAMP_SHIFT) + 2)
+                //除了修改结束标识之外，还得设置 i = n; 以便重新检查一遍数组，防止有遗漏未成功迁移的桶
 				finishing = advance = true;
 				i = n;
 			}
@@ -630,6 +737,10 @@ private final void transfer(Node<K,V>[] tab, Node<K,V>[] nextTab) {
 		}
 	}
 }
+
+
+
+
 
 
 ##################################   get过程。  ########################################

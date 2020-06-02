@@ -1,9 +1,21 @@
-主要方法是：
-	await()和await*()：方法，让当前线程进入等待状态，并且释放锁。
-	signal：把线程唤起，如果等待队列中没有线程，直接获取锁，并执行；如果有等待队列，把当前节点放在等待队列之后。
+一、介绍
+	Condition：Condition对象是依赖于Lock对象的。在Lock接口中都要一个Condition newCondition()方法用于获取一个Condition实例。Condition与lock的关系有点类似于
+		Synchronized与Object的await、notify。
+		如果没有上锁就使用condition.await()也会报IllegalMonitorStateException异常和Synchronized很类似。
+
+	主要方法是：
+		await()和await*()：方法，让当前线程进入等待状态，并且释放锁。
+		signal：把线程唤起，如果等待队列中没有线程，直接获取锁，并执行；如果有等待队列，把当前节点放在等待队列之后。
 	
 
+	
+	
+/**
+ *
+ */
+location：AbstractQueuedSynchronizer.ConditionObject
 public class ConditionObject implements Condition, java.io.Serializable {
+	
 	private static final long serialVersionUID = 1173984872572414699L;
 	
 	// 头队列
@@ -12,17 +24,67 @@ public class ConditionObject implements Condition, java.io.Serializable {
 	// 尾队列
 	private transient Node lastWaiter;
 
-	public ConditionObject() { }
+	public ConditionObject() {
+	}
 
 	/**
-	 * 向等待队列中添加一个节点。
+	 * 实现可中断条件等待。
+	 */
+	public final void await() throws InterruptedException {
+		// 判断线程是否被中断了
+		if (Thread.interrupted()) {
+			throw new InterruptedException();
+		}
+		
+		/**
+		 * 向等待尾部队列中添加一个节点。
+		 */
+		Node node = addConditionWaiter();
+		
+		/**
+		 * 释放独占锁，并返回同步器的状态。【只有获取锁的节点才能进入await方法】
+		 */
+		int savedState = fullyRelease(node);
+		
+		
+		int interruptMode = 0;
+		
+		/**
+		 * 什么时候进入While。
+		 */
+		while (!isOnSyncQueue(node)) {
+			/** 
+			 * 挂起当前线程。
+			 */
+			LockSupport.park(this);
+				
+			if ((interruptMode = checkInterruptWhileWaiting(node)) != 0) {
+				break;
+			}
+		}
+		
+		if (acquireQueued(node, savedState) && interruptMode != THROW_IE) {
+			interruptMode = REINTERRUPT;
+		}
+		
+		if (node.nextWaiter != null) {
+			unlinkCancelledWaiters();
+		}
+		
+		if (interruptMode != 0) {
+			reportInterruptAfterWait(interruptMode);
+		}
+	}
+	
+	/**
+	 * 向等待队列尾部中添加一个节点。
 	 * 初始化的时候，直接把创建的新节点赋值给头节点，这个时候头节点和尾节点是一个。
 	 * 如果初始化完成以后就把节点放到为节点上。
 	 */
 	private Node addConditionWaiter() {
 		Node t = lastWaiter;
 		
-		// 如果节点不是不是Condition状态，则从队列中删除。
+		// 如果尾节点不为空【并且】如果尾节点不是Condition状态  ===>  从队列中删除。
 		if (t != null && t.waitStatus != Node.CONDITION) {
 			unlinkCancelledWaiters();
 			t = lastWaiter;
@@ -31,7 +93,10 @@ public class ConditionObject implements Condition, java.io.Serializable {
 		// 创建一个状态为CONDITION的节点。
 		Node node = new Node(Thread.currentThread(), Node.CONDITION);
 		
-		// 向队列中添加节点。
+		/**
+		 * 如果尾节点为空，这把为节点设置为该节点，
+		 * 否则把尾节点的后继节点指向该节点。
+		 */
 		if (t == null) {
 			firstWaiter = node;
 		} else {
@@ -41,8 +106,27 @@ public class ConditionObject implements Condition, java.io.Serializable {
 		return node;
 	}
 
+	
 	/**
-	 * 删除并转移节点，直到命中不可取消的一个或为null。 从信号中分离出来，部分鼓励编译器内联没有服务员的情况。
+	 * 将等待时间最长的线程（如果存在）从该条件的等待队列移至拥有锁的等待队列。
+	 */
+	public final void signal() {
+		// isHeldExclusively：同步器的当前线程是否保持着独占模式。
+		if (!isHeldExclusively()) (
+			throw new IllegalMonitorStateException();
+		}
+		
+		// 获取头节点。
+		Node first = firstWaiter;
+		
+		if (first != null) {
+			doSignal(first);
+		}
+	}
+
+	
+	/**
+	 * 删除并转移节点，直到命中不可取消的一个或为null。从信号中分离出来，部分鼓励编译器内联没有服务员的情况。
 	 */
 	private void doSignal(Node first) {
 		do {
@@ -72,6 +156,7 @@ public class ConditionObject implements Condition, java.io.Serializable {
 		}
         return true;
     }
+	
 
 	/**
 	 * 
@@ -120,31 +205,8 @@ public class ConditionObject implements Condition, java.io.Serializable {
 		}
 	}
 
-	 
-	/**
-	 * 将等待时间最长的线程（如果存在）从该条件的等待队列移至拥有锁的等待队列。
-	 */
-	public final void signal() {
-		// isHeldExclusively：同步器的当前线程是否保持着独占模式。
-		if (!isHeldExclusively()) (
-			throw new IllegalMonitorStateException();
-		}
-		
-		// 获取头节点。
-		Node first = firstWaiter;
-		
-		if (first != null) {
-			doSignal(first);
-		}
-	}
+	
 
-	/**
-	 * Moves all threads from the wait queue for this condition to
-	 * the wait queue for the owning lock.
-	 *
-	 * @throws IllegalMonitorStateException if {@link #isHeldExclusively}
-	 *         returns {@code false}
-	 */
 	public final void signalAll() {
 		if (!isHeldExclusively())
 			throw new IllegalMonitorStateException();
@@ -173,16 +235,10 @@ public class ConditionObject implements Condition, java.io.Serializable {
 			selfInterrupt();
 	}
 
-	/*
-	 * For interruptible waits, we need to track whether to throw
-	 * InterruptedException, if interrupted while blocked on
-	 * condition, versus reinterrupt current thread, if
-	 * interrupted while blocked waiting to re-acquire.
-	 */
 
-	/** Mode meaning to reinterrupt on exit from wait */
 	private static final int REINTERRUPT =  1;
-	/** Mode meaning to throw InterruptedException on exit from wait */
+
+	
 	private static final int THROW_IE    = -1;
 
 	/**
@@ -205,70 +261,9 @@ public class ConditionObject implements Condition, java.io.Serializable {
 			selfInterrupt();
 	}
 
-	/**
-	 * 实现可中断条件等待。
-	 */
-	public final void await() throws InterruptedException {
-		// 判断线程是否被中断了
-		if (Thread.interrupted()) {
-			throw new InterruptedException();
-		}
-		
-		// 向等待队列中添加一个节点。
-		Node node = addConditionWaiter();
-		
-		// 只有获取锁的节点才能进入await方法，
-		// 释放独占锁，并返回同步器的状态
-		int savedState = fullyRelease(node);
-		
-		int interruptMode = 0;
-		
-		while (!isOnSyncQueue(node)) {
-			// 挂起当前线程。
-			LockSupport.park(this);
-			
-			
-			if ((interruptMode = checkInterruptWhileWaiting(node)) != 0) {
-				break;
-			}
-		}
-		
-		if (acquireQueued(node, savedState) && interruptMode != THROW_IE) {
-			interruptMode = REINTERRUPT;
-		}
-		
-		if (node.nextWaiter != null) {
-			unlinkCancelledWaiters();
-		}
-		
-		if (interruptMode != 0) {
-			reportInterruptAfterWait(interruptMode);
-		}
-	}
 	
-	/**
-	 * 释放独占锁。并返回同步器的状态。
-	 */
-	location：AbstractQueuedSynchronizer
-	final int fullyRelease(Node node) {
-        boolean failed = true;
-        try {
-			// 获取同步器的状态。
-            int savedState = getState();
-			
-			// 释放独占锁。
-            if (release(savedState)) {
-                failed = false;
-                return savedState;
-            } else {
-                throw new IllegalMonitorStateException();
-            }
-        } finally {
-            if (failed) {
-                node.waitStatus = Node.CANCELLED;
-			}
-        }
-    }
+	
+	
 	
 	/**
 	 * 
@@ -284,19 +279,7 @@ public class ConditionObject implements Condition, java.io.Serializable {
         return findNodeFromTail(node);
     }
 
-	/**
-	 * Implements timed condition wait.
-	 * <ol>
-	 * <li> If current thread is interrupted, throw InterruptedException.
-	 * <li> Save lock state returned by {@link #getState}.
-	 * <li> Invoke {@link #release} with saved state as argument,
-	 *      throwing IllegalMonitorStateException if it fails.
-	 * <li> Block until signalled, interrupted, or timed out.
-	 * <li> Reacquire by invoking specialized version of
-	 *      {@link #acquire} with saved state as argument.
-	 * <li> If interrupted while blocked in step 4, throw InterruptedException.
-	 * </ol>
-	 */
+
 	public final long awaitNanos(long nanosTimeout)
 			throws InterruptedException {
 		if (Thread.interrupted())
@@ -385,26 +368,11 @@ public class ConditionObject implements Condition, java.io.Serializable {
 		return !timedout;
 	}
 
-	//  support for instrumentation
 
-	/**
-	 * Returns true if this condition was created by the given
-	 * synchronization object.
-	 *
-	 * @return {@code true} if owned
-	 */
 	final boolean isOwnedBy(AbstractQueuedSynchronizer sync) {
 		return sync == AbstractQueuedSynchronizer.this;
 	}
 
-	/**
-	 * Queries whether any threads are waiting on this condition.
-	 * Implements {@link AbstractQueuedSynchronizer#hasWaiters(ConditionObject)}.
-	 *
-	 * @return {@code true} if there are any waiting threads
-	 * @throws IllegalMonitorStateException if {@link #isHeldExclusively}
-	 *         returns {@code false}
-	 */
 	protected final boolean hasWaiters() {
 		if (!isHeldExclusively())
 			throw new IllegalMonitorStateException();
@@ -415,15 +383,7 @@ public class ConditionObject implements Condition, java.io.Serializable {
 		return false;
 	}
 
-	/**
-	 * Returns an estimate of the number of threads waiting on
-	 * this condition.
-	 * Implements {@link AbstractQueuedSynchronizer#getWaitQueueLength(ConditionObject)}.
-	 *
-	 * @return the estimated number of waiting threads
-	 * @throws IllegalMonitorStateException if {@link #isHeldExclusively}
-	 *         returns {@code false}
-	 */
+
 	protected final int getWaitQueueLength() {
 		if (!isHeldExclusively())
 			throw new IllegalMonitorStateException();
@@ -435,15 +395,7 @@ public class ConditionObject implements Condition, java.io.Serializable {
 		return n;
 	}
 
-	/**
-	 * Returns a collection containing those threads that may be
-	 * waiting on this Condition.
-	 * Implements {@link AbstractQueuedSynchronizer#getWaitingThreads(ConditionObject)}.
-	 *
-	 * @return the collection of threads
-	 * @throws IllegalMonitorStateException if {@link #isHeldExclusively}
-	 *         returns {@code false}
-	 */
+
 	protected final Collection<Thread> getWaitingThreads() {
 		if (!isHeldExclusively())
 			throw new IllegalMonitorStateException();
@@ -456,5 +408,67 @@ public class ConditionObject implements Condition, java.io.Serializable {
 			}
 		}
 		return list;
+	}
+}
+
+
+/**
+ * 释放独占锁。并返回同步器的状态。
+ */
+location：AbstractQueuedSynchronizer
+final int fullyRelease(Node node) {
+	boolean failed = true;
+	try {
+		// 获取同步器的状态。
+		int savedState = getState();
+		
+		// 释放独占锁。
+		if (release(savedState)) {
+			failed = false;
+			return savedState;
+		} else {
+			throw new IllegalMonitorStateException();
+		}
+	} finally {
+		if (failed) {
+			node.waitStatus = Node.CANCELLED;
+		}
+	}
+}
+
+
+/**
+ *
+ */
+location：AbstractQueuedSynchronizer
+final boolean isOnSyncQueue(Node node) {
+	if (node.waitStatus == Node.CONDITION || node.prev == null) {
+		return false;
+	}
+	
+	if (node.next != null) {
+		return true;
+	}
+	
+	return findNodeFromTail(node);
+}
+
+
+/**
+ *
+ */
+location：AbstractQueuedSynchronizer
+private boolean findNodeFromTail(Node node) {
+	Node t = tail;
+	for (;;) {
+		if (t == node) {
+			return true;
+		}
+		
+		if (t == null) {
+			return false;
+		}
+		
+		t = t.prev;
 	}
 }
