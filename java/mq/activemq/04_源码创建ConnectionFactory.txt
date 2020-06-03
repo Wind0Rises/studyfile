@@ -1,0 +1,78 @@
+
+
+
+
+
+三、源码
+/**
+ *
+ */
+location：ActiveMQConnectionFactory
+public ActiveMQConnectionFactory(String brokerURL) {
+	this(createURI(brokerURL));
+}
+
+/**
+ *
+ */
+location：ActiveMQConnectionFactory
+public ActiveMQConnectionFactory(URI brokerURL) {
+	setBrokerURL(brokerURL.toString());
+}
+
+/**
+ *
+ */
+location：ActiveMQConnectionFactory
+public void setBrokerURL(String brokerURL) {
+	this.brokerURL = createURI(brokerURL);
+
+	if (this.brokerURL.getQuery() != null) {
+		try {
+			Map<String,String> map = URISupport.parseQuery(this.brokerURL.getQuery());
+			Map<String,Object> jmsOptionsMap = IntrospectionSupport.extractProperties(map, "jms.");
+			if (buildFromMap(jmsOptionsMap)) {
+				if (!jmsOptionsMap.isEmpty()) {
+					String msg = "There are " + jmsOptionsMap.size() + " jms options that couldn't be set on the ConnectionFactory."
+						+ " Check the options are spelled correctly." + " Unknown parameters=[" + jmsOptionsMap + "]." + " This connection factory cannot be started.";
+					throw new IllegalArgumentException(msg);
+				}
+
+				this.brokerURL = URISupport.createRemainingURI(this.brokerURL, map);
+			}
+
+		} catch (URISyntaxException e) {
+		
+		}
+
+	} else {
+
+		try {
+			CompositeData data = URISupport.parseComposite(this.brokerURL);
+			Map<String,Object> jmsOptionsMap = IntrospectionSupport.extractProperties(data.getParameters(), "jms.");
+			
+			if (buildFromMap(jmsOptionsMap)) {
+				if (!jmsOptionsMap.isEmpty()) {
+					String msg = "There are " + jmsOptionsMap.size() + " jms options that couldn't be set on the ConnectionFactory." + " Check the options are spelled correctly."
+						+ " Unknown parameters=[" + jmsOptionsMap + "]." + " This connection factory cannot be started.";
+					throw new IllegalArgumentException(msg);
+				}
+
+				this.brokerURL = data.toURI();
+			}
+		} catch (URISyntaxException e) {
+		}
+	}
+}
+
+/**
+ *
+ */
+location：ActiveMQConnectionFactory
+private static URI createURI(String brokerURL) {
+	try {
+		return new URI(brokerURL);
+	} catch (URISyntaxException e) {
+		throw (IllegalArgumentException)new IllegalArgumentException("Invalid broker URI: " + brokerURL).initCause(e);
+	}
+}

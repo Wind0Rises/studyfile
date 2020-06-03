@@ -3,3 +3,30 @@
 
 
 一、Session的事务与模式。
+	1、开启事务，
+		如果开启使用的话，acknowledgeMode的模式只有一个SESSION_TRANSACTED。
+		开启事务以后需要手动commit.
+		
+	2、如果不开启事务
+		AUTO_ACKNOWLEDGE：自动确认
+		CLIENT_ACKNOWLEDGE：客户端确认
+		DUPS_OK_ACKNOWLEDGE：批量确认。
+		
+		
+	
+二、异步和同步
+	1、异步发送消息，消息丢失。
+		由于消息不阻塞，生产者会认为所有send的消息均被成功发送至MQ。如果服务端突然宕机，此时生产者端内存中尚未被发送至MQ的消息都会丢失。如何保证数据被
+		成功写入队列中，可以在生产者发送数据时，指定回调函数，实现AsyncCallback。
+		
+		
+		
+三、数据
+	* 非持久数据保存在内存中，但是当内部不足时，activemq会把非持久消息写入临时文件中，以腾出空间。
+	* 持久化数据保存在文件或者数据库中。
+	* 当activemq宕机重启时，activemq会把临时文件删除，并把持久文件中的消息从文件中恢复。
+
+
+四、Topic和Queue
+	Queue：特点是能够保证数据安全。
+	Topic：可能造成数据丢失。

@@ -1,0 +1,49 @@
+
+
+
+/**
+ *
+ */
+location：ActiveMQConnection
+public Session createSession(boolean transacted, int acknowledgeMode) throws JMSException {
+	checkClosedOrFailed();
+	ensureConnectionInfoSent();
+	
+	if (!transacted) {
+		if (acknowledgeMode == Session.SESSION_TRANSACTED) {
+			throw new JMSException("acknowledgeMode SESSION_TRANSACTED cannot be used for an non-transacted Session");
+		} else if (acknowledgeMode < Session.SESSION_TRANSACTED || acknowledgeMode > ActiveMQSession.MAX_ACK_CONSTANT) {
+			throw new JMSException("invalid acknowledgeMode: " + acknowledgeMode + ". Valid values are Session.AUTO_ACKNOWLEDGE (1), " + "Session.CLIENT_ACKNOWLEDGE (2), Session.DUPS_OK_ACKNOWLEDGE (3), ActiveMQSession.INDIVIDUAL_ACKNOWLEDGE (4) or for transacted sessions Session.SESSION_TRANSACTED (0)");
+		}
+	}
+	
+	return new ActiveMQSession(this, getNextSessionId(), transacted ? Session.SESSION_TRANSACTED : acknowledgeMode, isDispatchAsync(), isAlwaysSessionAsync());
+}
+
+/**
+ *
+ */
+location：ActiveMQSession
+protected ActiveMQSession(ActiveMQConnection connection, SessionId sessionId, int acknowledgeMode, boolean asyncDispatch, boolean sessionAsyncDispatch) throws JMSException {
+	this.debug = LOG.isDebugEnabled();
+	this.connection = connection;
+	this.acknowledgementMode = acknowledgeMode;
+	this.asyncDispatch = asyncDispatch;
+	this.sessionAsyncDispatch = sessionAsyncDispatch;
+	
+	this.info = new SessionInfo(connection.getConnectionInfo(), sessionId.getValue());
+	
+	setTransactionContext(new TransactionContext(connection));
+	
+	stats = new JMSSessionStatsImpl(producers, consumers);
+	this.connection.asyncSendPacket(info);
+	setTransformer(connection.getTransformer());
+	setBlobTransferPolicy(connection.getBlobTransferPolicy());
+	this.connectionExecutor=connection.getExecutor();
+	this.executor = new ActiveMQSessionExecutor(this);
+	connection.addSession(this);
+	if (connection.isStarted()) {
+		start();
+	}
+
+}

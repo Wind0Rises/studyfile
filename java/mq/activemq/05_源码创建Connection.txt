@@ -1,0 +1,312 @@
+
+
+
+三、源码
+/**
+ *
+ */
+location：ActiveMQConnectionFactory
+public Connection createConnection() throws JMSException {
+	return createActiveMQConnection();
+}
+
+/**
+ *
+ */
+location：ActiveMQConnectionFactory
+protected ActiveMQConnection createActiveMQConnection() throws JMSException {
+	return createActiveMQConnection(userName, password);
+}
+
+/**
+ *
+ */
+location：ActiveMQConnectionFactory
+protected ActiveMQConnection createActiveMQConnection(String userName, String password) throws JMSException {
+	if (brokerURL == null) {
+		throw new ConfigurationException("brokerURL not set.");
+	}
+	
+	ActiveMQConnection connection = null;
+	try {
+	
+		/**
+		 * 创建Transport。
+		 */
+		Transport transport = createTransport();
+		
+		
+		/**
+		 * JMSStatsImpl factoryStats = new JMSStatsImpl();
+		 */
+		connection = createActiveMQConnection(transport, factoryStats);
+
+		
+		/**
+		 * 设置用户名，密码。
+		 */
+		connection.setUserName(userName);
+		connection.setPassword(password);
+
+		
+		/**
+		 * 配置Connection。
+		 */
+		configureConnection(connection);
+
+		transport.start();
+
+		if (clientID != null) {
+			connection.setDefaultClientID(clientID);
+		}
+
+		return connection;
+	} catch (JMSException e) {
+		try {
+			connection.close();
+		} catch (Throwable ignore) {
+		}
+		throw e;
+	} catch (Exception e) {
+		try {
+			connection.close();
+		} catch (Throwable ignore) {
+		}
+		throw JMSExceptionSupport.create("Could not connect to broker URL: " + brokerURL + ". Reason: " + e, e);
+	}
+}
+
+#############################################################
+#						01、创建transport					#
+#############################################################
+/**
+ * 创建Transport。
+ */
+location：ActiveMQConnectionFactory
+protected Transport createTransport() throws JMSException {
+	try {
+		URI connectBrokerUL = brokerURL;
+		String scheme = brokerURL.getScheme();
+		if (scheme == null) {
+			throw new IOException("Transport not scheme specified: [" + brokerURL + "]");
+		}
+		if (scheme.equals("auto")) {
+			connectBrokerUL = new URI(brokerURL.toString().replace("auto", "tcp"));
+		} else if (scheme.equals("auto+ssl")) {
+			connectBrokerUL = new URI(brokerURL.toString().replace("auto+ssl", "ssl"));
+		} else if (scheme.equals("auto+nio")) {
+			connectBrokerUL = new URI(brokerURL.toString().replace("auto+nio", "nio"));
+		} else if (scheme.equals("auto+nio+ssl")) {
+			connectBrokerUL = new URI(brokerURL.toString().replace("auto+nio+ssl", "nio+ssl"));
+		}
+
+		return TransportFactory.connect(connectBrokerUL);
+		
+	} catch (Exception e) {
+		throw JMSExceptionSupport.create("Could not create Transport. Reason: " + e, e);
+	}
+}
+
+/**
+ *
+ */
+location：TransportFactory
+public static Transport connect(URI location) throws Exception {
+	TransportFactory tf = findTransportFactory(location);
+	return tf.doConnect(location);
+}
+
+
+/**
+ *
+ */
+location：TransportFactory
+public static TransportFactory findTransportFactory(URI location) throws IOException {
+	String scheme = location.getScheme();
+	if (scheme == null) {
+		throw new IOException("Transport not scheme specified: [" + location + "]");
+	}
+	
+	TransportFactory tf = TRANSPORT_FACTORYS.get(scheme);
+	
+	if (tf == null) {
+		try {
+			tf = (TransportFactory)TRANSPORT_FACTORY_FINDER.newInstance(scheme);
+			TRANSPORT_FACTORYS.put(scheme, tf);
+		} catch (Throwable e) {
+			throw IOExceptionSupport.create("Transport scheme NOT recognized: [" + scheme + "]", e);
+		}
+	}
+	return tf;
+}
+
+/**
+ *
+ */
+location：TransportFactory
+public Transport doConnect(URI location) throws Exception {
+	try {
+		Map<String, String> options = new HashMap<String, String>(URISupport.parseParameters(location));
+		if( !options.containsKey("wireFormat.host") ) {
+			options.put("wireFormat.host", location.getHost());
+		}
+		WireFormat wf = createWireFormat(options);
+		Transport transport = createTransport(location, wf);
+		Transport rc = configure(transport, wf, options);
+		IntrospectionSupport.extractProperties(options, "auto.");
+
+		if (!options.isEmpty()) {
+			throw new IllegalArgumentException("Invalid connect parameters: " + options);
+		}
+		return rc;
+	} catch (URISyntaxException e) {
+		throw IOExceptionSupport.create(e);
+	}
+}
+
+
+
+
+
+#############################################################
+#						02、创建connection					#
+#############################################################
+/**
+ *
+ */
+location：ActiveMQConnectionFactory
+protected ActiveMQConnection createActiveMQConnection(Transport transport, JMSStatsImpl stats) throws Exception {
+	ActiveMQConnection connection = new ActiveMQConnection(transport, getClientIdGenerator(), getConnectionIdGenerator(), stats);
+	return connection;
+}
+
+/**
+ * 获取客户端ID生成器
+ */
+location：ActiveMQConnectionFactory
+protected synchronized IdGenerator getClientIdGenerator() {
+	if (clientIdGenerator == null) {
+		if (clientIDPrefix != null) {
+			clientIdGenerator = new IdGenerator(clientIDPrefix);
+		} else {
+			clientIdGenerator = new IdGenerator();
+		}
+	}
+	return clientIdGenerator;
+}
+
+/**
+ * 获取连接ID生成器
+ */
+location：ActiveMQConnectionFactory
+protected synchronized IdGenerator getConnectionIdGenerator() {
+	if (connectionIdGenerator == null) {
+		if (connectionIDPrefix != null) {
+			connectionIdGenerator = new IdGenerator(connectionIDPrefix);
+		} else {
+			connectionIdGenerator = new IdGenerator();
+		}
+	}
+	return connectionIdGenerator;
+}
+
+/**
+ *
+ */
+location：ActiveMQConnection
+protected ActiveMQConnection(final Transport transport, IdGenerator clientIdGenerator, IdGenerator connectionIdGenerator, JMSStatsImpl factoryStats) throws Exception {
+	/**
+	 * 设置Connection的transport、clientIdGenerator、factoryStats属性。
+	 */
+	this.transport = transport;
+	this.clientIdGenerator = clientIdGenerator;
+	this.factoryStats = factoryStats;
+
+	
+	/**
+	 * 创建线程池。
+	 */
+	executor = new ThreadPoolExecutor(1, 1, 5, TimeUnit.SECONDS, new LinkedBlockingQueue<Runnable>(), new ThreadFactory() {
+		@Override
+		public Thread newThread(Runnable r) {
+			Thread thread = new Thread(r, "ActiveMQ Connection Executor: " + transport);
+			return thread;
+		}
+	});
+	
+	String uniqueId = connectionIdGenerator.generateId();
+	this.info = new ConnectionInfo(new ConnectionId(uniqueId));
+	this.info.setManageable(true);
+	this.info.setFaultTolerant(transport.isFaultTolerant());
+	this.connectionSessionId = new SessionId(info.getConnectionId(), -1);
+
+	this.transport.setTransportListener(this);
+
+	this.stats = new JMSConnectionStatsImpl(sessions, this instanceof XAConnection);
+	this.factoryStats.addConnection(this);
+	this.timeCreated = System.currentTimeMillis();
+	this.connectionAudit.setCheckForDuplicates(transport.isFaultTolerant());
+}
+
+
+
+
+
+#############################################################
+#						03、配置connection					#
+#############################################################
+protected void configureConnection(ActiveMQConnection connection) throws JMSException {
+	connection.setPrefetchPolicy(getPrefetchPolicy());
+	connection.setDisableTimeStampsByDefault(isDisableTimeStampsByDefault());
+	connection.setOptimizedMessageDispatch(isOptimizedMessageDispatch());
+	connection.setCopyMessageOnSend(isCopyMessageOnSend());
+	connection.setUseCompression(isUseCompression());
+	connection.setObjectMessageSerializationDefered(isObjectMessageSerializationDefered());
+	connection.setDispatchAsync(isDispatchAsync());
+	connection.setUseAsyncSend(isUseAsyncSend());
+	connection.setAlwaysSyncSend(isAlwaysSyncSend());
+	connection.setAlwaysSessionAsync(isAlwaysSessionAsync());
+	connection.setOptimizeAcknowledge(isOptimizeAcknowledge());
+	connection.setOptimizeAcknowledgeTimeOut(getOptimizeAcknowledgeTimeOut());
+	connection.setOptimizedAckScheduledAckInterval(getOptimizedAckScheduledAckInterval());
+	connection.setUseRetroactiveConsumer(isUseRetroactiveConsumer());
+	connection.setExclusiveConsumer(isExclusiveConsumer());
+	connection.setRedeliveryPolicyMap(getRedeliveryPolicyMap());
+	connection.setTransformer(getTransformer());
+	connection.setBlobTransferPolicy(getBlobTransferPolicy().copy());
+	connection.setWatchTopicAdvisories(isWatchTopicAdvisories());
+	connection.setProducerWindowSize(getProducerWindowSize());
+	connection.setWarnAboutUnstartedConnectionTimeout(getWarnAboutUnstartedConnectionTimeout());
+	connection.setSendTimeout(getSendTimeout());
+	connection.setCloseTimeout(getCloseTimeout());
+	connection.setSendAcksAsync(isSendAcksAsync());
+	connection.setAuditDepth(getAuditDepth());
+	connection.setAuditMaximumProducerNumber(getAuditMaximumProducerNumber());
+	connection.setUseDedicatedTaskRunner(isUseDedicatedTaskRunner());
+	connection.setConsumerFailoverRedeliveryWaitPeriod(getConsumerFailoverRedeliveryWaitPeriod());
+	connection.setCheckForDuplicates(isCheckForDuplicates());
+	connection.setMessagePrioritySupported(isMessagePrioritySupported());
+	connection.setTransactedIndividualAck(isTransactedIndividualAck());
+	connection.setNonBlockingRedelivery(isNonBlockingRedelivery());
+	connection.setMaxThreadPoolSize(getMaxThreadPoolSize());
+	connection.setSessionTaskRunner(getSessionTaskRunner());
+	connection.setRejectedTaskHandler(getRejectedTaskHandler());
+	connection.setNestedMapAndListEnabled(isNestedMapAndListEnabled());
+	connection.setRmIdFromConnectionId(isRmIdFromConnectionId());
+	connection.setConsumerExpiryCheckEnabled(isConsumerExpiryCheckEnabled());
+	connection.setTrustedPackages(getTrustedPackages());
+	connection.setTrustAllPackages(isTrustAllPackages());
+	connection.setConnectResponseTimeout(getConnectResponseTimeout());
+	
+	if (transportListener != null) {
+		connection.addTransportListener(transportListener);
+	}
+	
+	if (exceptionListener != null) {
+		connection.setExceptionListener(exceptionListener);
+	}
+	
+	if (clientInternalExceptionListener != null) {
+		connection.setClientInternalExceptionListener(clientInternalExceptionListener);
+	}
+}

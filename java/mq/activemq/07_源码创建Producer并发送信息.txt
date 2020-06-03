@@ -1,0 +1,206 @@
+/**
+ *
+ */
+location：ActiveMQSession
+public MessageProducer createProducer(Destination destination) throws JMSException {
+	checkClosed();
+	
+	if (destination instanceof CustomDestination) {
+		CustomDestination customDestination = (CustomDestination)destination;
+		return customDestination.createProducer(this);
+	}
+	
+	int timeSendOut = connection.getSendTimeout();
+	
+	return new ActiveMQMessageProducer(this, getNextProducerId(), ActiveMQMessageTransformation.transformDestination(destination),timeSendOut);
+}
+
+/**
+ *
+ */
+location：ActiveMQMessageProducer
+protected ActiveMQMessageProducer(ActiveMQSession session, ProducerId producerId, ActiveMQDestination destination, int sendTimeout) throws JMSException {
+	super(session);
+	
+	this.info = new ProducerInfo(producerId);
+	this.info.setWindowSize(session.connection.getProducerWindowSize());
+	
+	if (destination != null && destination.getOptions() != null) {
+		Map<String, Object> options = IntrospectionSupport.extractProperties(new HashMap<String, Object>(destination.getOptions()), "producer.");
+		IntrospectionSupport.setProperties(this.info, options);
+		if (options.size() > 0) {
+			String msg = "There are " + options.size() + " producer options that couldn't be set on the producer." + " Check the options are spelled correctly."
+				+ " Unknown parameters=[" + options + "]." + " This producer cannot be started.";
+			LOG.warn(msg);
+			throw new ConfigurationException(msg);
+		}
+	}
+
+	this.info.setDestination(destination);
+
+	if (session.connection.getProtocolVersion() >= 3 && this.info.getWindowSize() > 0) {
+		producerWindow = new MemoryUsage("Producer Window: " + producerId);
+		producerWindow.setExecutor(session.getConnectionExecutor());
+		producerWindow.setLimit(this.info.getWindowSize());
+		producerWindow.start();
+	}
+
+	/**
+	 * DeliveryMode：默认为PERSISTENT
+	 * Priority：4
+	 * defaultTimeToLive：0
+	 */
+	this.defaultDeliveryMode = Message.DEFAULT_DELIVERY_MODE;
+	this.defaultPriority = Message.DEFAULT_PRIORITY;
+	this.defaultTimeToLive = Message.DEFAULT_TIME_TO_LIVE;
+	this.startTime = System.currentTimeMillis();
+	this.messageSequence = new AtomicLong(0);
+	this.stats = new JMSProducerStatsImpl(session.getSessionStats(), destination);
+	try {
+		this.session.addProducer(this);
+		this.session.syncSendPacket(info);
+	} catch (JMSException e) {
+		this.session.removeProducer(this);
+		throw e;
+	}
+	
+	this.setSendTimeout(sendTimeout);
+	setTransformer(session.getTransformer());
+}
+
+/**
+ *
+ */
+location：ActiveMQMessageProducerSupport
+public ActiveMQMessageProducerSupport(ActiveMQSession session) {
+    this.session = session;
+	disableMessageTimestamp = session.connection.isDisableTimeStampsByDefault();
+}
+
+
+/**
+ *
+ */
+location：ActiveMQMessageProducer
+public void send(Message message, AsyncCallback onComplete) throws JMSException {
+	this.send(this.getDestination(), message, this.defaultDeliveryMode, this.defaultPriority, this.defaultTimeToLive, onComplete);
+}
+
+
+
+#############################################################
+#						02、生产者发送消息					#
+#############################################################
+/**
+ *
+ */
+location：ActiveMQMessageProducer
+public void send(Destination destination, Message message, int deliveryMode, int priority, long timeToLive, AsyncCallback onComplete) throws JMSException {
+	checkClosed();
+	if (destination == null) {
+		if (info.getDestination() == null) {
+			throw new UnsupportedOperationException("A destination must be specified.");
+		}
+		throw new InvalidDestinationException("Don't understand null destinations");
+	}
+
+	ActiveMQDestination dest;
+	
+	if (destination.equals(info.getDestination())) {
+		dest = (ActiveMQDestination)destination;
+	} else if (info.getDestination() == null) {
+		dest = ActiveMQDestination.transform(destination);
+	} else {
+		throw new UnsupportedOperationException("This producer can only send messages to: " + this.info.getDestination().getPhysicalName());
+	}
+	if (dest == null) {
+		throw new JMSException("No destination specified");
+	}
+
+	if (transformer != null) {
+		Message transformedMessage = transformer.producerTransform(session, this, message);
+		if (transformedMessage != null) {
+			message = transformedMessage;
+		}
+	}
+
+	if (producerWindow != null) {
+		try {
+			producerWindow.waitForSpace();
+		} catch (InterruptedException e) {
+			throw new JMSException("Send aborted due to thread interrupt.");
+		}
+	}
+
+	this.session.send(this, dest, message, deliveryMode, priority, timeToLive, producerWindow, sendTimeout, onComplete);
+
+	stats.onMessage();
+}
+
+
+
+/**
+ *
+ */
+location：
+protected void send(ActiveMQMessageProducer producer, ActiveMQDestination destination, Message message, int deliveryMode, int priority, long timeToLive, MemoryUsage producerWindow, int sendTimeout, AsyncCallback onComplete) throws JMSException {
+
+	checkClosed();
+	if (destination.isTemporary() && connection.isDeleted(destination)) {
+		throw new InvalidDestinationException("Cannot publish to a deleted Destination: " + destination);
+	}
+	
+	synchronized (sendMutex) {
+		doStartTransaction();
+		TransactionId txid = transactionContext.getTransactionId();
+		long sequenceNumber = producer.getMessageSequence();
+
+		message.setJMSDeliveryMode(deliveryMode);
+		long expiration = 0L;
+		if (!producer.getDisableMessageTimestamp()) {
+			long timeStamp = System.currentTimeMillis();
+			message.setJMSTimestamp(timeStamp);
+			if (timeToLive > 0) {
+				expiration = timeToLive + timeStamp;
+			}
+		}
+		message.setJMSExpiration(expiration);
+		message.setJMSPriority(priority);
+		message.setJMSRedelivered(false);
+
+		ActiveMQMessage msg = ActiveMQMessageTransformation.transformMessage(message, connection);
+		msg.setDestination(destination);
+		msg.setMessageId(new MessageId(producer.getProducerInfo().getProducerId(), sequenceNumber));
+
+		if (msg != message) {
+			message.setJMSMessageID(msg.getMessageId().toString());
+			message.setJMSDestination(destination);
+		}
+		msg.setBrokerPath(null);
+
+		msg.setTransactionId(txid);
+		if (connection.isCopyMessageOnSend()) {
+			msg = (ActiveMQMessage)msg.copy();
+		}
+		msg.setConnection(connection);
+		msg.onSend();
+		msg.setProducerId(msg.getMessageId().getProducerId());
+		if (LOG.isTraceEnabled()) {
+			LOG.trace(getSessionId() + " sending message: " + msg);
+		}
+		if (onComplete==null && sendTimeout <= 0 && !msg.isResponseRequired() && !connection.isAlwaysSyncSend() && (!msg.isPersistent() || connection.isUseAsyncSend() || txid != null)) {
+			this.connection.asyncSendPacket(msg);
+			if (producerWindow != null) {
+				int size = msg.getSize();
+				producerWindow.increaseUsage(size);
+			}
+		} else {
+			if (sendTimeout > 0 && onComplete==null) {
+				this.connection.syncSendPacket(msg,sendTimeout);
+			}else {
+				this.connection.syncSendPacket(msg, onComplete);
+			}
+		}
+
+	}
+}
