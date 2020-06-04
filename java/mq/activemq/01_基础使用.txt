@@ -2,6 +2,40 @@
 管理页面为：8161
 
 
+
+事务、持久化、acknowledgeMode
+
+
+
+一、事务
+	1)、什么activeMQ事务？
+		1、事务是在生产者producer到broker或broker到consumer过程中同一个session中发生的，保证一条或者几条消息在发送过程中的原子性。
+		2、在支持事务的session中，producer发送message时在message中带有transaction ID。broker收到message后判断是否有transaction ID，如果有就把message保存在transaction store中，等待commit或者rollback的消息。
+		   所以ActiveMQ的事务是针对broker而不是producer的，不管session是否commit，broker都会收到message。如果producer发送模式选择了persistent（持久化），那么message过期后会进入死亡队列。在message进入死亡队
+		   列之前，ActiveMQ会删除message中的transaction ID，这样过期的message就不在事务中了，不会保存在transaction store中，会直接进入死亡队列。
+
+
+二、ActiveMQ中的多种Message
+	Message
+			TextMessage
+					ActiveMQTextMessage（继承ActiveMQMessage）
+			StreamMessage
+					ActiveMQStreamMessage（继承ActiveMQMessage）
+			MapMessage
+					ActiveMQMapMessage（继承ActiveMQMessage）
+			ObjectMessage
+					ActiveMQObjectMessage（继承ActiveMQMessage）
+			BytesMessage
+					ActiveMQBytesMessage（继承ActiveMQMessage）
+			Message
+					BlobMessage	
+							ActiveMQBlobMessage
+					
+					
+					
+					
+					
+			
 一、Session的事务与模式。
 	1、开启事务，
 		如果开启使用的话，acknowledgeMode的模式只有一个SESSION_TRANSACTED。
