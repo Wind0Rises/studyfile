@@ -13,7 +13,9 @@
 		2、在支持事务的session中，producer发送message时在message中带有transaction ID。broker收到message后判断是否有transaction ID，如果有就把message保存在transaction store中，等待commit或者rollback的消息。
 		   所以ActiveMQ的事务是针对broker而不是producer的，不管session是否commit，broker都会收到message。如果producer发送模式选择了persistent（持久化），那么message过期后会进入死亡队列。在message进入死亡队
 		   列之前，ActiveMQ会删除message中的transaction ID，这样过期的message就不在事务中了，不会保存在transaction store中，会直接进入死亡队列。
-
+		3、在消费端如果开启了事务，如果事务未提交，是可以接收到消息的，但是broker中的消息不会出队，只有消费端手动提交了事务，broker中的消息才会出队。
+		   
+		   
 
 二、ActiveMQ中的多种Message
 	Message
@@ -31,7 +33,12 @@
 					BlobMessage	
 							ActiveMQBlobMessage
 					
-					
+
+三、持久化
+	* 非持久数据保存在内存中，但是当内部不足时，activemq会把非持久消息写入临时文件中，以腾出空间。
+	* 持久化数据保存在文件或者数据库中。
+	* 当activemq宕机重启时，activemq会把临时文件删除，并把持久文件中的消息从文件中恢复。
+	* 如果未被消费的持久化数据在宕机以后，重启activeMQ的时候，那些未被消费的消息都会到Number Of Pending Messages中。
 					
 					
 					
@@ -56,9 +63,7 @@
 		
 		
 三、数据
-	* 非持久数据保存在内存中，但是当内部不足时，activemq会把非持久消息写入临时文件中，以腾出空间。
-	* 持久化数据保存在文件或者数据库中。
-	* 当activemq宕机重启时，activemq会把临时文件删除，并把持久文件中的消息从文件中恢复。
+	
 
 
 四、Topic和Queue

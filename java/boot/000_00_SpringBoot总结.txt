@@ -33,16 +33,57 @@
 
 	2)、自动配置的流程
 	
-		1、在启动类使用@SpringBootApplication注解，@SpringBootApplication注解是一个符合注解，其包含@SpringBootConfiguration和@EnableAutoConfiguration等。
-		2、@EnableAutoConfiguration注解也是一个派生注解，其中的关键功能由@Import提供，通过@Import导入AutoConfigurationImportSelector类，AutoConfigurationImportSelector的
-		   selectImports()中可以通过SpringFactoriesLoader.loadFactoryNames()扫描所有具有META-INF/spring.factories的jar包。spring-boot-autoconfigure-x.x.x.x.jar里就有一个这样
-		   的spring.factories文件。
+		1、在启动类使用@SpringBootApplication注解，@SpringBootApplication注解是一个复合注解，其包含@SpringBootConfiguration和@EnableAutoConfiguration等。
+		2、@EnableAutoConfiguration注解也是一个派生注解，其中的关键功能由@Import提供，通过@Import导入AutoConfigurationImportSelector类，在AbstractApplicationContext
+		   中的invokeBeanFactoryPostProcessors(beanFactory)方法里会调用AutoConfigurationImportSelector.AutoConfigurationGroup的process(...)方法。在这个方法中
+		   会通过SpringFactoriesLoader.loadFactoryNames()扫描所有具有META-INF/spring.factories的jar包中EnableAutoConfiguration对应的Bean。
 		3、在spring-boot-autoconfigure-x.x.x.x.jar里面的有一个spring.factories文件中配置各种的EnableAutoConfiguration对应的类。
 		4、spring会把spring.factories文件中的配置的类加载到spring容器中，但是这些EnableAutoConfigurac本上都是会使用@ConditionalOn*注解，当没有引入对应的包的
 		   时候是无法把对应的类加载到spring容器。EnableAutoConfiguration对应的类都是各个组件的配置类。【可以用redis、rabbit进行观察。】
 		5、这些不同组件的配置类会把其对应的配置导入到spring容器中。这些配置类通常会接口@ConditionalOn*，如果没有导入对应组件的jar包，就不会导入对应的配置。
 	
 	
+	
+	
 二、Spring Boot自动配置之ImportSelector	
 	ImportSelector的处理过程：ConfigurationClassPostProcessor
+	详情请看
 	
+	
+	
+	
+三、Spring Boot之spring-configuration-metadata.json、spring-autoconfigure-metadata.properties、additional-spring-configuration-metadata.json
+	1)：spring-configuration-metadata.json：这个配置的是对应@ConfigurationProperties注解配置的类，即是在application.yml中配置的信息。
+		1、举例
+			{
+				"name": "server",
+				"type": "org.springframework.boot.autoconfigure.web.ServerProperties",
+				"sourceType": "org.springframework.boot.autoconfigure.web.ServerProperties"
+			}
+		
+		2、名称为server，类型对应ServerProperties
+			
+		
+	2)：additional-spring-configuration-metadata.json：就是对应的配置的信息
+		1、举例
+			{
+				"name" : "server.display-name",
+				"type" : "java.lang.String",
+				"description" : "Display name of the application.",
+				"defaultValue" : "application",
+				"deprecation" : {
+					"replacement" : "server.servlet.application-display-name",
+					"level" : "error"
+				}
+			}
+		
+		2、如果你在application.yml中配置server.display-name。要求这个为String类型，对应的标签的描述、默认值等。
+		
+	3)：spring-autoconfigure-metadata.properties
+		1、举例	
+			org.springframework.boot.autoconfigure.data.jpa.JpaRepositoriesAutoConfiguration=
+			org.springframework.boot.autoconfigure.web.client.RestTemplateAutoConfiguration.AutoConfigureAfter=org.springframework.boot.autoconfigure.http.HttpMessageConvertersAutoConfiguration
+			org.springframework.boot.autoconfigure.data.cassandra.CassandraReactiveDataAutoConfiguration.ConditionalOnClass=com.datastax.driver.core.Cluster,reactor.core.publisher.Flux,org.springframework.data.cassandra.core.ReactiveCassandraTemplate
+			org.springframework.boot.autoconfigure.data.solr.SolrRepositoriesAutoConfiguration.ConditionalOnClass=org.apache.solr.client.solrj.SolrClient,org.springframework.data.solr.repository.SolrRepository
+			org.springframework.boot.autoconfigure.security.oauth2.client.servlet.OAuth2ClientAutoConfiguration.ConditionalOnWebApplication=SERVLET
+			org.springframework.boot.autoconfigure.web.servlet.error.ErrorMvcAutoConfiguration=
