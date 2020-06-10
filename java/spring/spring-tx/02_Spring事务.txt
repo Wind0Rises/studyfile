@@ -1,0 +1,207 @@
+
+
+
+
+PlatformTransactionManager
+			CallbackPreferringPlatformTransactionManager
+						WebSphereUowTransactionManager
+			AbstractPlatformTransactionManager
+						CciLocalTransactionManager
+						DataSourceTransactionManager【底层使用JDBC管理事务】
+						JtaTransactionManager
+									WebLogicJtaTransactionManager
+									WebSphereUowTransactionManager
+			ResourceTransactionManager
+						CciLocalTransactionManager
+						DataSourceTransactionManager
+						
+
+TransactionInterceptor 实现了 MethodInterceptor（Aop）
+
+
+
+NameMatchTransactionAttributeSource
+
+
+
+/**
+ * 
+ * 
+ */
+location：
+private RootBeanDefinition parseAttributeSource(Element attrEle, ParserContext parserContext) {
+	List<Element> methods = DomUtils.getChildElementsByTagName(attrEle, METHOD_ELEMENT);
+	ManagedMap<TypedStringValue, RuleBasedTransactionAttribute> transactionAttributeMap = new ManagedMap<TypedStringValue, RuleBasedTransactionAttribute>(methods.size());
+	transactionAttributeMap.setSource(parserContext.extractSource(attrEle));
+
+	for (Element methodEle : methods) {
+		String name = methodEle.getAttribute(METHOD_NAME_ATTRIBUTE);
+		TypedStringValue nameHolder = new TypedStringValue(name);
+		nameHolder.setSource(parserContext.extractSource(methodEle));
+
+		RuleBasedTransactionAttribute attribute = new RuleBasedTransactionAttribute();
+		String propagation = methodEle.getAttribute(PROPAGATION_ATTRIBUTE);
+		String isolation = methodEle.getAttribute(ISOLATION_ATTRIBUTE);
+		String timeout = methodEle.getAttribute(TIMEOUT_ATTRIBUTE);
+		String readOnly = methodEle.getAttribute(READ_ONLY_ATTRIBUTE);
+		
+		if (StringUtils.hasText(propagation)) {
+			attribute.setPropagationBehaviorName(RuleBasedTransactionAttribute.PREFIX_PROPAGATION + propagation);
+		}
+		
+		if (StringUtils.hasText(isolation)) {
+			attribute.setIsolationLevelName(RuleBasedTransactionAttribute.PREFIX_ISOLATION + isolation);
+		}
+		
+		if (StringUtils.hasText(timeout)) {
+			try {
+				attribute.setTimeout(Integer.parseInt(timeout));
+			} catch (NumberFormatException ex) {
+				parserContext.getReaderContext().error("Timeout must be an integer value: [" + timeout + "]", methodEle);
+			}
+		}
+		
+		if (StringUtils.hasText(readOnly)) {
+			attribute.setReadOnly(Boolean.valueOf(methodEle.getAttribute(READ_ONLY_ATTRIBUTE)));
+		}
+
+		List<RollbackRuleAttribute> rollbackRules = new LinkedList<RollbackRuleAttribute>();
+		
+		if (methodEle.hasAttribute(ROLLBACK_FOR_ATTRIBUTE)) {
+			String rollbackForValue = methodEle.getAttribute(ROLLBACK_FOR_ATTRIBUTE);
+			addRollbackRuleAttributesTo(rollbackRules,rollbackForValue);
+		}
+		
+		if (methodEle.hasAttribute(NO_ROLLBACK_FOR_ATTRIBUTE)) {
+			String noRollbackForValue = methodEle.getAttribute(NO_ROLLBACK_FOR_ATTRIBUTE);
+			addNoRollbackRuleAttributesTo(rollbackRules,noRollbackForValue);
+		}
+		
+		attribute.setRollbackRules(rollbackRules);
+
+		transactionAttributeMap.put(nameHolder, attribute);
+	}
+
+	RootBeanDefinition attributeSourceDefinition = new RootBeanDefinition(NameMatchTransactionAttributeSource.class);
+	attributeSourceDefinition.setSource(parserContext.extractSource(attrEle));
+	attributeSourceDefinition.getPropertyValues().add("nameMap", transactionAttributeMap);
+	return attributeSourceDefinition;
+}
+
+
+
+
+
+
+
+
+
+
+
+#####################################################
+#					02、调用过程					#
+#####################################################
+/**
+ *
+ */
+location：TransactionInterceptor
+public Object invoke(final MethodInvocation invocation) throws Throwable {
+	
+	// 获取目标类。
+	Class<?> targetClass = (invocation.getThis() != null ? AopUtils.getTargetClass(invocation.getThis()) : null);
+
+	return invokeWithinTransaction(invocation.getMethod(), targetClass, new InvocationCallback() {
+		@Override
+		public Object proceedWithInvocation() throws Throwable {
+			return invocation.proceed();
+		}
+	});
+}
+
+
+/**
+ *
+ */
+location：TransactionAspectSupport
+protected Object invokeWithinTransaction(Method method, Class<?> targetClass, final InvocationCallback invocation) throws Throwable {
+
+	final TransactionAttribute txAttr = getTransactionAttributeSource().getTransactionAttribute(method, targetClass);
+	final PlatformTransactionManager tm = determineTransactionManager(txAttr);
+	final String joinpointIdentification = methodIdentification(method, targetClass, txAttr);
+
+	if (txAttr == null || !(tm instanceof CallbackPreferringPlatformTransactionManager)) {
+		TransactionInfo txInfo = createTransactionIfNecessary(tm, txAttr, joinpointIdentification);
+		Object retVal = null;
+		try {
+			retVal = invocation.proceedWithInvocation();
+		} catch (Throwable ex) {
+			completeTransactionAfterThrowing(txInfo, ex);
+			throw ex;
+		}
+		finally {
+			cleanupTransactionInfo(txInfo);
+		}
+		commitTransactionAfterReturning(txInfo);
+		return retVal;
+	} else {
+		
+		try {
+			Object result = ((CallbackPreferringPlatformTransactionManager) tm).execute(txAttr, new TransactionCallback<Object>() {
+				@Override
+				public Object doInTransaction(TransactionStatus status) {
+					TransactionInfo txInfo = prepareTransactionInfo(tm, txAttr, joinpointIdentification, status);
+					try {
+						return invocation.proceedWithInvocation();
+					} catch (Throwable ex) {
+						if (txAttr.rollbackOn(ex)) {
+							if (ex instanceof RuntimeException) {
+								throw (RuntimeException) ex;
+							}
+							else {
+								throw new ThrowableHolderException(ex);
+							}
+						} else {
+							return new ThrowableHolder(ex);
+						}
+					} finally {
+						cleanupTransactionInfo(txInfo);
+					}
+				}
+			});
+
+			if (result instanceof ThrowableHolder) {
+				throw ((ThrowableHolder) result).getThrowable();
+			} else {
+				return result;
+			}
+		}
+		catch (ThrowableHolderException ex) {
+			throw ex.getCause();
+		}
+	}
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

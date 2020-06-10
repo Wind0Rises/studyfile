@@ -1,0 +1,70 @@
+并行：多个线程干的是一件事情。
+并发：多个线程干不同的事情。
+
+
+一、问题
+	1)、java8默认的参数有哪些。
+		-XX:InitialHeapSize=265766784 
+		-XX:MaxHeapSize=4252268544 
+		-XX:+PrintCommandLineFlags 
+		-XX:+UseCompressedClassPointers 
+		-XX:+UseCompressedOops 
+		-XX:-UseLargePagesIndividualAllocation 
+		-XX:+UseParallelGC
+		
+
+	2)、CMS和G1的区别。
+		1、CMS收集的流程【并发】
+			* 初始化标记（也会发生短暂的停顿）
+			* 并发标记（用户线程和CMS线程都在执行）
+			* 重新标记（在并发标记的时候，用户线程可能产生新的线程。短暂的停顿，非常短）
+			* 并发清理（用户线程和CMS线程都在执行）
+			* 并发重置
+			
+			优点：并发执行，停顿时间很多，
+			缺点：并发清理过程会产生垃圾碎片。
+			
+			
+		2、G1：Humongous
+			* 初始标识（）
+			* 并发标记
+			* 最终标记
+			* 筛选回收 (通过Region区块对回收价值和成本进行排序，根据用户所希望的GC时间进行回收。)
+			
+			优点；可预测停顿。G1除了追求停顿时间，还建立了可预测停顿时间模型，能让制定的M毫秒时间片段内，消耗在垃圾回收器上的时间不超过N毫秒。G1可以自己管理新生代和老年代
+			缺点：
+			
+			
+			
+		
+	3)、Parallel Scavenge收集器【java8默认收集器】
+		新生代采用复制算法、老年代采用标记-整理算法。
+		
+		
+		
+		
+	4)、你如何进行性能调优？
+		1、分析确认瓶颈。
+			 * 使用JDK自带的分析工具。
+				jinfo pid（可以用来查看正在运行的 java 应用程序的扩展参数，包括Java System属性和JVM命令行参数；也可以动态的修改正在运行的 JVM 一些参数）
+				jmap heap pid：产看内存使用情况。jmap -histo pid：查看堆中的实例对象的统计情况。jmap dump 
+				jstack option：检查死锁。
+				jvisualvm：windows下的图像化分析dump文件。
+				jhat 是Java堆分析工具。
+				可以使用-Xloggc:./gc.log保存dump文件，然后使用easyGC进行分析。
+			
+			
+		2、调优的目标
+			停顿时间：
+			调高吞吐量：垃圾回收的时间和占总时间的比例。
+			
+			
+		2、问题处理
+			* 判断是是否是代码的问题，比如有大量异常类的创建。
+			* 如果不是，进行对应的内存调优，比如调整堆内存大小、元空间的大小【诱发FullGC】、选择合适的垃圾回收期。
+			
+			
+		3、常见的问题
+			* 分配的空间太小了
+			
+		

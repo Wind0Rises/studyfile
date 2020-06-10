@@ -1,0 +1,48 @@
+
+
+一、面试
+	1、资源表示符【资源:操作:实例】
+		权限标识符的规则。
+	
+	
+	2、什么是shiro
+		* shiro是一个轻量级的安全管理框架、提供了认证、授权、加密、会话管理、与web集成、缓存等功能，
+		* 主要组件Subject、SecurityManager、Realm
+	
+	
+	3、Shiro的授权
+		1)、shiro可以提供基于角色授权、基于资源授权。
+		
+		2)、shiro提供的授权方式。
+			1、基于Shiro.xml配置：
+				/user/list.html = perms[item:edit]
+				/product/list.html = role[sys]
+				
+			2、基于注解
+				@RequiresPremissions("item:edit")
+				@RequiresRoles("")
+				@RequiresUser("")
+				@RequiresGuest
+				@RequiresAuthentication：用户认证通过以后才能访问
+				
+			3、基于shiro的jsp标签。
+				<shiro:hasPremission name="item:edit"></shiro:haspremission>		有指定权限时
+				<shiro:hasRole name=""></shiro:hasRole>								有指定角色时	
+				<shiro:hasAnyRoles name="sys,user"></shiro:hasAnyRoles>				有其中任意一个角色时
+				<shiro:lacksRole name=""></shiro:lacksRole>							没有指定角色时
+				<shiro:lacksPremission name=""></shiro:lacksPremission> 			没有指定权限时
+			
+	4、认证的流程
+		1、认证的时候会传入一个AuthenticationToken，保存用户信息，
+		2、从数据库获取用户的信息，一般是密码
+		3、构造一个AuthenticationInfo信息，里面保存用户数据库里的用户信息。
+		
+	5、授权流程
+		1、获取认证时保证在AuthenticationInfo中的用户信息。
+		2、从数据库中获取用户权限
+		3、构造并返回AuthorizationInfo信息。
+		
+	6、shiro的session管理
+	
+	
+	7、shiro的缓存管理。

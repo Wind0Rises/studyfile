@@ -1,1 +1,0 @@
-Condition：类似Object类的wait、notify()、notifyAll()操作。它提供了更加全面的功能，入wait(long time)等待时间的设置。

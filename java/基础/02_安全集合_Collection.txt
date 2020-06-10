@@ -11,6 +11,11 @@ CopyOnWriteArrayList：【在写的时候复制】内部使用ReetrantLock进行
 CopyOnWriteArraySet：
 
 
+
+/**
+ *
+ */
+location：CopyOnWriteArrayList
 public boolean addIfAbsent(E e) {
 	// 获取CopyOnWriteArrayList内部维护的数组。
 	Object[] snapshot = getArray();
@@ -21,6 +26,7 @@ public boolean addIfAbsent(E e) {
 /**
  * 判断给定元素，在CopyOnWriteArrayList中是否存在。如果存在返回元素在数组中的下标。
  */
+location：CopyOnWriteArrayList
 private static int indexOf(Object o, Object[] elements, int index, int fence) {
 	if (o == null) {
 		for (int i = index; i < fence; i++)

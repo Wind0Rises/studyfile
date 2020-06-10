@@ -72,5 +72,11 @@
 		#############################  
 		
 	
+	
 二、通知处理的流程。
+	@Order指定先后顺序，数字越小，优先级越高。
+	调用链是：AspectJAfterThrowingAdvice  --》 AspectJAfterReturningAdvice --》  AspectJAfterAdvice   ---》  AspectJMethodBeforeAdvice   ---》  AspectJAroundAdvice
+	实际处理过程：before  --》   around  --》   自己的业务信息   --》  around  --》  after   --》  afterReturning   --》  afterThrowing 
+	
+
 	

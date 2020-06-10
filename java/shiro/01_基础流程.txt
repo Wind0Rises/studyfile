@@ -1,9 +1,30 @@
+
+
+一、shiro的流程
+	1)、谁进行认证？
+		主体进行认证，
+
+
+
+
+二、认证流程
+
+
+
+三、授权流程
+	1、创建一个SecurityManager
+
+
+
+
+
+
 1、filterChainDefinitions是什么时候起作用的？filter做了哪些事情？？
 
 
 2、shiro与Spring整合以后认证的流程？？
 	* 首先在web.xml中配置一个过滤器DelegatingFilterProxy，并指定targetBeanName的名称。所以所有的请求处理之前，都会执行DelegatingFilter这个过滤器的doFilter。
-在初始化这个过滤器时，会加载名称为targetBeanName属性对应的值的Filter，这个Filter是在xml中配置的。这个Filter通常是ShiroFilterFactoryBean的内部类SpringShiroFilter。
+	  在初始化这个过滤器时，会加载名称为targetBeanName属性对应的值的Filter，这个Filter是在xml中配置的。这个Filter通常是ShiroFilterFactoryBean的内部类SpringShiroFilter。
 
 	* 当有请求进入时，会执行DelegatingFilterProxy的doFilter(..)方法，在其内部是调用初始化DelegatingFilterProxy时加载的Filter的doFilter(..)。
 	

@@ -1,0 +1,161 @@
+/***
+ * BeanPostProcessor 
+ *			 InstantiationAwareBeanPostProcessor
+ *							SmartInstantiationAwareBeanPostProcessor
+ *
+ */
+
+
+一、面试
+	1、Spring Bean加载的流程
+		1)、主线：
+			实例化之前的操作	---》		构造函数的选择		---》		实例化 		---》	实例化之后的操作	---》	      
+			设置属性			---》		各种aware类			---》		BeanPostProcessor的before方法			---》	
+			InitializingBean的afterPropertiesSet()方法  		---》		init-method的操作						---》	  
+			BeanPostProcessor的after方法
+	
+
+		2)、具体流程
+			createBean(..)方法中。
+				1、获取对应的Bean Definition对应的Class对象。
+				2、调用InstantiationAwareBeanPostProcessor的postProcessBeforeInstantiation(..)方法。英死代笑A型
+				3、调用SmartInstantiationAwareBeanPostProcessor的determineCandidateConstructors(..)方法，选择合适的构造函数。	迪特明 看地对特 
+				4、构建BeanWrapper实例，在BeanWrapper中有对应的Bean实例，在这里初始化Bean，一般通过Cglib获取实例。
+				5、调用MergedBeanDefinitionPostProcessor的postProcessMergedBeanDefinition(..)方法。
+				6、调用InstantiationAwareBeanPostProcessor的postProcessAfterInstantiation(..)：方法。
+				7、调用InstantiationAwareBeanPostProcessor的postProcessPropertyValues(...)方法。
+				
+				8、设置Bean的属性值，通过<propretity>标签或者@Value注解设置的操作。
+				9、如果该Bean是实现了一些Aware接口，调用对应的Aware的方法。BeanNameAware --> BeanClassLoaderAware --> BeanFactoryAware	【只有实现了对应Aware接口才会调用】
+				10、调用SmartInstantiationAwareBeanPostProcessor类的getEarlyBeanReference()方法。
+				11、调用BeanPostProcessor对应的postProcessBeforeInitialization(..)方法。												【BeanPostProcessor是每一个Bean都会调用】
+				12、调用InitializingBean的afterPropertiesSet()方法。																	【只有实现了InitializingBean的Bean才会调用。】
+				13、调用init-method属性设置的初始化方法。
+				14、调用BeanPostProcessor对应的postProcessAfterInitializing(..)方法。	
+
+	
+
+	2、Aop的流程
+		1)、SpringAop接入流程
+			1、使用了Spring的SPI，Spring会加载MATE-INF/spring.handlers文件，获取命名空间与命名空间对应的处理器，在SpringAop中使用AopNamespaceHandler去解析aop的标签。
+
+		2)、创建对应BeanDefinition
+			1、以XML配置解析为例，AopNamespaceHandler中的解析类会向Spring中注入AspectJAwareAdvisorAutoProxyCreator类，其主要作用是解析。
+			2、创建pointCut标签，创建AspectJExpressionPointcut对应的BeanDefinition，并把这个BeanDefinition注册到BeanFactory中。	
+			3、每一个Advice标签都会创建一个AspectJPointcutAdvisor【这是Advisor的子类】对应的BeanDefinition。并把这个BeanDefinition注册到BeanFactory中。	
+			
+		3)、创建代理类，并调用
+			1、AspectJAwareAdvisorAutoProxyCreator是生成代理类的入口。
+			2、自己的业务类将变成一个代理类，这里代理类中有一个Advice的list，然后循环调用这些Advice。
+		
+		
+		
+	3、Aop中的通知调用流程。
+		如果有多个@Order指定先后顺序，数字越小，优先级越高。
+		调用链是：AspectJAfterThrowingAdvice  --》 AspectJAfterReturningAdvice --》  AspectJAfterAdvice   ---》  AspectJMethodBeforeAdvice   ---》  AspectJAroundAdvice
+		实际处理过程：before  --》   around  --》   自己的业务信息   --》  around  --》  after   --》  afterReturning   --》  afterThrowing 
+
+
+	4、Spring的事务
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+一、prepareRefresh();
+	准备刷新Context：【里面包含：Context的状态设置，初始化PropertySources。校验Property】
+	
+二、obtainFreshBeanFactory()
+
+		1、Bean的加载。获取xml文件对应的输入流，并解析对应的Document的对象。
+					【衍生问题？1：xml是如何解析的?Resources接口的理解】
+					
+					
+		2、Bean的解析过程。如何Bean解析成对应BeanDefinition
+		
+		
+		3、Bean的注册过程。解析过程发生在DefaultBeanDefinitionDocumentReader类中，
+				判断对应的Element是否是默认的命名空间。------ 如果是默认的     ---》  三种【import、alias、bean】三种element处理过程，【beans】进行递归。 
+												       ------ 如果不是默认的   ---》  获取响应的element所对应的命名空间，并创建NamespaceHandler，然后进行解析。
+													   
+		3、<bean>的解析过程
+			首先根据className、parent、classLoader创建对应BeanDefinition，并设置attribute、metaElement、propriety等等。
+			接着生成BeanName并构建BeanDefinitionHolder对象，如果需要装饰AbstractBeanDefinition进行装饰操作。
+			然后把BeanDefinition注册到BeanDefinitionRegistry（DefaultListableBeanFactory)中。
+					【衍生问题？如果依赖的Bean不存在会怎么样，Bean是怎么加载的。】
+
+	【这是BeanDefinition已经加载完成，但是还没有实例化Bean】
+					
+三、prepareBeanFactory(beanFactory)
+		
+		1、设置BeanFactory的组件。
+		
+
+四、postProcessBeanFactory(beanFactory)
+		
+		1、设置BeanFactory的组件。
+		
+
+五：invokeBeanFactoryPostProcessors
+		
+		1、调用BeanFactoryPostProcessor的实现类，修改Context中的bean definition或者改写Context下的BeanFactory中的Bean的属性值。
+		
+六：registerBeanPostProcessors
+
+
+七：initMessageSource
+
+
+
+八：initApplicationEventMulticaster
+
+
+九：onRefresh
+
+
+十：registerListeners接听器
+
+
+
+十一：finishBeanFactoryInitialization:
+	完成此上下文的bean工厂的初始化，初始化所有剩余的单例bean。
+	
+
+		
+		
+什么时候进行初始化操作的？？？
+	Spring什么时候实例化bean，首先要分2种情况。
+	第一：如果你使用BeanFactory作为Spring Bean的工厂类，则所有的bean都是在第一次使用该Bean的时候实例化 （不管bean是否实现了FactoryBean）。
+
+	第二：如果你使用ApplicationContext作为Spring Bean的工厂类，则又分为以下几种情况： 
+		（1）：如果bean的scope是singleton的，并且lazy-init为false（默认是false，所以可以不用设置），则ApplicationContext启动的时候就实例化该Bean，
+			   并且将实例化的Bean放在一个map结构的缓存中，下次再使用该Bean的时候，直接从这个缓存中取 （但是如果bean实现了FactoryBean，则ApplicationContext
+			   启动的时候先实例化对应的FactoryBean，当第一次使用bean的时候，在通过FactoryBean的getObject方法实例化bean）。
+		（2）：如果bean的scope是singleton的，并且lazy-init为true，则该Bean的实例化是在第一次使用该Bean的时候进行实例化。
+		（3）：如果bean的scope是prototype的，则该Bean的实例化是在第一次使用该Bean的时候进行实例化。

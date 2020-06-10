@@ -1,18 +1,10 @@
 
 
-学习一下@InitBinder注解。@ModelAttribute
 
-
-
-
-
-
-
-
-
+一、面试
 一、MVC一个完整的请求？？
 	* 用户发起一个请求，被DispatcherServlet捕获。因为在web.xml配置DispatcherServlet，并且DispatcherServlet本身就是一个Servlet，所以符合web.xml配置的拦截
-	条件都是会被拦截的。
+	  条件都是会被拦截的。
 	
 	* 判断是否是MultipartResolver请求。
 	
@@ -59,6 +51,94 @@
 六、常见的几种HandlerAdapter，HandlerAdapter的作用是什么？
 	RequestMappingHandlerAdapter、HttpRequestHandlerAdapter、SimpleControllerHandlerAdapter。
 	HandlerAdapter可以请求对应的Handler(即你写的Controller里的具体方法)，并返回一个ModelAndView对象。
+
+
+
+
+
+二、面试
+	1、如何从SpringMVC中获取HttpServletRequest对象。
+		* 可以在自己的HandlerMapping的方法中，传入HttpServletRequest。
+		* 通过RequestContextHolder获取对应的Request。
+		* 可以使用@Autowired进行自动注入。
+
+	
+	2、Servlet的生命周期
+		* 在默认情况下，会在第一被访问的时候进行初始化操作
+		* 执行init()方法，该访问只会被执行一次。
+		* 执行service()方法，执行多次。
+		* 在Servelt服务器关闭的时候，执行destory()方法，只会执行一次。
+		
+		
+	3、SpringMVC一个完整的流程
+		1、用户发起一个请求，被拦截，交给DispatcherServlet，
+		2、通过对应的请求信息获取对应的Handler，并通过handler构造一个HandlerExecutionChain返回。
+		3、通过Handler获取对应的HandlerAdapter，然后通过HandlerAdapter去调用对应的Handler。
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+
+学习一下@InitBinder注解。@ModelAttribute
+
+
+
+
 
 
 
