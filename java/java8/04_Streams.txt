@@ -1,3 +1,10 @@
+
+
+
+stream：只能操作一次，
+
+
+
 函数式编程，如果有表达式只有一行，可以把{}、return省略。
 
 一、Stream
@@ -40,7 +47,22 @@
 		* flatMap的变种。
 		
 	9、distinct()
-		* 
+		* 去重
+		
+	10、of()
+		* 产生stream。
+		
+	11、forEach(Consumer<? super T> action)
+		
+		
+	12、allMatch(Predicate<? super T> predicate)
+		* 判断所有元素是否满足给定条件，只要有一个不满足就返回false。
+		
+	13、anyMatch(Predicate<? super T> predicate)
+		* 只有有一个反正，就返回true
+		
+	14、noMatch(Predicate<? super T> predicate)
+		* 没有一个元素满足，返回true。
 		
 	
 二、注意

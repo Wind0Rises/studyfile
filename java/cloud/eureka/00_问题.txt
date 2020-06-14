@@ -1,7 +1,7 @@
 
 一、为什么Eureka Client获取服务实例这么慢？
 		1、Eureka Client的注册是有延迟的。Eureka Client启动之后，不是自己向Eureka Server注册的，而是有一个延迟向服务端注册的时间，默认情况下延迟时间为
-	40秒。
+	       40秒。
 		2、Eureka Server的响应缓存。Eureka Server维护每30秒更新一次响应缓存，所以即使刚刚注册的服务，也不会立刻出现在服务注册列表中
 		3、Eureka Client的缓存。Eureka Client保留注册信息的缓存。每30秒更新一次缓存，所有Eureka Client刷新本地并发现其他新注册的实例可能需要30秒。
 		4、LoadBalance的缓存。Ribbon的负载平衡器从本地的Eureka Client获取服务注册列表信息。Ribbon本身还维护了缓存，以避免每个请求都需要从 Eureka Client

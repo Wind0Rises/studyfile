@@ -1,0 +1,18 @@
+
+
+
+一、面试题
+	1)、Dubbo集群容错方案？
+		1、Failover cluster：【默认】失败自动切换，自动重试其他服务器。
+		2、Failfast cluster： 快速失败，立即报错，只发起一次调用。
+		3、Failsafe cluster： 失败安全，出现异常时，直接忽略
+		4、Failback cluster： 失败自动恢复，记录失败请求，定时重发。
+		5、Forking cluster：  并行调用多个服务器，只要一个成功即返回
+		6、Broadcast cluster：广播逐个调用所有提供者 
+		
+		
+	2)、Dubbo负载均衡策略？
+		1、Random：随机，按权重设置随机概率。
+		2、RoundRobin：轮询。
+		3、LeastActive：最少活跃调用数。
+		4、ConsistenHash：一致性Hash。

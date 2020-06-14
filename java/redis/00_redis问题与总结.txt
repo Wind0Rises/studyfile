@@ -41,3 +41,10 @@
 			allkeys-random：检查【所有的key】并移除【随机】key；
 			volatile-ttl：在【设置了过期时间】的键空间中，移除【将要过期】的key；
 			noeviction，当内存使用达到阀值的时候，所有引起申请内存的命令会报错；
+			
+	
+	5、redis五种数据的用途
+		* string 
+		* hash   保存
+		* l
+		*

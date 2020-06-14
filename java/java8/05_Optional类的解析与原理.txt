@@ -1,0 +1,5 @@
+default的方法只能用于接口
+
+
+1、创建Optional
+	1、通过empty()方法、或者使用of()方法。

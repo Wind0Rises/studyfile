@@ -87,3 +87,47 @@
 			org.springframework.boot.autoconfigure.data.solr.SolrRepositoriesAutoConfiguration.ConditionalOnClass=org.apache.solr.client.solrj.SolrClient,org.springframework.data.solr.repository.SolrRepository
 			org.springframework.boot.autoconfigure.security.oauth2.client.servlet.OAuth2ClientAutoConfiguration.ConditionalOnWebApplication=SERVLET
 			org.springframework.boot.autoconfigure.web.servlet.error.ErrorMvcAutoConfiguration=
+			
+			
+四、Spring Boot有哪些优点。
+	1)、自动化配置，减少配置，不需要写大量的xml配置。
+	2)、内置tomcat，可以直接启动使用jar运行项目。
+	3)、maven管理jar，可以避免大量jar的版本冲突。
+	
+	
+五、Spring Boot的配置加载顺序
+	1、properties文件。
+	2、yaml文件。
+	3、系统环境变量。
+	4、命令行参数。
+	
+	
+	
+六、自定义@Enable..
+	1)、包在扫描的范围
+	
+	
+	2)、包不在扫描的范围
+		@import	
+		动态注册有两种方式，一是和实现ImportSelector接口，二是实现 ImportBeanDefinitionRegistrar
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	

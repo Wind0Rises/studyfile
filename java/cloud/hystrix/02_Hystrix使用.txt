@@ -5,7 +5,20 @@
 	3-1：RestTemplate
 	3-2：Ribbon
 	
+	
+	
+	
 二、在Feign中使用熔断器。
 	由于Feign的起步依赖中已经引入了Hystrix 的依赖，所以在 Feign中使用Hystrix不需要引入任何的依赖。只需要在eureka-feign-client工程的配置文件application.yml中配置开启Hystrix 的功能，配置文件
 	application.yml中加以下配置：feign-hystrix-enable: true
 
+
+
+
+
+
+	判断是否有缓存，缓存是否可用，可用直接返回
+	
+	不可用
+	
+	

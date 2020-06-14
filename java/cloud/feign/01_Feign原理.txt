@@ -3,8 +3,8 @@ Fegin起步依赖Ribbon和Hystrix。
 
 一、总体流程：
 	总的来说 ， Feign的源码实现过程如下。
-		1、首先通过＠EnableFeignClients 注解开启 FeignClient 的功能。只有这个注解存在，才会在程序启动时开启对＠FeignClient 注解的包扫描 。
-		2、根据Feign的规则实现接口，井在接口上面加上＠Feign Client注解。
+		1、首先通过＠EnableFeignClients 注解开启FeignClient的功能。只有这个注解存在，才会在程序启动时开启对＠FeignClient注解的包扫描 。
+		2、根据Feign的规则实现接口，并在接口上面加上＠Feign Client注解。
 		3、程序启动后，会进行包扫描，扫描所有的＠Feign Client的注解的类，并将这些信息注入IoC容器中。
 		4、当接口的方法被调用时，通过JDK的代理来生成具体的RequestTemplate棋根对象。
 		5、根据RequestTemplate再生成Http请求的Request对象。

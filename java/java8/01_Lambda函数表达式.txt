@@ -1,0 +1,30 @@
+
+
+一、
+	1、
+		(Apply a) -> {}     <===>    a -> {}
+		类型推导
+		
+	2、	返回是一个String 
+		a -> "a" + "b"		<===>	 a ->  { sout(..);  return "a" + "b"}
+		在如果有{}需要return，没有{}可以省去return。
+			
+	
+	3、Function<入参类型，返回类型>
+	
+	
+	4、常用的FunctionInterface
+		* Predicate 		-》		boolean test(T t);			/ˈprɛdɪˌkeɪt/			使……基于；断言；暗示						=====》			BiPredicate<T, U>		boolean test(T t, U u)
+		* Consumer 			-》 	accept(T t);				/kənˈsjuːmə(r)/ 		消费者；用户，顾客							=====》			BiConsumer<T, U>		void accept(T t, U u)
+		* Function<T, R>	-》 	R apply(T t);				/ˈfʌŋkʃn/				功能；[数] 函数；职责；盛大的集会			=====》			BiFunction<T, U, R>		R apply(T t, U u);
+		* Supplier<T>		-》		T get();					/səˈplaɪə(r)/ 			供应厂商，供应国；供应者					=====》			
+		
+	5、方法推导
+		1、实例一
+			String test1 = new String("asdfwe");
+			Function<Integer, Character> f1 = test1::charAt;	// char charAt(int index)：输入是一个int，返回一个character
+			System.out.println(f1.apply(4));					// 输出w
+		
+		2、实例二
+			BiFunction<String, Integer, Character> f2 = String::charAt;
+			System.out.println(f2.apply("liuweian", 4));
