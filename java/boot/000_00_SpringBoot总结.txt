@@ -109,7 +109,7 @@
 	
 	2)、包不在扫描的范围
 		@import	
-		动态注册有两种方式，一是和实现ImportSelector接口，二是实现 ImportBeanDefinitionRegistrar
+		动态注册有两种方式，一是和实现ImportSelector接口，二是实现ImportBeanDefinitionRegistrar
 	
 	
 	

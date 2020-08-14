@@ -17,9 +17,149 @@
 二、重要的类
 
 
-三、源码
+
+
+
+
+三、向BeanFactory注册Bean，包含多个内部类。
+
 /**
+ * 解析<context:component-scan>标签。会加载对应应用的Bean，并会注册多个内部Bean。
+ * 其中包括：ConfigurationClassPostProcessor、AutowiredAnnotationBeanPostProcessor	
+ *			 RequiredAnnotationBeanPostProcessor、CommonAnnotationBeanPostProcessor
+ *			 EventListenerMethodProcessor、DefaultEventListenerFactory
  *
+ */
+location：ComponentScanBeanDefinitionParser
+public BeanDefinition parse(Element element, ParserContext parserContext) {
+	// 获取base-package属性。
+	String basePackage = element.getAttribute(BASE_PACKAGE_ATTRIBUTE);
+	
+	// 获取扫描的范围。
+	basePackage = parserContext.getReaderContext().getEnvironment().resolvePlaceholders(basePackage);
+	String[] basePackages = StringUtils.tokenizeToStringArray(basePackage, ConfigurableApplicationContext.CONFIG_LOCATION_DELIMITERS);
+
+	ClassPathBeanDefinitionScanner scanner = configureScanner(parserContext, element);
+	
+	// 扫描给定包下的类，并获取BeanDefinition、beanName等并包装成BeanDefinitionHolder，但是没有注册到BeanFactory。
+	Set<BeanDefinitionHolder> beanDefinitions = scanner.doScan(basePackages);
+	
+	registerComponents(parserContext.getReaderContext(), beanDefinitions, element);
+
+	return null;
+}
+
+
+
+/**
+ * 注册应用实际的BeanDefinition并且初始化多个内部Bean。
+ */
+location：ComponentScanBeanDefinitionParser
+protected void registerComponents(XmlReaderContext readerContext, Set<BeanDefinitionHolder> beanDefinitions, Element element) {
+
+	Object source = readerContext.extractSource(element);
+	CompositeComponentDefinition compositeDef = new CompositeComponentDefinition(element.getTagName(), source);
+
+	for (BeanDefinitionHolder beanDefHolder : beanDefinitions) {
+		compositeDef.addNestedComponent(new BeanComponentDefinition(beanDefHolder));
+	}
+
+	boolean annotationConfig = true;
+	if (element.hasAttribute(ANNOTATION_CONFIG_ATTRIBUTE)) {
+		annotationConfig = Boolean.valueOf(element.getAttribute(ANNOTATION_CONFIG_ATTRIBUTE));
+	}
+	
+	if (annotationConfig) {
+		Set<BeanDefinitionHolder> processorDefinitions = AnnotationConfigUtils.registerAnnotationConfigProcessors(readerContext.getRegistry(), source);
+		for (BeanDefinitionHolder processorDefinition : processorDefinitions) {
+			compositeDef.addNestedComponent(new BeanComponentDefinition(processorDefinition));
+		}
+	}
+
+	readerContext.fireComponentRegistered(compositeDef);
+}
+
+/**
+ * 创建六个内部Bean
+ * 		internalConfigurationAnnotationProcessor		==》			ConfigurationClassPostProcessor
+ *		internalAutowiredAnnotationProcessor			==》			AutowiredAnnotationBeanPostProcessor
+ *		internalRequiredAnnotationProcessor				==》			RequiredAnnotationBeanPostProcessor
+ * 		internalCommonAnnotationProcessor 				==》			CommonAnnotationBeanPostProcessor
+ *		internalEventListenerProcessor					==》			EventListenerMethodProcessor
+ * 		internalEventListenerFactory					==》			DefaultEventListenerFactory
+ */
+location：AnnotationConfigUtils
+public static Set<BeanDefinitionHolder> registerAnnotationConfigProcessors(BeanDefinitionRegistry registry, Object source) {
+
+	DefaultListableBeanFactory beanFactory = unwrapDefaultListableBeanFactory(registry);
+	if (beanFactory != null) {
+		if (!(beanFactory.getDependencyComparator() instanceof AnnotationAwareOrderComparator)) {
+			beanFactory.setDependencyComparator(AnnotationAwareOrderComparator.INSTANCE);
+		}
+		if (!(beanFactory.getAutowireCandidateResolver() instanceof ContextAnnotationAutowireCandidateResolver)) {
+			beanFactory.setAutowireCandidateResolver(new ContextAnnotationAutowireCandidateResolver());
+		}
+	}
+
+	Set<BeanDefinitionHolder> beanDefs = new LinkedHashSet<BeanDefinitionHolder>(4);
+
+	/**
+	 * CONFIGURATION_ANNOTATION_PROCESSOR_BEAN_NAME=org.springframework.context.annotation.internalConfigurationAnnotationProcessor
+	 */ 
+	if (!registry.containsBeanDefinition(CONFIGURATION_ANNOTATION_PROCESSOR_BEAN_NAME)) {
+		RootBeanDefinition def = new RootBeanDefinition(ConfigurationClassPostProcessor.class);
+		def.setSource(source);
+		beanDefs.add(registerPostProcessor(registry, def, CONFIGURATION_ANNOTATION_PROCESSOR_BEAN_NAME));
+	}
+
+	if (!registry.containsBeanDefinition(AUTOWIRED_ANNOTATION_PROCESSOR_BEAN_NAME)) {
+		RootBeanDefinition def = new RootBeanDefinition(AutowiredAnnotationBeanPostProcessor.class);
+		def.setSource(source);
+		beanDefs.add(registerPostProcessor(registry, def, AUTOWIRED_ANNOTATION_PROCESSOR_BEAN_NAME));
+	}
+
+	if (!registry.containsBeanDefinition(REQUIRED_ANNOTATION_PROCESSOR_BEAN_NAME)) {
+		RootBeanDefinition def = new RootBeanDefinition(RequiredAnnotationBeanPostProcessor.class);
+		def.setSource(source);
+		beanDefs.add(registerPostProcessor(registry, def, REQUIRED_ANNOTATION_PROCESSOR_BEAN_NAME));
+	}
+
+	if (jsr250Present && !registry.containsBeanDefinition(COMMON_ANNOTATION_PROCESSOR_BEAN_NAME)) {
+		RootBeanDefinition def = new RootBeanDefinition(CommonAnnotationBeanPostProcessor.class);
+		def.setSource(source);
+		beanDefs.add(registerPostProcessor(registry, def, COMMON_ANNOTATION_PROCESSOR_BEAN_NAME));
+	}
+
+	if (jpaPresent && !registry.containsBeanDefinition(PERSISTENCE_ANNOTATION_PROCESSOR_BEAN_NAME)) {
+		RootBeanDefinition def = new RootBeanDefinition();
+		try {
+			def.setBeanClass(ClassUtils.forName(PERSISTENCE_ANNOTATION_PROCESSOR_CLASS_NAME, AnnotationConfigUtils.class.getClassLoader()));
+		} catch (ClassNotFoundException ex) {
+			throw new IllegalStateException("Cannot load optional framework class: " + PERSISTENCE_ANNOTATION_PROCESSOR_CLASS_NAME, ex);
+		}
+		def.setSource(source);
+		beanDefs.add(registerPostProcessor(registry, def, PERSISTENCE_ANNOTATION_PROCESSOR_BEAN_NAME));
+	}
+
+	if (!registry.containsBeanDefinition(EVENT_LISTENER_PROCESSOR_BEAN_NAME)) {
+		RootBeanDefinition def = new RootBeanDefinition(EventListenerMethodProcessor.class);
+		def.setSource(source);
+		beanDefs.add(registerPostProcessor(registry, def, EVENT_LISTENER_PROCESSOR_BEAN_NAME));
+	}
+	if (!registry.containsBeanDefinition(EVENT_LISTENER_FACTORY_BEAN_NAME)) {
+		RootBeanDefinition def = new RootBeanDefinition(DefaultEventListenerFactory.class);
+		def.setSource(source);
+		beanDefs.add(registerPostProcessor(registry, def, EVENT_LISTENER_FACTORY_BEAN_NAME));
+	}
+
+	return beanDefs;
+}
+
+
+三、ConfigurationClassPostProcessor源码
+/**
+ * ConfigurationClassPostProcessor实现了BeanDefinitionRegistryPostProcessor接口。
+ * 在初始化ConfigurationClassPostProcessor的时候，会调用postProcessBeanDefinitionRegistry(...)方法。
  */
 location：ConfigurationClassPostProcessor
 public void postProcessBeanDefinitionRegistry(BeanDefinitionRegistry registry) {
@@ -42,20 +182,26 @@ public void postProcessBeanDefinitionRegistry(BeanDefinitionRegistry registry) {
 
 
 /**
- *
+ * 构建并且验证Configuration实体基于注册表中的Configuration的classes。
  */
 location：ConfigurationClassPostProcessor
 public void processConfigBeanDefinitions(BeanDefinitionRegistry registry) {
+	
+	// 获取所有BeanFactory中的BeanDefinitionNam
 	List<BeanDefinitionHolder> configCandidates = new ArrayList<>();
 	String[] candidateNames = registry.getBeanDefinitionNames();
 
+	// 遍历，通过名称获取BeanDefinition
 	for (String beanName : candidateNames) {
 		BeanDefinition beanDef = registry.getBeanDefinition(beanName);
+		
 		if (beanDef.getAttribute(ConfigurationClassUtils.CONFIGURATION_CLASS_ATTRIBUTE) != null) {
 			if (logger.isDebugEnabled()) {
 				logger.debug("Bean definition has already been processed as a configuration class: " + beanDef);
 			}
+			
 		} else if (ConfigurationClassUtils.checkConfigurationClassCandidate(beanDef, this.metadataReaderFactory)) {
+			// 普通类会走到这里。
 			configCandidates.add(new BeanDefinitionHolder(beanDef, beanName));
 		}
 	}
@@ -70,6 +216,7 @@ public void processConfigBeanDefinitions(BeanDefinitionRegistry registry) {
 		return Integer.compare(i1, i2);
 	});
 
+	// 判断是否存在"org.springframework.context.annotation.internalConfigurationBeanNameGenerator",如果存在进入If
 	SingletonBeanRegistry sbr = null;
 	if (registry instanceof SingletonBeanRegistry) {
 		sbr = (SingletonBeanRegistry) registry;
@@ -86,13 +233,17 @@ public void processConfigBeanDefinitions(BeanDefinitionRegistry registry) {
 		this.environment = new StandardEnvironment();
 	}
 
-
+	// 构建ConfigurationClassParser实例。
 	ConfigurationClassParser parser = new ConfigurationClassParser(this.metadataReaderFactory, this.problemReporter, this.environment, this.resourceLoader, this.componentScanBeanNameGenerator, registry);
+
 
 	Set<BeanDefinitionHolder> candidates = new LinkedHashSet<>(configCandidates);
 	Set<ConfigurationClass> alreadyParsed = new HashSet<>(configCandidates.size());
 	
 	do {
+		// ##############################################
+		// #				01、先解析					#
+		// ##############################################
 		parser.parse(candidates);
 		parser.validate();
 
@@ -102,6 +253,11 @@ public void processConfigBeanDefinitions(BeanDefinitionRegistry registry) {
 		if (this.reader == null) {
 			this.reader = new ConfigurationClassBeanDefinitionReader(registry, this.sourceExtractor, this.resourceLoader, this.environment, this.importBeanNameGenerator, parser.getImportRegistry());
 		}
+		
+		
+		// ##############################################
+		// #				02、在加载					#
+		// ##############################################
 		this.reader.loadBeanDefinitions(configClasses);
 		alreadyParsed.addAll(configClasses);
 
@@ -126,11 +282,339 @@ public void processConfigBeanDefinitions(BeanDefinitionRegistry registry) {
 	}
 	while (!candidates.isEmpty());
 
+
 	if (sbr != null && !sbr.containsSingleton(IMPORT_REGISTRY_BEAN_NAME)) {
 		sbr.registerSingleton(IMPORT_REGISTRY_BEAN_NAME, parser.getImportRegistry());
 	}
 
 	if (this.metadataReaderFactory instanceof CachingMetadataReaderFactory) {
 		((CachingMetadataReaderFactory) this.metadataReaderFactory).clearCache();
+	}
+}
+
+
+
+/**
+ *
+ */
+location：ConfigurationClassParser
+public void parse(Set<BeanDefinitionHolder> configCandidates) {
+
+	for (BeanDefinitionHolder holder : configCandidates) {
+		BeanDefinition bd = holder.getBeanDefinition();
+		try {
+		
+			/**
+			 * ##############################
+			 * #		获取@Import标签		#
+			 * ##############################
+			 * 
+			 */
+			if (bd instanceof AnnotatedBeanDefinition) {
+				parse(((AnnotatedBeanDefinition) bd).getMetadata(), holder.getBeanName());
+			} else if (bd instanceof AbstractBeanDefinition && ((AbstractBeanDefinition) bd).hasBeanClass()) {
+				parse(((AbstractBeanDefinition) bd).getBeanClass(), holder.getBeanName());
+			} else {
+				parse(bd.getBeanClassName(), holder.getBeanName());
+			}
+		} catch (BeanDefinitionStoreException ex) {
+			throw ex;
+		} catch (Throwable ex) {
+			throw new BeanDefinitionStoreException("Failed to parse configuration class [" + bd.getBeanClassName() + "]", ex);
+		}
+	}
+
+	/**
+	 * 处理过程
+	 *
+	 * private final DeferredImportSelectorHandler deferredImportSelectorHandler = new DeferredImportSelectorHandler();
+	 * DeferredImportSelectorHandler是ConfigurationClassParser内部类。
+	 */ 
+	this.deferredImportSelectorHandler.process();
+}
+
+
+/**
+ * 
+ */
+location：ConfigurationClassParser.DeferredImportSelectorHandler
+public void process() {
+	List<DeferredImportSelectorHolder> deferredImports = this.deferredImportSelectors;
+	this.deferredImportSelectors = null;
+	try {
+		if (deferredImports != null) {
+			DeferredImportSelectorGroupingHandler handler = new DeferredImportSelectorGroupingHandler();
+			deferredImports.sort(DEFERRED_IMPORT_COMPARATOR);
+			deferredImports.forEach(handler::register);
+			handler.processGroupImports();
+		}
+	}
+	finally {
+		this.deferredImportSelectors = new ArrayList<>();
+	}
+}
+
+
+/**
+ * 
+ */
+location：ConfigurationClassParser
+protected final void parse(String className, String beanName) throws IOException {
+	MetadataReader reader = this.metadataReaderFactory.getMetadataReader(className);
+	processConfigurationClass(new ConfigurationClass(reader, beanName));
+}
+
+/**
+ * 
+ */
+location：ConfigurationClassParser
+protected final void parse(Class<?> clazz, String beanName) throws IOException {
+	processConfigurationClass(new ConfigurationClass(clazz, beanName));
+}
+
+/**
+ * 
+ */
+location：ConfigurationClassParser
+protected final void parse(AnnotationMetadata metadata, String beanName) throws IOException {
+	processConfigurationClass(new ConfigurationClass(metadata, beanName));
+}
+
+
+
+
+/**
+ * 
+ */
+location：ConfigurationClassParser
+protected void processConfigurationClass(ConfigurationClass configClass) throws IOException {
+	// 判断是否被Conditional注解修饰。
+	if (this.conditionEvaluator.shouldSkip(configClass.getMetadata(), ConfigurationPhase.PARSE_CONFIGURATION)) {
+		return;
+	}
+
+	// 获取配置类。【【【如何判断是否是配置类】】】
+	ConfigurationClass existingClass = this.configurationClasses.get(configClass);
+	
+	// existingClass!=null说明是配置类。
+	if (existingClass != null) {
+		
+		// 判断配置类是否是通过@Import导入的。
+		if (configClass.isImported()) {
+			if (existingClass.isImported()) {
+				existingClass.mergeImportedBy(configClass);
+			}
+			return;
+		} else {
+			this.configurationClasses.remove(configClass);
+			for (Iterator<ConfigurationClass> it = this.knownSuperclasses.values().iterator(); it.hasNext();) {
+				if (configClass.equals(it.next())) {
+					it.remove();
+				}
+			}
+		}
+	}
+
+	SourceClass sourceClass = asSourceClass(configClass);
+	do {
+		sourceClass = doProcessConfigurationClass(configClass, sourceClass);
+	}
+	while (sourceClass != null);
+
+	this.configurationClasses.put(configClass, configClass);
+}
+
+
+/**
+ * 
+ */
+location：ConfigurationClassParser
+protected final SourceClass doProcessConfigurationClass(ConfigurationClass configClass, SourceClass sourceClass) throws IOException {
+	
+	// 首先递归处理任何成员（嵌套）类
+	processMemberClasses(configClass, sourceClass);
+
+	// 处理@PropertySource注解
+	for (AnnotationAttributes propertySource : AnnotationConfigUtils.attributesForRepeatable(
+			sourceClass.getMetadata(), PropertySources.class,
+			org.springframework.context.annotation.PropertySource.class)) {
+		if (this.environment instanceof ConfigurableEnvironment) {
+			processPropertySource(propertySource);
+		}
+		else {
+			logger.warn("Ignoring @PropertySource annotation on [" + sourceClass.getMetadata().getClassName() +
+					"]. Reason: Environment must implement ConfigurableEnvironment");
+		}
+	}
+
+	// 处理@ComponentScan注解
+	Set<AnnotationAttributes> componentScans = AnnotationConfigUtils.attributesForRepeatable(
+			sourceClass.getMetadata(), ComponentScans.class, ComponentScan.class);
+	if (!componentScans.isEmpty() &&
+			!this.conditionEvaluator.shouldSkip(sourceClass.getMetadata(), ConfigurationPhase.REGISTER_BEAN)) {
+		for (AnnotationAttributes componentScan : componentScans) {
+			// The config class is annotated with @ComponentScan -> perform the scan immediately
+			Set<BeanDefinitionHolder> scannedBeanDefinitions =
+					this.componentScanParser.parse(componentScan, sourceClass.getMetadata().getClassName());
+			// Check the set of scanned definitions for any further config classes and parse recursively if needed
+			for (BeanDefinitionHolder holder : scannedBeanDefinitions) {
+				if (ConfigurationClassUtils.checkConfigurationClassCandidate(
+						holder.getBeanDefinition(), this.metadataReaderFactory)) {
+					parse(holder.getBeanDefinition().getBeanClassName(), holder.getBeanName());
+				}
+			}
+		}
+	}
+
+	// ######################################
+	// #		ImportSelector处理			#
+	// ######################################
+	// 处理@Import注解
+	processImports(configClass, sourceClass, getImports(sourceClass), true);
+	
+
+	// 处理@ImportResource注解
+	if (sourceClass.getMetadata().isAnnotated(ImportResource.class.getName())) {
+		AnnotationAttributes importResource =
+				AnnotationConfigUtils.attributesFor(sourceClass.getMetadata(), ImportResource.class);
+		String[] resources = importResource.getStringArray("locations");
+		Class<? extends BeanDefinitionReader> readerClass = importResource.getClass("reader");
+		for (String resource : resources) {
+			String resolvedResource = this.environment.resolveRequiredPlaceholders(resource);
+			configClass.addImportedResource(resolvedResource, readerClass);
+		}
+	}
+
+	// 处理@Bean methods
+	Set<MethodMetadata> beanMethods = retrieveBeanMethodMetadata(sourceClass);
+	for (MethodMetadata methodMetadata : beanMethods) {
+		configClass.addBeanMethod(new BeanMethod(methodMetadata, configClass));
+	}
+
+
+	// 处理接口的默认方法
+	processInterfaces(configClass, sourceClass);
+
+
+	// 处理父类
+	if (sourceClass.getMetadata().hasSuperClass()) {
+		String superclass = sourceClass.getMetadata().getSuperClassName();
+		if (!superclass.startsWith("java") && !this.knownSuperclasses.containsKey(superclass)) {
+			this.knownSuperclasses.put(superclass, configClass);
+			// Superclass found, return its annotation metadata and recurse
+			return sourceClass.getSuperClass();
+		}
+	}
+
+	return null;
+}
+
+
+
+
+/**
+ *
+ */
+location：ConfigurationClassParser.DeferredImportSelectorHandler
+public void process() {
+	List<DeferredImportSelectorHolder> deferredImports = this.deferredImportSelectors;
+	
+	this.deferredImportSelectors = null;
+	try {
+		
+		if (deferredImports != null) {
+			DeferredImportSelectorGroupingHandler handler = new DeferredImportSelectorGroupingHandler();
+			deferredImports.sort(DEFERRED_IMPORT_COMPARATOR);
+			deferredImports.forEach(handler::register);
+			handler.processGroupImports();
+		}
+		
+	} finally {
+		this.deferredImportSelectors = new ArrayList<>();
+	}
+}
+
+
+/**
+ *
+ */
+location：ConfigurationClassParser.DeferredImportSelectorGroupingHandler
+public void processGroupImports() {
+	for (DeferredImportSelectorGrouping grouping : this.groupings.values()) {
+		grouping.getImports().forEach(entry -> {
+			ConfigurationClass configurationClass = this.configurationClasses.get(entry.getMetadata());
+			try {
+				processImports(configurationClass, asSourceClass(configurationClass), asSourceClasses(entry.getImportClassName()), false);
+			} catch (BeanDefinitionStoreException ex) {
+				throw ex;
+			} catch (Throwable ex) {
+				throw new BeanDefinitionStoreException("Failed to process import candidates for configuration class [" + configurationClass.getMetadata().getClassName() + "]", ex);
+			}
+		});
+	}
+}
+
+
+/**
+ *
+ */
+location：ConfigurationClassParser
+private void processImports(ConfigurationClass configClass, SourceClass currentSourceClass, Collection<SourceClass> importCandidates, boolean checkForCircularImports) {
+
+	if (importCandidates.isEmpty()) {
+		return;
+	}
+
+	if (checkForCircularImports && isChainedImportOnStack(configClass)) {
+		this.problemReporter.error(new CircularImportProblem(configClass, this.importStack));
+	} else {
+		
+		this.importStack.push(configClass);
+		
+		try {
+			for (SourceClass candidate : importCandidates) {
+					
+				/**
+				 * ImportSelector处理。
+				 */
+				if (candidate.isAssignable(ImportSelector.class)) {
+					Class<?> candidateClass = candidate.loadClass();
+					
+					ImportSelector selector = ParserStrategyUtils.instantiateClass(candidateClass, ImportSelector.class, this.environment, this.resourceLoader, this.registry);
+					
+					if (selector instanceof DeferredImportSelector) {
+						this.deferredImportSelectorHandler.handle(configClass, (DeferredImportSelector) selector);
+					} else {
+						// ##################################
+						// #		具体的调用过程			#
+						// ##################################
+						String[] importClassNames = selector.selectImports(currentSourceClass.getMetadata());
+						
+						// 获取源。
+						Collection<SourceClass> importSourceClasses = asSourceClasses(importClassNames);
+						processImports(configClass, currentSourceClass, importSourceClasses, false);
+					}
+					
+				/**
+				 * ImportBeanDefinitionRegistrar处理。
+				 */
+				} else if (candidate.isAssignable(ImportBeanDefinitionRegistrar.class)) {
+					Class<?> candidateClass = candidate.loadClass();
+					ImportBeanDefinitionRegistrar registrar = ParserStrategyUtils.instantiateClass(candidateClass, ImportBeanDefinitionRegistrar.class, this.environment, this.resourceLoader, this.registry);
+					configClass.addImportBeanDefinitionRegistrar(registrar, currentSourceClass.getMetadata());
+					
+				} else {
+					this.importStack.registerImport(currentSourceClass.getMetadata(), candidate.getMetadata().getClassName());
+					processConfigurationClass(candidate.asConfigClass(configClass));
+					
+				}
+			}
+		} catch (BeanDefinitionStoreException ex) {
+			throw ex;
+		} catch (Throwable ex) {
+			throw new BeanDefinitionStoreException("Failed to process import candidates for configuration class [" +  configClass.getMetadata().getClassName() + "]", ex);
+		} finally {
+			this.importStack.pop();
+		}
 	}
 }

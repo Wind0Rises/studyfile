@@ -1,0 +1,47 @@
+
+一、
+	1、配置一个XxlJobSpringExecutor，XxlJobSpringExecutor实现了SmartInitializingSingleton接口。所以在XxlJobSpringExecutor初始化过程中，会调用afterSingletonsInstantiated()方法，在这个方法中
+	   会获取被XxlJob注解修饰的方法，并构建一个MethodJobHandler实例，并缓存起来。然后进行相应的启动操作
+	   在启动的时候：
+			* 初始化日志路径。	
+			* 并构建对应的AdminBiz。可以通过AdminBiz进行callback、registry、registryRemove操作。
+			* 日志文件线程。
+			* 会使用netty构建一个服务端/客户端程序EmbedServer，用于接收xxl-job-admin的请求，并根据做相应的操作，比如/run；或者是向xxl-job-admin注册JobHandler，xxl-job-admin中的JobApiController的api方法。
+	   
+	   
+	   * ExecutorRegistryThread：用于注册的线程。
+	   * JobLogFileCleanThread：主要做什么的？？
+	   * TriggerCallbackThread：主要作用？
+	   * EmbedServer：定时任务应用对应服务端程序。
+	   
+
+	
+	
+二、Job注册的过程。
+	具体的Job服务会在启动的时候，把自己的配置Job内部服务的地址（value）、appName（value）等信息注册到xxl-job-admin（保存到数据中）。
+	
+	
+
+三、xxl-admin-job.
+	* 其中有一个XxlJobAdminConfig类，实现了InitializingBean的接口，在spring初始化过程中，会调用afterPropertiesSet()方法，在这个方法里会创建一个XxlJobScheduler示例，并调用XxlJobScheduler的init()方法，在
+	  init()方法中会启动各种线程。
+	* 定时操作都是在xxl-job-admin操作。然后在使用Http请求的方式调用具体服务器上的定时任务，处理逻辑。
+	JobRegistryMonitorHelper：
+	
+	
+	并通过配置的信息，向xxl-job-admin【控制台】注册JobHandler。
+
+	
+四、
+	任务触发调度时将会自动发现注册成功的执行器, 实现任务自动发现功能; 另一方面也可以方便的进行任务分组。每个任务必须绑定一个执行器, 可在 "执行器管理" 进行设置;
+	
+	
+五、
+	运行模式：
+		BEAN模式：任务以JobHandler方式维护在执行器端；需要结合 "JobHandler" 属性匹配执行器中任务；
+		GLUE模式(Java)：任务以源码方式维护在调度中心；该模式的任务实际上是一段继承自IJobHandler的Java类代码并 "groovy" 源码方式维护，它在执行器项目中运行，可使用@Resource/@Autowire注入执行器里中的其他服务；
+		GLUE模式(Shell)：任务以源码方式维护在调度中心；该模式的任务实际上是一段 "shell" 脚本；
+		GLUE模式(Python)：任务以源码方式维护在调度中心；该模式的任务实际上是一段 "python" 脚本；
+		GLUE模式(PHP)：任务以源码方式维护在调度中心；该模式的任务实际上是一段 "php" 脚本；
+		GLUE模式(NodeJS)：任务以源码方式维护在调度中心；该模式的任务实际上是一段 "nodejs" 脚本；
+		GLUE模式(PowerShell)：任务以源码方式维护在调度中心；该模式的任务实际上是一段 "PowerShell" 脚本；

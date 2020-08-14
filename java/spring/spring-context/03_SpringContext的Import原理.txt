@@ -10,10 +10,10 @@
 三、源码
 #############################################################################
 #    	01、前置说明，以AnnotationConfigApplicationContext为例				#
-#    	Spring Boot为例														#
 #############################################################################
 
 	1、以SpringBoot为例，在创建AnnotationConfigApplicationContext的时候，会把ConfigurationClassPostProcessor这个类对应的BeanDefinition注册到BeanFactory中。
+	
 	2、在AbstractApplicationContext中调用invokeBeanFactoryPostProcessors(beanFactory)时处理开始，在invokeBeanDefinitionRegistryPostProcessors(...)方法处理
 	   BeanDefinitionRegistryPostProcessor类时，会使用ConfigurationClassPostProcessor处理，这里进入正题。
 

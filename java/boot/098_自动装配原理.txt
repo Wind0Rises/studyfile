@@ -1,4 +1,5 @@
-零、@Enable..
+零、@EnableAutoConfiguration
+
 	@Import注解可以配置三种不同的class，根据不同的场景来选择不同的注入方式
 		* 普通的bean或者带有@Configuration的bean直接注入。
 		* 实现ImportSelector接口注入。
@@ -9,21 +10,22 @@
 	DeferredImportSelector接口：继承ImportSelector接口；这是一个变种的ImportSelector接口，它在所有被@Configuration注解修饰的类处理完成后才运行。
 
 
-一、spring boot自动配置的原理
+
+一、Spring Boot自动配置的原理
 	1、在启动类使用@SpringBootApplication注解，@SpringBootApplication注解是一个符合注解，其包含@SpringBootConfiguration和@EnableAutoConfiguration等。
 	2、@EnableAutoConfiguration注解也是一个派生注解，其中的关键功能由@Import提供，通过@Import导入AutoConfigurationImportSelector类，AutoConfigurationImportSelector的
-	selectImports()中可以通过SpringFactoriesLoader.loadFactoryNames()扫描所有具有META-INF/spring.factories的jar包。spring-boot-autoconfigure-x.x.x.x.jar里就有一个这样
-	的spring.factories文件。
+	   selectImports()中可以通过SpringFactoriesLoader.loadFactoryNames()扫描所有具有META-INF/spring.factories的jar包。spring-boot-autoconfigure-x.x.x.x.jar里就有一个这样
+	   的spring.factories文件。
 	3、在spring-boot-autoconfigure-x.x.x.x.jar里面的有一个spring.factories文件中配置各种的EnableAutoConfiguration对应的类。
-	4、spring会把spring.factories文件中的配置的类加载到spring容器中，但是这些EnableAutoConfigurac本上都是会使用@ConditionalOn*注解，当没有引入对应的包的
-	时候是无法把对应的类加载到spring容器。EnableAutoConfiguration对应的类都是各个组件的配置类。【可以用redis、rabbit进行观察。】
+	4、spring会把spring.factories文件中的配置的类加载到spring容器中，但是这些EnableAutoConfigurac基本上都是会使用@ConditionalOn*注解，当没有引入对应的包的时候是无法把对应
+	   的类加载到spring容器。EnableAutoConfiguration对应的类都是各个组件的配置类。【可以用redis、rabbit进行观察。】
 	5、这些不同组件的配置类会把其对应的配置导入到spring容器中。这些配置类通常会接口@ConditionalOn*，如果没有导入对应组件的jar包，就不会导入对应的配置。
 
 
 	
 	注意springboot的真正的处理过程。
-		* 在启动SpringBoot时，在refresh()方法中会调用invokeBeanFactoryPostProcessors(.)方法，在这个方法里面会对ConfigurationClassPostProcessor类进行处理（调用其postProcessBeanDefinitionRegistry(.)方法），
-		这个方法最终会创建一个ConfigurationClassParser类，并调用parser(.)方法，ConfigurationClassParser这个类专门用于解析@Configuration注解的。
+		* 在启动SpringBoot时，在[AbstractApplicationContext]refresh()方法中会调用invokeBeanFactoryPostProcessors(.)方法，在这个方法里面会对ConfigurationClassPostProcessor类进行处理
+		（调用其postProcessBeanDefinitionRegistry(.)方法），这个方法最终会创建一个ConfigurationClassParser类，并调用parser(.)方法，ConfigurationClassParser这个类专门用于解析@Configuration注解的。
 		* 最终还是调用AutoConfigurationImportSelector类process的方法，在process方法中会加载META-INF/spring.factories文件，并解析。
 
 
