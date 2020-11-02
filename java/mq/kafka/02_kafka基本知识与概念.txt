@@ -1,0 +1,84 @@
+
+
+./kafka-topics.sh --zookeeper 192.168.20.160:2181 --create --topic test1 --partitions 3 --replication-factor 1
+./kafka-topics.sh --zookeeper 192.168.20.160:2181 --describe --topic test1
+
+./kafka-console-consumer.sh --bootstrap-server 192.168.20.160:9092 --topic
+./kafka-console-producer.sh --broker-list 192.168.20.160:9092 --topic test1
+
+
+
+
+
+杂；
+	1、批次与吞吐量
+	2、如何选择分区的数量。
+		如果每秒钟要从主题上写入和读取lGB的数据，并且每个消费者每秒钟可以处理50MB的数据，那么至少需要20个分区。这样就可以让20个消费者同时读取这些分区，从而达到每秒钟lGB的吞吐量。
+		
+	3、如何保存partition中分区顺序消费。
+	
+	
+一、主题与分区	
+	Kafka的消息通过主题进行分类。主题就好比数据库的表，或者文件系统里的文件夹。主题可以被分为若干个分区，一个分区就是一个提交日志。消息以追加的方式写入分区，然后以先入先出的顺序读取。
+	Kafka通过分区来实现数据冗余和伸缩性。分区可以分布在不同的服务器上，也就是说， 一个主题可以横跨多个服务器，以此来提供比单个服务器更强大的性能。
+
+
+二、配置文件
+	1、broker.id
+		每个broker都需要有一个标识符，使用broker.id来表示。它的默认值是0，也可以被设置成其他任意整数。这个值在整个Kafka集群里必须是唯一的。
+		
+	2、zookeeper.connect
+		用于保存 broker 元数据的 Zooke巳per 地址是通过 zookeepe「 .connect 来指定的。
+		
+	3、num.recovery.threads.per.data.dir
+		对于如下 3 种情况， Kafka 会使用可配置的钱程池来处理日志片段：
+			* 服务器正常启动，用于打开每个分区的日志片段.
+			* 服务器崩愤后重启，用于检查和截短每个分区的日志片段：
+			* 服务器正常关闭，用于关闭日志片段。
+			
+	4、num.paritions
+		num.paritions参数指定了新创建的主题将包含多少个分区。如果启用了主题自动创建功能（该功能默认是启用的），主题分区的个数就是该参数指定的值。该参数的默认值是l。
+		【要注意，我们可以增加主题分区的个数，但不能减少分区的个数】
+		Kafka集群通过分区对主题进行横向扩展，所以当有新的broker加入集群时，可以通过分区个数来实现集群的负载均衡。
+		
+	5、log.retention.ms
+		Kafka通常根据时间来决定数据可以被保留多久。默认使用log.retention.hours参数来配置时间，默认值为168小时，也就是一周。还有log.retention.minutes和log.retention.ms。如果
+		指定不止一个参数，Kafka优先使用具有最小值的那个参数。
+		
+	6、log.retention.bytes
+		另 一 种方式是通过保留的消息字节数来判断消息是否过期。它的值通过参数log.retention.bytes来指定，作用在每一个分区上。也就是说，如果有一个包含8个分区的主题，并且log.retention.bytes 
+		被设为1GB ，那么这个主题最多可以保留8GB的数据。 	
+		
+	7、log.segment.bytes
+		当消息到达broker时，它们被迫加到分区的当前日志片段上。当日志片段大小达到log.segment.bytes指定的上限（默认是lGB）时，当前日志片段就会被关闭，一个新的日志片段被打开。	
+		如果主题的消息量不大，那么如何调整这个参数的大小就变得尤为重要。如果一个主题每天只接收lOOMB的消息，而 log.segment.bytes使用默认设置，那么需要10天时间才能填满一个日志片段。
+		因为在日志片段被关闭之前消息是不会过期的，所以如果log.retention.ms 被设为604800000（ 也就是 1 周），那么日志片段最多需要17天才会过期。
+		
+	8、 log.segment.ms
+		另一个可以控制日志片段关闭时间的参数是 log.segment.ms时，它指定了多长时间之后日志片段会被关闭。
+		
+	9、message.max.bytes
+		broker通过设置message.max.bytes参数来限制单个消息的大小，默认值是l000000 ，也就是lMB 。
+		
+		
+		
+三、Producer
+	1、Sync Producer
+		低延迟、低吞吐、无数据丢失
+		
+	2、Aync Producer	
+		高延迟、高吞吐、可能会有数据丢失。放入queue中，后台会其线程从queue中取数据写到broker。
+		
+	
+四、消费者：
+	1、分区、再平衡
+		
+
+	2、poll方法。
+		每次调用poll（），它总是返回由生产者写入 Kafka 但还没有被消费者读取过的记录，我们因此可以追踪到哪些记录是被群组里的哪个消费者读取的。之前已经讨论过，Kafka不会像其他 JMS 队列那样需要得到
+	消费者的确认，这是Kafka的一个独特之处。相反，消费者可以使用Kafka来追踪消息在分区里的位置（偏移量）。
+		
+		
+		
+		
+		

@@ -1,6 +1,11 @@
 好的博客：https://blog.csdn.net/joeljx/category_7438264.html
 
 
+CAS、Oauth2、jwt、
+
+spring-security、shiro
+
+
 1、SSO与Central Authentication Service（CAS）
 	SSO 仅仅是一种架构，一种设计，而CAS则是实现SSO的一种手段。两者是抽象与具体的关系。当然，除了CAS之外，实现SSO还有其他手段，比如简单的cookie。
 	

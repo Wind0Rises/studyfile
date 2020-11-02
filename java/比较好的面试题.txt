@@ -63,7 +63,7 @@
 		1、两阶段提交
 			常见于一个系统操作中操作多个数据库。
 		
-		2、TTC方案：try、confirm、cancel
+		2、TCC方案：try、confirm、cancel
 		
 		3、本地消息
 		

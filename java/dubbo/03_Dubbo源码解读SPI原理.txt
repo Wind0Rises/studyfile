@@ -1,0 +1,240 @@
+
+
+一、创建ExtensionLoader
+
+
+二、ExtensionLoader获取Extension。
+
+/**
+ *
+ */
+location：ExtensionLoader
+public T getExtension(String name) {
+
+	// 01、
+	if (StringUtils.isEmpty(name)) {
+		throw new IllegalArgumentException("Extension name == null");
+	}
+	
+	// 02、加载默认的extension。
+	if ("true".equals(name)) {
+		return getDefaultExtension();
+	}
+		
+	// 03、获取并创建Holder，有缓存操作。
+	final Holder<Object> holder = getOrCreateHolder(name);
+	
+	// 04、获取实例。
+	Object instance = holder.get();
+	if (instance == null) {
+		synchronized (holder) {
+			instance = holder.get();
+			if (instance == null) {
+				instance = createExtension(name);
+				holder.set(instance);
+			}
+		}
+	}
+	return (T) instance;
+}
+
+/**
+ * 创建或者获取Holder。
+ */
+location：ExtensionLoader
+private Holder<Object> getOrCreateHolder(String name) {
+	Holder<Object> holder = cachedInstances.get(name);
+	if (holder == null) {
+		cachedInstances.putIfAbsent(name, new Holder<>());
+		holder = cachedInstances.get(name);
+	}
+	return holder;
+}
+
+
+/**
+ * 创建或者获取Holder。
+ */
+location：ExtensionLoader
+private T createExtension(String name) {
+	// 01、通过名称获取对应的Class对象。
+	Class<?> clazz = getExtensionClasses().get(name);
+	if (clazz == null) {
+		throw findException(name);
+	}
+	
+	
+	try {
+		// 02、获取实例，有一个缓存的操作。
+		T instance = (T) EXTENSION_INSTANCES.get(clazz);
+		if (instance == null) {
+			EXTENSION_INSTANCES.putIfAbsent(clazz, clazz.newInstance());
+			instance = (T) EXTENSION_INSTANCES.get(clazz);
+		}
+		
+		// ##############################################################################
+		// #                                  AOP的拓展									#
+		// ##############################################################################
+		injectExtension(instance);
+		
+		//
+		Set<Class<?>> wrapperClasses = cachedWrapperClasses;
+		
+		if (CollectionUtils.isNotEmpty(wrapperClasses)) {
+			for (Class<?> wrapperClass : wrapperClasses) {
+				instance = injectExtension((T) wrapperClass.getConstructor(type).newInstance(instance));
+			}
+		}
+		
+		initExtension(instance);
+		
+		return instance;
+	} catch (Throwable t) {
+		throw new IllegalStateException("Extension instance (name: " + name + ", class: " + type + ") couldn't be instantiated: " + t.getMessage(), t);
+	}
+}
+
+
+/**
+ * 获取所有的MATE-INF下的内容。
+ */
+location：ExtensionLoader
+private Map<String, Class<?>> getExtensionClasses() {
+	Map<String, Class<?>> classes = cachedClasses.get();
+	if (classes == null) {
+		synchronized (cachedClasses) {
+			classes = cachedClasses.get();
+			if (classes == null) {
+				// 【【【【============重点==========】】】】
+				classes = loadExtensionClasses();
+				cachedClasses.set(classes);
+			}
+		}
+	}
+	return classes;
+}
+
+/**
+ *
+private Map<String, Class<?>> loadExtensionClasses() {
+    // 01、缓存默认的ExtensionName。
+	cacheDefaultExtensionName();
+
+	// 加载：【internal】文件夹下文件。
+	Map<String, Class<?>> extensionClasses = new HashMap<>();
+	loadDirectory(extensionClasses, DUBBO_INTERNAL_DIRECTORY, type.getName(), true);
+	loadDirectory(extensionClasses, DUBBO_INTERNAL_DIRECTORY, type.getName().replace("org.apache", "com.alibaba"), true);
+
+	// 加载：【META-INF/dubbo/】文件夹下的文件。
+	loadDirectory(extensionClasses, DUBBO_DIRECTORY, type.getName());
+	loadDirectory(extensionClasses, DUBBO_DIRECTORY, type.getName().replace("org.apache", "com.alibaba"));
+	
+	// 加载：【META-INF/services/】文件夹下的文件。
+	loadDirectory(extensionClasses, SERVICES_DIRECTORY, type.getName());
+	loadDirectory(extensionClasses, SERVICES_DIRECTORY, type.getName().replace("org.apache", "com.alibaba"));
+	return extensionClasses;
+}
+
+/**
+ * 缓存默认的ExtensionName
+ */
+location：ExtensionLoader
+private void cacheDefaultExtensionName() {
+	final SPI defaultAnnotation = type.getAnnotation(SPI.class);
+	if (defaultAnnotation == null) {
+		return;
+	}
+
+	String value = defaultAnnotation.value();
+	if ((value = value.trim()).length() > 0) {
+		String[] names = NAME_SEPARATOR.split(value);
+		if (names.length > 1) {
+			throw new IllegalStateException("More than 1 default extension name on extension " + type.getName() + ": " + Arrays.toString(names));
+		}
+		if (names.length == 1) {
+			cachedDefaultName = names[0];
+		}
+	}
+}
+
+
+/**
+ * 缓存默认的ExtensionName
+ */
+location：ExtensionLoader
+private void loadDirectory(Map<String, Class<?>> extensionClasses, String dir, String type, boolean extensionLoaderClassLoaderFirst) {
+	String fileName = dir + type;
+	try {
+		Enumeration<java.net.URL> urls = null;
+		ClassLoader classLoader = findClassLoader();
+		
+		if (extensionLoaderClassLoaderFirst) {
+			ClassLoader extensionLoaderClassLoader = ExtensionLoader.class.getClassLoader();
+			if (ClassLoader.getSystemClassLoader() != extensionLoaderClassLoader) {
+				urls = extensionLoaderClassLoader.getResources(fileName);
+			}
+		}
+		
+		if(urls == null || !urls.hasMoreElements()) {
+			if (classLoader != null) {
+				urls = classLoader.getResources(fileName);
+			} else {
+				urls = ClassLoader.getSystemResources(fileName);
+			}
+		}
+
+		if (urls != null) {
+			while (urls.hasMoreElements()) {
+				java.net.URL resourceURL = urls.nextElement();
+				loadResource(extensionClasses, classLoader, resourceURL);
+			}
+		}
+	} catch (Throwable t) {
+		logger.error("Exception occurred when loading extension class (interface: " + type + ", description file: " + fileName + ").", t);
+	}
+}
+
+
+三、AOP的拓展。
+private T injectExtension(T instance) {
+	if (objectFactory == null) {
+		return instance;
+	}
+
+	try {
+		// 遍历实例的所有的方法。
+		for (Method method : instance.getClass().getMethods()) {
+		
+			// isSetter(..)：如果是public修饰并且是set开头，并且只有一个参数的，返回true。
+			if (!isSetter(method)) {
+				continue;
+			}
+			
+			// 判断是否被DisableInject修饰，如果被修饰了直接跳过。
+			if (method.getAnnotation(DisableInject.class) != null) {
+				continue;
+			}
+			
+			// 方法的参数不能是基础类型的。
+			Class<?> pt = method.getParameterTypes()[0];
+			if (ReflectUtils.isPrimitives(pt)) {
+				continue;
+			}
+
+			try {
+				String property = getSetterProperty(method);
+				Object object = objectFactory.getExtension(pt, property);
+				if (object != null) {
+					method.invoke(instance, object);
+				}
+			} catch (Exception e) {
+				logger.error("Failed to inject via method " + method.getName() + " of interface " + type.getName() + ": " + e.getMessage(), e);
+			}
+		}
+		
+	} catch (Exception e) {
+		logger.error(e.getMessage(), e);
+	}
+	return instance;
+}
+

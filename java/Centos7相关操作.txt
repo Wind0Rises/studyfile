@@ -1,0 +1,26 @@
+
+
+一、防火墙设置
+	1)、常用命令
+		# 打开端口
+		firewall-cmd --zone=public --add-port=80/tcp --permanent
+		
+		# 获取所有启动的区域的特性
+		firewall-cmd --list-all-zones
+		
+		# 获取所有的端口
+		firewall-cmd --zone=public --list-ports
+		
+		# 重启防火墙
+		firewall-cmd --reload
+		
+		# 查看防火墙的状态
+		firewall-cmd --state
+		
+		
+		
+	2)、常用的端口
+		1、zookeeper
+			firewall-cmd --zone=public --add-port=2181/tcp --permanent
+			firewall-cmd --zone=public --add-port=2888/tcp --permanent
+			firewall-cmd --zone=public --add-port=3888/tcp --permanent
