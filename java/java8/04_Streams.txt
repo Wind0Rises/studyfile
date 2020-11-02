@@ -70,7 +70,23 @@ stream：只能操作一次，
 		map：处理普通集合
 		flatMap：处理集合包集合。
 	
-二、Predicate
 
 
-三、Function
+#####################################################################
+#################			     原理解析			#################
+#####################################################################
+三、StreamSupport
+	1、说明
+		StreamSupport：底层使用的工具类，用于创建和操作Stream。
+		
+	2、方法。
+		/**
+		 *
+		 *
+		 *
+		 */
+		public static <T> Stream<T> stream(Spliterator<T> spliterator, boolean parallel) {
+			Objects.requireNonNull(spliterator);
+			return new ReferencePipeline.Head<>(spliterator, StreamOpFlag.fromCharacteristics(spliterator), parallel);
+		}
+	
