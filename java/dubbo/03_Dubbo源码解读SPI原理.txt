@@ -77,15 +77,20 @@ private T createExtension(String name) {
 		// ##############################################################################
 		injectExtension(instance);
 		
-		//
-		Set<Class<?>> wrapperClasses = cachedWrapperClasses;
 		
+		// ##############################################################################
+		// #                                  wrapper的拓展								#
+		// ##############################################################################
+		Set<Class<?>> wrapperClasses = cachedWrapperClasses;
 		if (CollectionUtils.isNotEmpty(wrapperClasses)) {
 			for (Class<?> wrapperClass : wrapperClasses) {
 				instance = injectExtension((T) wrapperClass.getConstructor(type).newInstance(instance));
 			}
 		}
 		
+		// ##############################################################################
+		// #                         init的拓展要实现Lifecycle		     				#
+		// ##############################################################################
 		initExtension(instance);
 		
 		return instance;
@@ -195,7 +200,52 @@ private void loadDirectory(Map<String, Class<?>> extensionClasses, String dir, S
 }
 
 
+/**
+ * 1、Adaptive
+ * 2、Wrapper：如何判断是否是一个wrapper接口，判断其构造函数是否有对应的参数。
+ * 3、
+ * 
+ */
+location：ExtensionLoader
+private void loadClass(Map<String, Class<?>> extensionClasses, java.net.URL resourceURL, Class<?> clazz, String name) throws NoSuchMethodException {
+	if (!type.isAssignableFrom(clazz)) {
+		throw new IllegalStateException("Error occurred when loading extension class (interface: " + type + ", class line: " + clazz.getName() + "), class " + clazz.getName() + " is not subtype of interface.");
+	}
+	
+	// 如何判断是否是一个wrapper接口，判断其构造函数是否有对应的参数。
+	if (clazz.isAnnotationPresent(Adaptive.class)) {
+		cacheAdaptiveClass(clazz);
+		
+	// 如何判断是否是一个wrapper接口，判断其构造函数是否有对应的参数。
+	} else if (isWrapperClass(clazz)) {
+		cacheWrapperClass(clazz);
+	} else {
+		clazz.getConstructor();
+		if (StringUtils.isEmpty(name)) {
+			name = findAnnotationName(clazz);
+			if (name.length() == 0) {
+				throw new IllegalStateException("No such extension name for the class " + clazz.getName() + " in the config " + resourceURL);
+			}
+		}
+
+		String[] names = NAME_SEPARATOR.split(name);
+		if (ArrayUtils.isNotEmpty(names)) {
+			cacheActivateClass(clazz, names[0]);
+			for (String n : names) {
+				cacheName(clazz, n);
+				saveInExtensionClass(extensionClasses, clazz, n);
+			}
+		}
+	}
+}
+
 三、AOP的拓展。
+/**
+ * 找到instance中名称为set的不被@DisableInject修饰，并且只有一个参数的方法。
+ * 
+ * 
+ */
+location：ExtensionLoader
 private T injectExtension(T instance) {
 	if (objectFactory == null) {
 		return instance;
@@ -222,6 +272,7 @@ private T injectExtension(T instance) {
 			}
 
 			try {
+				// 获取属性名称。
 				String property = getSetterProperty(method);
 				Object object = objectFactory.getExtension(pt, property);
 				if (object != null) {
@@ -238,3 +289,11 @@ private T injectExtension(T instance) {
 	return instance;
 }
 
+
+/**
+ * 缓存默认的ExtensionName
+ */
+location：ExtensionLoader
+private String getSetterProperty(Method method) {
+	return method.getName().length() > 3 ? method.getName().substring(3, 4).toLowerCase() + method.getName().substring(4) : "";
+}

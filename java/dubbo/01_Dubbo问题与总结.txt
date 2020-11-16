@@ -16,3 +16,16 @@
 		2、RoundRobin：轮询。
 		3、LeastActive：最少活跃调用数。
 		4、ConsistenHash：一致性Hash。
+		
+		
+二、总结
+	1、dubbo有哪几种配置方式，这些配置项的加载顺序？
+		SystemConfiguration：系统配置，启动命令时指定的。
+		EnvironmentConfiguration：
+		InmemoryConfiguration：管理台。
+		PropertiesConfiguration：dubbo.properties文件
+		
+		系统配置最高	>  	配置中心app 	>  	配置中心全局 	> 	bean初始化配置  	>    properties文件
+		系统配置最高	> 	bean初始化配置	>   配置中心app 	>  	配置中心全局 	  	>    properties文件
+		
+	2、dubbo在线修改配置，监听器。
