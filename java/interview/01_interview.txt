@@ -1,0 +1,8 @@
+1、jvm的内存模型。
+2、https://blog.csdn.net/longzhutengyue/article/details/95534447
+
+
+
+1、redis的常用的数据结构、已经在实际开发中使用场景。
+2、redis的key的过期策略。
+3、redis实现分布式锁。

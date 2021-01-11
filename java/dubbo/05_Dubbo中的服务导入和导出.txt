@@ -8,11 +8,11 @@ DubboBootstrapApplicationListener
 
 
 一、服务的导出。
-
+#########################################################
+#         			Dubbo、Spring的入口					#
+#########################################################
 /**
- *
- *
- *
+ * Dubbo设置监听器。
  */
 location：DubboBootstrapApplicationListener
 public void onApplicationContextEvent(ApplicationContextEvent event) {
@@ -25,9 +25,7 @@ public void onApplicationContextEvent(ApplicationContextEvent event) {
 
 
 /**
- *
- *
- *
+ * 启动DubboBoostrap这个类。
  */
 location：DubboBootstrapApplicationListener
 private void onContextRefreshedEvent(ContextRefreshedEvent event) {
@@ -35,8 +33,10 @@ private void onContextRefreshedEvent(ContextRefreshedEvent event) {
 }
 
 
+
+
 /**
- *
+ * 
  */
 location：DubboBootstrap
 public DubboBootstrap start() {
@@ -71,7 +71,155 @@ public DubboBootstrap start() {
 	return this;
 }
 
+#########################################################
+#         				Dubbo初始化过程					#
+#########################################################
+/**
+ * 初始化总体流程。
+ */
+location：DubboBootstrap
+private void initialize() {
+	// 01、是否已经初始化了。
+	if (!initialized.compareAndSet(false, true)) {
+		return;
+	}
 
+	// 02、
+	ApplicationModel.iniFrameworkExts();
+
+	startConfigCenter();
+
+	useRegistryAsConfigCenterIfNecessary();
+
+	startMetadataReport();
+
+	loadRemoteConfigs();
+
+	checkGlobalConfigs();
+
+	initMetadataService();
+
+	initMetadataServiceExporter();
+
+	initEventListener();
+
+	if (logger.isInfoEnabled()) {
+		logger.info(NAME + " has been initialized!");
+	}
+}
+
+
+/**
+ * initialize-02、拓展初始化
+ * 
+ * FrameworkExt三个实现类：ConfigManager、Environment、ServiceRepository。
+ * 
+ */
+location：ApplicationModel
+public static void iniFrameworkExts() {
+	Set<FrameworkExt> exts = ExtensionLoader.getExtensionLoader(FrameworkExt.class).getSupportedExtensionInstances();
+	for (FrameworkExt ext : exts) {
+		ext.initialize();
+	}
+}
+
+/**
+ * initialize-03、配置中心初始化。
+ * 
+ */
+location：DubboBootstrap
+private void startConfigCenter() {
+
+	Collection<ConfigCenterConfig> configCenters = configManager.getConfigCenters();
+
+	if (CollectionUtils.isNotEmpty(configCenters)) {
+		CompositeDynamicConfiguration compositeDynamicConfiguration = new CompositeDynamicConfiguration();
+		for (ConfigCenterConfig configCenter : configCenters) {
+			configCenter.refresh();
+			ConfigValidationUtils.validateConfigCenterConfig(configCenter);
+			compositeDynamicConfiguration.addConfiguration(prepareEnvironment(configCenter));
+		}
+		environment.setDynamicConfiguration(compositeDynamicConfiguration);
+	}
+	configManager.refreshAll();
+}
+
+/**
+ * 
+ * 
+ */
+location：ConfigManager
+public Collection<ConfigCenterConfig> getConfigCenters() {
+	return getConfigs(getTagName(ConfigCenterConfig.class));
+}
+
+
+/**
+ * 
+ * 
+ */
+location：AbstractConfig
+public static String getTagName(Class<?> cls) {
+	String tag = cls.getSimpleName();
+	for (String suffix : SUFFIXES) {
+		if (tag.endsWith(suffix)) {
+			tag = tag.substring(0, tag.length() - suffix.length());
+			break;
+		}
+	}
+	return StringUtils.camelToSplitName(tag, "-");
+}
+
+/**
+ * 
+ * 
+ */
+location：ConfigManager
+protected <C extends AbstractConfig> Collection<C> getConfigs(String configType) {
+	return (Collection<C>) read(() -> getConfigsMap(configType).values());
+}
+
+/**
+ * 
+ * 
+ */
+location：ConfigManager
+private <V> V read(Callable<V> callable) {
+	Lock readLock = lock.readLock();
+	V value = null;
+	try {
+		readLock.lock();
+		value = callable.call();
+	} catch (Throwable e) {
+		throw new RuntimeException(e);
+	} finally {
+		readLock.unlock();
+	}
+	return value;
+}
+
+/**
+ * 
+ * 
+ */
+location：ConfigManager
+public void refreshAll() {
+	write(() -> {
+		getApplication().ifPresent(ApplicationConfig::refresh);
+		getMonitor().ifPresent(MonitorConfig::refresh);
+		getModule().ifPresent(ModuleConfig::refresh);
+
+		getProtocols().forEach(ProtocolConfig::refresh);
+		getRegistries().forEach(RegistryConfig::refresh);
+		getProviders().forEach(ProviderConfig::refresh);
+		getConsumers().forEach(ConsumerConfig::refresh);
+	});
+}
+
+
+#########################################################
+#         			Dubbo服务导出过程					#
+#########################################################
 /**
  * 获取所有的服务，并进行导出服务。
  */

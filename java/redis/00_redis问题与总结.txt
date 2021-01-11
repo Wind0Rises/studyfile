@@ -7,7 +7,7 @@
 	
 	
 	
-	2、生成上的redis是如何配置的。	
+	2、生产上的redis是如何配置的。	
 		答：* 设置rdb的规则，【save 时间秒  至少改变的key的个数】。十五分钟至少有一个，就保存rdb，如果5分钟有100，就保存一次rdb，如果一分钟有1000key发生改变，就保存一次。
 			* 开启aof模式，【appendonly yes】，并配置fsync，生成配置的都是everysec每秒复制一次，【还有其他的两种模式：一种是always，一种是：no】然后配置一下aof的rewrite的策略，可以通过
 			  auto-aof-rewrite-percentage和auto-aof-rewrite-min-size。
@@ -35,16 +35,19 @@
 		
 		
 		* 达到最大内存时六种key淘汰策略【maxmemory-policy volatile-lru】
-			volatile-lru：【设置了过期时间】的键空间中，移除【最近最少使用】的key；
-			allkeys-lru：检查【所有的key】并移除【最近最少使用】的key；
-			volatile-random：【设置了过期时间】的键空间中，移除【随机】的key；
-			allkeys-random：检查【所有的key】并移除【随机】key；
-			volatile-ttl：在【设置了过期时间】的键空间中，移除【将要过期】的key；
+			volatile-lru：		【设置了过期时间】的键空间中，移除【最近最少使用】的key；
+			volatile-random：	【设置了过期时间】的键空间中，移除【随机】的key；
+			volatile-ttl：		【设置了过期时间】的键空间中，移除【将要过期】的key；
+			
+			allkeys-random：	【所有的key】并移除【随机】key；
+			allkeys-lru：		【所有的key】并移除【最近最少使用】的key；
+			
 			noeviction，当内存使用达到阀值的时候，所有引起申请内存的命令会报错；
 			
 	
 	5、redis五种数据的用途
 		* string 
-		* hash   保存
-		* l
-		*
+		* hash   保
+		* list
+		* set
+		* zset
