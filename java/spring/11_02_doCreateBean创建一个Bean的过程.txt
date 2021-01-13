@@ -1,12 +1,34 @@
 /**
+ * 【创建的整体的流程】
+ * 		1、SmartInstantiationAwareBeanPostProcessor#determineCandidateConstructors();				| 	实例化对象模块	
+ * 		2、通过反射创建对应Bean Definition的实例。													| 	实例化对象模块
  *
+ *
+ * 		3、MergedBeanDefinitionPostProcessor#postProcessMergedBeanDefinition()
+ *		
+ * 		
+ * 		4、InstantiationAwareBeanPostProcessor的postProcessAfterInstantiation(..)					|	设置属性模块   			【自动注入操作在这个模块进行的？？？？】
+ * 		5、设置对象的属性。																			|  	设置属性模块
+ *
+ *
+ * 		6、调用各种Aware接口方法、BeanNameAware、ClassLoaderAware、BeanFactoryAware					| 	初始化阶段
+ * 		7、BeanPostProcessor#postProcessBeforeInitializing()方法									| 	初始化阶段
+ * 		8、InitializingBean#afterPropertiesSet()方法。												| 	初始化阶段
+ *		9、调用init-method的方法																	| 	初始化阶段
+ * 		10、BeanPostProcessor#postProcessAfterInitializing()										| 	初始化阶段
+ * 
  */
 location：AbstractAutowireCapableBeanFactory
 protected Object doCreateBean(final String beanName, final RootBeanDefinition mbd, final Object[] args)throws BeanCreationException {
 
 	BeanWrapper instanceWrapper = null;
 	
-	// factoryBeanInstanceCache：为完成的FactoryBean 实例缓存， key：FactoryBean name   value：BeanWrapper
+	/**
+	 * factoryBeanInstanceCache：为已经完成的FactoryBean实例缓存， 
+	 * key：FactoryBean-name   
+	 * value：BeanWrapper
+	 *
+	 */
 	if (mbd.isSingleton()) {
 		instanceWrapper = this.factoryBeanInstanceCache.remove(beanName);
 	}
@@ -21,6 +43,7 @@ protected Object doCreateBean(final String beanName, final RootBeanDefinition mb
 	if (instanceWrapper == null) {
 		instanceWrapper = createBeanInstance(beanName, mbd, args);
 	}
+	
 	
 	final Object bean = (instanceWrapper != null ? instanceWrapper.getWrappedInstance() : null);
 	Class<?> beanType = (instanceWrapper != null ? instanceWrapper.getWrappedClass() : null);
@@ -39,12 +62,15 @@ protected Object doCreateBean(final String beanName, final RootBeanDefinition mb
 			} catch (Throwable ex) {
 				throw new BeanCreationException(mbd.getResourceDescription(), beanName, "Post-processing of merged bean definition failed", ex);
 			}
+			
 			mbd.postProcessed = true;
 		}
 	}
+	
 
-	// 是否是单例模式  【并且】  是否允许循环引用  【并且】  是否是当前真正创建的Bean。
+	// 是否是单例模式  【并且】  是否允许循环引用  【并且】  是否是当前正在创建的Bean。
 	boolean earlySingletonExposure = (mbd.isSingleton() && this.allowCircularReferences && isSingletonCurrentlyInCreation(beanName));
+	
 	
 	if (earlySingletonExposure) {
 		if (logger.isDebugEnabled()) {
@@ -67,9 +93,9 @@ protected Object doCreateBean(final String beanName, final RootBeanDefinition mb
 	Object exposedObject = bean;
 	try {
 		/**
-		 * ☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆
-		 * ☆               设置属性，这个要重点看                    							   ☆
-		 * ☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆
+		 * ☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆
+		 * ☆               设置属性，这个要重点看                    	☆
+		 * ☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆
 		 */
 		populateBean(beanName, mbd, instanceWrapper);
 		
@@ -78,9 +104,9 @@ protected Object doCreateBean(final String beanName, final RootBeanDefinition mb
 		
 		
 			/**
-			 * ☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆
-			 * ☆               设置属性，这个要重点看                   							   ☆
-			 * ☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆
+			 * ☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆
+			 * ☆              		初始化操作，重点	                 ☆
+			 * ☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆
 			 */
 			exposedObject = initializeBean(beanName, exposedObject, mbd);
 			
@@ -160,7 +186,7 @@ protected BeanWrapper createBeanInstance(String beanName, RootBeanDefinition mbd
 
 	
 	/**
-	 * 测试工厂方法创建Bean。
+	 * 通过工厂方法创建Bean。
 	 */
 	if (mbd.getFactoryMethodName() != null)  {
 		return instantiateUsingFactoryMethod(beanName, mbd, args);
@@ -200,6 +226,7 @@ protected BeanWrapper createBeanInstance(String beanName, RootBeanDefinition mbd
 	/**
 	 * ######################################################################
 	 * #                    初始化没有特殊处理的Bean，						#
+	 * #                    通过反射创建对应Bean的实例						#
 	 * ######################################################################
 	 */
 	return instantiateBean(beanName, mbd);
@@ -234,8 +261,10 @@ protected Constructor<?>[] determineConstructorsFromBeanPostProcessors(@Nullable
 location：AbstractAutowireCapableBeanFactory
 protected BeanWrapper instantiateBean(final String beanName, final RootBeanDefinition mbd) {
 	try {
+	
 		Object beanInstance;
 		final BeanFactory parent = this;
+			
 		if (System.getSecurityManager() != null) {
 			beanInstance = AccessController.doPrivileged(new PrivilegedAction<Object>() {
 				@Override
@@ -248,12 +277,18 @@ protected BeanWrapper instantiateBean(final String beanName, final RootBeanDefin
 				}
 			}, getAccessControlContext());
 		} else {
+		
+			/**
+			 * getInstantiationStrategy():获取到CglibSubclassingInstantiationStrategy()实例对象。
+			 */
 			beanInstance = getInstantiationStrategy().instantiate(mbd, beanName, parent);
 		}
 		
 		// 创建BeanWrapper并初始化。
 		BeanWrapper bw = new BeanWrapperImpl(beanInstance);
 		initBeanWrapper(bw);
+		
+		
 		return bw;
 	} catch (Throwable ex) {
 		throw new BeanCreationException(mbd.getResourceDescription(), beanName, "Instantiation of bean failed", ex);
@@ -356,7 +391,6 @@ protected void populateBean(String beanName, RootBeanDefinition mbd, BeanWrapper
 		if (!pvs.isEmpty()) {
 			throw new BeanCreationException(mbd.getResourceDescription(), beanName, "Cannot apply property values to null instance");
 		} else {
-			
 			return;
 		}
 	}
@@ -384,14 +418,17 @@ protected void populateBean(String beanName, RootBeanDefinition mbd, BeanWrapper
 		return;
 	}
 
+	// 判断注入的类型，如果注入类型为byName或者是byType。
 	if (mbd.getResolvedAutowireMode() == RootBeanDefinition.AUTOWIRE_BY_NAME || mbd.getResolvedAutowireMode() == RootBeanDefinition.AUTOWIRE_BY_TYPE) {
 		
 		MutablePropertyValues newPvs = new MutablePropertyValues(pvs);
-
+		
+		// 通过名称进行自动依赖注入。
 		if (mbd.getResolvedAutowireMode() == RootBeanDefinition.AUTOWIRE_BY_NAME) {
 			autowireByName(beanName, mbd, bw, newPvs);
 		}
 
+		// 通过类型进行自动依赖注入。
 		if (mbd.getResolvedAutowireMode() == RootBeanDefinition.AUTOWIRE_BY_TYPE) {
 			autowireByType(beanName, mbd, bw, newPvs);
 		}
@@ -424,14 +461,19 @@ protected void populateBean(String beanName, RootBeanDefinition mbd, BeanWrapper
 }
 
 
+
+
+
 /**
- * 
+ * ######################################################
+ * #					初始化操作						#
+ * ######################################################
  */
 location：AbstractAutowireCapableBeanFactory
 protected Object initializeBean(final String beanName, final Object bean, RootBeanDefinition mbd) {
 	/**
 	 * ☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆
-	 * ☆					    	  Aware对应的Bean调用对应的Aware的方法。			 						☆
+	 * ☆					    	  Aware对应的Bean调用对应的Aware的方法。			 					☆
 	 * ☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆
 	 */
 	if (System.getSecurityManager() != null) {
@@ -530,9 +572,12 @@ protected void invokeInitMethods(String beanName, final Object bean, RootBeanDef
 	 * 调用InitializingBean的afterPropertiesSet()方法。
 	 */
 	if (isInitializingBean && (mbd == null || !mbd.isExternallyManagedInitMethod("afterPropertiesSet"))) {
+		
 		if (logger.isDebugEnabled()) {
 			logger.debug("Invoking afterPropertiesSet() on bean with name '" + beanName + "'");
 		}
+		
+		
 		if (System.getSecurityManager() != null) {
 			try {
 				AccessController.doPrivileged(new PrivilegedExceptionAction<Object>() {
