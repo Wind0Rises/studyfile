@@ -1,5 +1,8 @@
+Key:
+	命令：
+		keys：
+		type key：
 		
-	
 
 string:
 	普通字符串操作。
@@ -13,7 +16,6 @@ string:
 			xx：当且仅当key存在时，进行操作。
 			在Redis 2.6.12版本以前，set命令总是返回ok。
 			从Redis 2.6.12版本开始，set命令只在设置操作成功完成时才返回ok;如果命令使用了nx或者xx选项，但是因为条件没达到而造成设置操作未执行，那么命令将返回空批量回复（NULL Bulk Reply）。
-		
 	
 		setnx key value 
 			当且仅当key不存在时，进行插入操作。
@@ -488,7 +490,6 @@ zset集合()：
 
 			
 Lua脚本
-
 	命令：
 		eval script numkeys key [key ..] arg [arg ..]
 			执行script脚本，numkeys指定后面有几个键名，最后是参数值。

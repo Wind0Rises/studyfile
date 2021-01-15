@@ -1,7 +1,0 @@
-https://www.acfun.cn/v/ac10872282_6
-
-异步复制、同步双写。支持
-
-双master模式
-多master多slave的方式、异步复制。
-多master多slave的方式、同步双写。
