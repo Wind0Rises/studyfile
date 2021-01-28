@@ -29,6 +29,9 @@ public class ConditionObject implements Condition, java.io.Serializable {
 
 	/**
 	 * 实现可中断条件等待。
+	 *
+	 * 类似Synchronized与Object的await()方法。
+	 * 
 	 */
 	public final void await() throws InterruptedException {
 		// 判断线程是否被中断了

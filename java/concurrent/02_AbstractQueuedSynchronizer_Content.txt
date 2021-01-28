@@ -51,6 +51,16 @@
 
 
 	3、内部类：Node节点。
+		###############################################################################################
+		#	/**                                                                                           #
+		#	* <note>                                                                                     #
+		#	*		1、内部有区分是共享mode还是排他mode。                                                 #
+		#	* 		2、保存当前线程。                                                                     #
+		#	*    	3、保存前驱、后继节点。                                                               #
+		#	*		4、以及节点的状态。                                                                   #
+		#	* </note>                                                                                    #
+		#	*/                                                                                           #
+		###############################################################################################
 		class Node {
 			static final Node SHARED = new Node();
 			
@@ -139,7 +149,8 @@ public final void acquire(int arg) {
 	 * 获取锁失败 【并且】 加入队列失败		===直接返回===>   中断线程。
 	 *	
 	 * addWaiter(..)：把节点添加到AQS队列的尾部。并把添加的节点返回。
-	 * acquireQueued(..)：
+	 * acquireQueued(..)：如果该节点的头节点的Head，再次尝试获取锁，如果失败，根据不同的状态进行不同的处理，可能更新状态，可能挂起线程，可能中断。
+	 * 					  acquireQueued内部逻辑是一个自旋操作，当挂起的线程
 	 */
  	if (!tryAcquire(arg) && acquireQueued(addWaiter(Node.EXCLUSIVE), arg)) {
 		selfInterrupt();
@@ -148,7 +159,8 @@ public final void acquire(int arg) {
 
 
 /**
- * 尝试以独占方式获取锁。查询对象的状态是否允许以独占模式获取对象，如果允许则获取对象.
+ * 尝试以独占方式获取锁。
+ * 查询对象的状态是否允许以独占模式获取对象，如果允许则获取对象.
  */
 protected boolean tryAcquire(int arg) {
 	throw new UnsupportedOperationException();
@@ -158,6 +170,7 @@ protected boolean tryAcquire(int arg) {
 
 
 /**
+ * 节点保存当前线程。
  * 创建一个新的节点，并把节点添加到等待队里的尾部。（这个队列是AQS的双向链表，由tail尾节点和head头结点组成）
  * 并返回刚刚创建并设置为尾结点的节点。
  * 
@@ -190,7 +203,11 @@ private Node addWaiter(Node mode) {
 		}
 	}
 	
-	// 如果尾节点为空，或者是CAS更新尾节点失败时需要：不断尝试把传入的Node放入AQS节点上，相当于一个自旋操作。
+	/**
+	 * 
+	 * 如果尾节点为空，首先new Node()，并把这个节点赋值给头节点（CAS操作），并把头节点赋值给尾节点。
+	 * 然后把当前的节点的前驱设置为（其实上前一个）尾节点，并把当前节点设置为尾节点。
+	 */
 	enq(node);
 	
 	return node;
@@ -260,8 +277,10 @@ private final boolean compareAndSetHead(Node update) {
 
 
 /**
- * 1、判断该节点的前驱节点是否是头节点。
- * 2、如果是头节点，尝试获取锁，如果获取锁成功。把该节点设置为头节点，并把该节点的线程和前驱节点设置为空，把原有的头节点的后继节点设置为null。
+ * 1、判断该节点的前驱节点是否是头节点
+ * 2、如果是头节点，尝试获取锁，
+ *		- 如果获取锁成功。【返回false】把该节点设置为头节点，并把该节点的线程和前驱节点设置为空，把原有的头节点的后继节点设置为null。
+ *		- 如果获取失败，继续执行下去。
  * 3、如果不是头节点或者是头结点但是获取锁失败。
  * 
  * node为刚刚设置的尾节点。这个时候尾节点可能已经变了。
@@ -476,7 +495,11 @@ private void cancelAcquire(Node node) {
  *		2、尝试释放锁失败，直接返回。
  */
 public final boolean release(int arg) {
+	/**
+	 * 只用尝试释放成功以后，才会执行if语句内部的内容。
+	 */
 	if (tryRelease(arg)) {
+	
 		Node h = head;
 		
 		// 头节点不为空，并且状态不等于0(0代表是初始化状态)
@@ -740,13 +763,8 @@ protected final boolean tryRelease(int releases) {
  * 尝试获取锁失败 ==>
  */
 public final void acquireShared(int arg) {
-	/**
-	 * 尝试获取共享锁。
-	 * 		返回值： < 0  ===  失败
-	 * 		返回值： = 0  ===  如果共享模式下获取成功，但是后续共享模式获取不成功。
-	 * 		返回值： > 0  ===  如果共享模式下的获取成功并且后续共享模式下的获取也可能成功，
-	 *						   则为正值，在这种情况下，后续的等待线程必须检查可用性。
-	 */
+	
+	// 尝试获取共享锁。 
 	if (tryAcquireShared(arg) < 0) {
 		doAcquireShared(arg);
 	}
@@ -866,6 +884,8 @@ private void setHeadAndPropagate(Node node, int propagate) {
 	/**
 	 * propagate > 0 说明获取锁成功，代表可以继续获取锁。如果当前节点获取共享锁成功以后，
 	 * 判断老的头结点和新的头结点，如果新老头节点为有效状态（waitStatus < 0）进入循环。
+	 * 
+	 * propagate = 0 自动唤醒模式。
 	 */
 	if (propagate > 0 || h == null || h.waitStatus < 0 || (h = head) == null || h.waitStatus < 0) {
 	
