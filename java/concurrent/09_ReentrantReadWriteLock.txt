@@ -1,0 +1,101 @@
+一、
+	案例：
+	
+	public class ReentrantReadWriteLock implements ReadWriteLock, java.io.Serializable {
+		
+		public ReentrantReadWriteLock() {
+			this(false);
+		}
+		
+		public ReentrantReadWriteLock(boolean fair) {
+			sync = fair ? new FairSync() : new NonfairSync();
+			readerLock = new ReadLock(this);
+			writerLock = new WriteLock(this);
+		}
+		
+
+		/**
+		 * 内部维持一个同步器；
+		 */
+		private Syn syn;
+		
+		
+		
+		
+		/**
+		 * 有两个内部类，都Syn的子类。Syn继承了AbstractQueuedASynchronizer。
+		 */
+		 class Syn extends AbstractQueuedSynchronizer {
+			...
+		 }
+		 
+		 /**
+		  * 公平的同步器。
+		  */
+		 class FairSync extends Syn {
+		 
+		 }
+		 
+		 /**
+		  * 非公平的同步器。
+		  */
+		 class NonfairSync extends Syn {
+		 
+		 }
+		 
+		 
+		 
+		/**
+		 * 读锁
+		 */
+		private final ReentrantReadWriteLock.ReadLock readerLock;
+		
+		/**
+		 * 写锁。
+		 */
+		private final ReentrantReadWriteLock.WriteLock writerLock;
+		
+		
+		/**
+		 * ==============	读锁。使用AQS的共享模式	===================
+		 */
+		public static class ReadLock implements Lock, java.io.Serializable {
+		
+			private final Sync sync;
+
+			protected ReadLock(ReentrantReadWriteLock lock) {
+				sync = lock.sync;
+			}
+			
+			public void lock() {
+				sync.acquireShared(1);
+			}
+			
+			......
+		}	
+		
+		
+		/**
+		 * ==============	读锁。使用AQS的排他模式	===================
+		 */
+		public static class WriteLock implements Lock, java.io.Serializable {
+		
+			private final Sync sync;
+
+			protected WriteLock(ReentrantReadWriteLock lock) {
+				sync = lock.sync;
+			}
+
+			public void lock() {
+				sync.acquire(1);
+			}
+			
+			......
+		}
+	}
+	
+	
+二、模式总结
+	ReadWriteLock接口：锁的定义。
+	ReentrantReadWriteLock类：锁的具体实现。
+	

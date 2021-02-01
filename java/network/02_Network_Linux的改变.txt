@@ -1,4 +1,1 @@
-
-
-
-一、从select到epoll的转变。
+一、从select、poll到epoll的转变。
