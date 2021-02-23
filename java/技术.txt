@@ -1,4 +1,0 @@
-actuator：监控
-spring boot admin
-
-画图工具：https://www.processon.com/
