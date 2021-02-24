@@ -20,9 +20,23 @@ Java堆：被所有线程共享，在虚拟机启动时就创建，此区域唯�
 
 ### 1.3 主存、工作空间（TODO）
 
-java memory model与JVM的联系
+#### 1.3.1 Java Memory Model与JVM的关系	
 
-虚拟机栈与程序计数器 == 工作空间？？
+java 内存模型：Java内存模型规定所有的变量都是存在主存中，每个线程都有自己的工作内存。线程堆变量的操作都必须在工作内存进行，不能直接堆主存进行操作，并且每个线程不能访问其他线程的工作内存。
+
+![java memory model](..\zzz_image\jvm\java memory model.png)
+
+
+
+JVM：java 虚拟机内存模型如下图：
+
+![JVM model](..\zzz_image\jvm\JVM model.png)
+
+
+
+**JVM的虚拟机栈与程序计数器 == Java Memory Model的工作空间**
+
+
 
 CPU的内存模型是什么样的。
 
