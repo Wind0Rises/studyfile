@@ -173,6 +173,8 @@ protected Object doCreateBean(final String beanName, final RootBeanDefinition mb
 
 /**
  * 构建一个BeanWrapper对象。
+ * 
+ * 为指定的Bean创建一个新的实例，可以通过适合的实例化策略；工厂方法、构造函数自动装配、或者简单的实例化。
  */
 location：AbstractAutowireCapableBeanFactory
 protected BeanWrapper createBeanInstance(String beanName, RootBeanDefinition mbd, Object[] args) {
