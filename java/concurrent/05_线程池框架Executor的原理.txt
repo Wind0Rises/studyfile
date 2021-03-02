@@ -3,7 +3,7 @@
 
 一、总结、
 	1)、线程池参数已经说明
-		1、corePoolSize必须要小于maximumPoolSize。
+		1、corePoolSize必须要小于活等于maximumPoolSize。
 		2、新建一个线程的时候，【不会】初始化corePoolSize数量的线程，只有添加任务到线程的时候才会创建线程。
 		
 	2)、流程。
@@ -21,9 +21,9 @@
 		forkjoin框架使用的线程池【ForkJoinPool】：
 		
 		常用的拒绝策略有哪些【都是实现RejectedExecutionHandler】：AbortPolicy、CallerRunsPolicy、DiscardPolicy、DiscardOldestPolicy
-			AbortPolicy：直接抛出异常。
+			AbortPolicy：直接抛出异常。【流产、夭折、终止】
 			CallerRunsPolic：运行当前的。
-			DiscardPolicy：直接抛弃。
+			DiscardPolicy：直接抛弃。【抛弃、放弃、丢弃】
 			DiscardOldestPolicy：删除等待队列中队尾的一个，然后把新的添加进入。
 
 

@@ -8,7 +8,7 @@
  *		
  * 		
  * 		4、InstantiationAwareBeanPostProcessor的postProcessAfterInstantiation(..)					|	设置属性模块   			【自动注入操作在这个模块进行的？？？？】
- * 		5、设置对象的属性。																			|  	设置属性模块
+ * 		5、设置对象的属性。InstantiationAwareBeanPostProcessor#postProcessPropertyValues			|  	设置属性模块
  *
  *
  * 		6、调用各种Aware接口方法、BeanNameAware、ClassLoaderAware、BeanFactoryAware					| 	初始化阶段
