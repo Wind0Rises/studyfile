@@ -10,13 +10,15 @@
 
 ### 1.2 Spring Bean的初始化流程
 
+* InstantiationAwareBeanPostProcessor#postProcessBeforeInstantiation(Class<?> beanClass, String beanName) 
+
 * SmartInstantiationAwareBeanPostProcessor#determineCandidateConstructors()确定候选构造函数，一般不会出现这样的Bean。
 * 通过反射获取Bean Definition对应的实例，并包装成BeanWrapper。
 * MergedBeanDefinitionPostProcessor#postProcessMergedBeanDefinition(....)合并Bean Definition。
 * InstantiationAwareBeanPostProcessor#postProcessAfterInstantiation(Class<?> beanClass, String beanName)实例化前的操作。
 * 设置Bean的属性值。InstantiationAwareBeanPostProcessor#postProcessPropertyValues(PropertyValues pvs, PropertyDescriptor[] pds, Object bean, String beanName)
 * 调用各种Aware实例的方法（BeanNameAware、BeanClassLoaderAware、BeanFactoryAware）
-* 调用BeanPostProcessor#postProcessBeforeInitialization(Object bean, String beanName)初始化前的操作。
+* 调用BeanPostProcessor#postProcessBeforeInitialization(Object bean, String beanName)初始化前的操作。**@PostConstruct就是在这一步执行的，对应的CommonAnnotationBeanPostProcessor处理器。**
 * 如果Bean实现了InitializingBean类，调用InitializingBean#afterPropertiesSet()方法。
 * 调用init-method方法。
 * 调用BeanPostProcessor#postProcessAfterInitialization(Object bean, String beanName)初始化后的操作。
@@ -36,7 +38,19 @@
 
 
 
-### 1.5 Spring事务 
+### 1.5 Spring如何解决循环依赖的问题？
+
+* 什么是循环依赖。
+* 循环依赖怎么解决。
+* Spring中为什么要使用三级缓存来解决循环依赖
+
+
+
+
+
+* 单例的、非构造函数注入。
+
+
 
 ## 二、Spring AOP原理
 

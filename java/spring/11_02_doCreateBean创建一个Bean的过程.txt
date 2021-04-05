@@ -18,6 +18,70 @@
  * 		10、BeanPostProcessor#postProcessAfterInitializing()										| 	初始化阶段
  * 
  */
+
+protected Object createBean(String beanName, RootBeanDefinition mbd, Object[] args) throws BeanCreationException {
+	if (logger.isDebugEnabled()) {
+		logger.debug("Creating instance of bean '" + beanName + "'");
+	}
+	RootBeanDefinition mbdToUse = mbd;
+
+	Class<?> resolvedClass = resolveBeanClass(mbd, beanName);
+	if (resolvedClass != null && !mbd.hasBeanClass() && mbd.getBeanClassName() != null) {
+		mbdToUse = new RootBeanDefinition(mbd);
+		mbdToUse.setBeanClass(resolvedClass);
+	}
+
+	try {
+		mbdToUse.prepareMethodOverrides();
+	} catch (BeanDefinitionValidationException ex) {
+		throw new BeanDefinitionStoreException(mbdToUse.getResourceDescription(), beanName, "Validation of method overrides failed", ex);
+	}
+
+	try {
+		/**
+		 * 第一步：InstantiationAwareBeanPostProcessor
+		 */
+		Object bean = resolveBeforeInstantiation(beanName, mbdToUse);
+		if (bean != null) {
+			return bean;
+		}
+	} catch (Throwable ex) {
+		throw new BeanCreationException(mbdToUse.getResourceDescription(), beanName, "BeanPostProcessor before instantiation of bean failed", ex);
+	}
+
+	Object beanInstance = doCreateBean(beanName, mbdToUse, args);
+	if (logger.isDebugEnabled()) {
+		logger.debug("Finished creating instance of bean '" + beanName + "'");
+	}
+	return beanInstance;
+}
+
+/**
+ * InstantiationAwareBeanPostProcessor: postProcessBeforeInstantiation(Class<?> beanClass, String beanName)
+ */
+location：AbstractAutowireCapableBeanFactory
+protected Object resolveBeforeInstantiation(String beanName, RootBeanDefinition mbd) {
+	Object bean = null;
+	if (!Boolean.FALSE.equals(mbd.beforeInstantiationResolved)) {
+		if (!mbd.isSynthetic() && hasInstantiationAwareBeanPostProcessors()) {
+			Class<?> targetType = determineTargetType(beanName, mbd);
+			if (targetType != null) {
+				bean = applyBeanPostProcessorsBeforeInstantiation(targetType, beanName);
+				if (bean != null) {
+					bean = applyBeanPostProcessorsAfterInitialization(bean, beanName);
+				}
+			}
+		}
+		mbd.beforeInstantiationResolved = (bean != null);
+	}
+	return bean;
+}
+
+
+ 
+/**
+ *
+ */
 location：AbstractAutowireCapableBeanFactory
 protected Object doCreateBean(final String beanName, final RootBeanDefinition mbd, final Object[] args)throws BeanCreationException {
 
@@ -549,6 +613,12 @@ private void invokeAwareMethods(final String beanName, final Object bean) {
 location：AbstractAutowireCapableBeanFactory
 public Object applyBeanPostProcessorsBeforeInitialization(Object existingBean, String beanName) throws BeansException {
 
+	/***
+	 * @PostConstruct就是在这一步执行的。
+	 *
+	 * 对应处理这个BeanPostProcessor就是CommonAnnotationBeanPostProcessor类。
+	 *
+	 */
 	Object result = existingBean;
 	for (BeanPostProcessor beanProcessor : getBeanPostProcessors()) {
 		result = beanProcessor.postProcessBeforeInitialization(result, beanName);

@@ -169,7 +169,7 @@ list：
 
 			
 hash表：
-	类似java里的map。总体来看想一个包括map的list。
+	类似java里的map。总体来看像一个包括map的list。
 
 	命令：
 		hset key filed value
